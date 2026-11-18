@@ -57,7 +57,17 @@ func reconcile(sim: Sim, context: String) -> void:
 
 func test_stores() -> void:
 	var fresh := Sim.register("Mira", "New Venture", "New Venture", 0, 0, 2, 12)
-	expect(fresh.stores.is_empty(), "Simulation-level new-company registration starts with zero stores")
+	var fresh_sim := Sim.new(fresh)
+	expect(fresh.stores.is_empty() and fresh_sim.channel_enabled(0) == false and fresh_sim.channel_enabled(1) == false,
+		"New-company registration starts with zero stores and no legacy channel can act as a phantom store")
+	expect(fresh.stores.filter(func(store): return int(store.type) == 1).is_empty(),
+		"New-company registration creates no actual website")
+	var fresh_save_path := "user://phase3_empty_company.save"
+	expect(Saves.save(fresh, fresh_save_path, 1.0) == OK, "Zero-store company can be saved")
+	var fresh_loaded := Saves.load_state(fresh_save_path)
+	expect(fresh_loaded.stores.is_empty() and Sim.new(fresh_loaded).channel_enabled(1) == false,
+		"Save/load preserves zero stores and cannot activate a default website")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(fresh_save_path))
 	var sim := game()
 	var state := sim.state
 	expect(Stores.setup_cost(0, 0) == 0 and Stores.setup_cost(1, 0) == 0 and Stores.setup_cost(0, 1) != Stores.setup_cost(1, 1) and Stores.daily_cost(0, 1) != Stores.daily_cost(1, 1),
@@ -76,6 +86,8 @@ func test_stores() -> void:
 	var site_id: int = state.next_store - 1
 	var website := Stores.get_store(state, site_id)
 	expect(website.domain == "direct.aster.shop" and website.active, "Website store keeps its configured domain and active status")
+	expect(website.setup_cost == Stores.setup_cost(state.country, 1) and state.ledger[0].store_setup == marketplace_cost + website.setup_cost,
+		"Website activation occurs only after its setup charge is recorded")
 	expect(Stores.create(state, "", 0, "Aster") != "", "Reject invalid store setup")
 	var cash_before_day: int = state.cash
 	sim.advance(1)
@@ -87,6 +99,8 @@ func test_stores() -> void:
 	sim.advance(1)
 	expect(state.ledger[1].store_expenses == 3 * Stores.daily_cost(state.country, 0) and second_day_cost == 0,
 		"Inactive stores stop accruing recurring costs")
+	expect(Stores.set_active(state, 9999, true) != "" and state.ledger[1].store_expenses == 3 * Stores.daily_cost(state.country, 0),
+		"Activating an uncreated website cannot bypass setup or recurring charges")
 
 	add_delivered_stock(sim, 0, 12)
 	expect(Stores.set_listing(state, 0, 0, 8100, true) == "", "Publish product in the legacy marketplace")

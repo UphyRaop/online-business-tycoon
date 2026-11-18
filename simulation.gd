@@ -118,6 +118,13 @@ func product_state(product: int) -> Dictionary:
 	})
 
 func channel_enabled(channel: int) -> bool:
+	# A present stores array is authoritative. New registrations deliberately have
+	# an empty array; legacy channel flags must not create phantom destinations.
+	if state.get("stores") is Array:
+		for store in state.stores:
+			if int(store.get("type", -1)) == channel and store.get("active", false):
+				return true
+		return false
 	var has_store_type := false
 	for store in state.get("stores", []):
 		if int(store.get("type", -1)) == channel:
