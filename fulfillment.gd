@@ -4,18 +4,49 @@ const Catalog = preload("res://catalog.gd")
 const Service = preload("res://customer_service.gd")
 const Stores = preload("res://store_manager.gd")
 const Advertising = preload("res://advertising.gd")
+const Supply = preload("res://supply.gd")
 
 static func place(sim: RefCounted, channel: int, items: Array, total: int, offer_kind: String,
 		prices: Array = [], store_id: int = -1, campaign_id: int = 0) -> int:
 	var state: Dictionary = sim.state
 	if store_id < 0:
 		store_id = channel
+	var required_direct := 0
+	var available_stock := {}
+	for product_value in items:
+		var product_id: int = int(product_value)
+		var stock_remaining: int = int(available_stock.get(product_id, sim.stock(product_id)))
+		if stock_remaining > 0:
+			available_stock[product_id] = stock_remaining - 1
+		else:
+			var source: int = int(sim.product_state(product_id).get("supplier", 0))
+			if not Supply.supplier_unlocked(state, source) or not Catalog.SUPPLIERS[source].direct:
+				return 0
+			required_direct += Catalog.quote(state.country, product_id, source) + Catalog.inbound_freight(state.country, source)
+	if state.cash + total < required_direct:
+		return 0
 	var id: int = state.next_order
 	state.next_order += 1
 	var method: int = state.shipping
 	var lines: Array = []
+	var direct_cost := 0
+	var direct_freight := 0
 	for i in items.size():
-		var line: Dictionary = sim.reserve_unit(items[i])
+		var product: int = items[i]
+		var line: Dictionary
+		if sim.stock(product) > 0:
+			line = sim.reserve_unit(product)
+		else:
+			var product_state: Dictionary = sim.product_state(product)
+			var supplier: int = int(product_state.get("supplier", 0))
+			var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+			var freight: int = Catalog.inbound_freight(state.country, supplier)
+			var goods: int = Catalog.quote(state.country, product, supplier)
+			var landed := goods + freight
+			line = {"product": product, "cost": landed, "quality": provider.quality, "freight": freight,
+				"direct_supplier": supplier, "supplier_name": provider.name}
+			direct_cost += landed
+			direct_freight += freight
 		if prices.size() == items.size():
 			line.revenue = prices[i]
 		lines.append(line)
@@ -32,6 +63,10 @@ static func place(sim: RefCounted, channel: int, items: Array, total: int, offer
 	state.cash += total
 	var row: Dictionary = state.ledger.back()
 	row.deposits += total
+	if direct_cost > 0:
+		state.cash -= direct_cost
+		row.purchases += direct_cost
+		row.inbound_freight = int(row.get("inbound_freight", 0)) + direct_freight
 	var totals: Dictionary = row.channels[channel]
 	totals.placed += 1
 	if not offer_kind.is_empty():
@@ -74,6 +109,37 @@ static func auto_dispatch(state: Dictionary, rng: RandomNumberGenerator) -> void
 	for id in state.active_orders:
 		var order: Dictionary = state.orders[id]
 		if order.status == "queued":
+			var direct_lead := 0
+			for item in order.items:
+				if item.has("direct_supplier"):
+					direct_lead = maxi(direct_lead, int(Catalog.SUPPLIERS[int(item.direct_supplier)].lead))
+			if direct_lead > 0:
+				var supplier_delay := 0
+				var supplier_reliability := 1.0
+				for item in order.items:
+					if item.has("direct_supplier"):
+						var provider: Dictionary = Catalog.SUPPLIERS[int(item.direct_supplier)]
+						supplier_reliability = minf(supplier_reliability, float(provider.reliability))
+				if rng.randf() >= supplier_reliability:
+					supplier_delay = rng.randi_range(1, 3)
+				var has_warehouse_item := false
+				for item in order.items:
+					if not item.has("direct_supplier"):
+						has_warehouse_item = true
+				if has_warehouse_item:
+					var shipping: Dictionary = Catalog.SHIPPING[order.method]
+					var delay := rng.randi_range(1, 3) if rng.randf() >= shipping.reliability else 0
+					dispatch(state, order, order.method, delay)
+					order.eta = maxi(order.eta, state.day + direct_lead)
+					order.arrival = maxi(order.arrival, order.eta + supplier_delay)
+				else:
+					order.status = "shipped"
+					order.shipped = state.day
+					order.eta = state.day + direct_lead
+					order.arrival = order.eta + supplier_delay
+					order.shipping_cost = 0
+					state.ledger.back().channels[order.channel].dispatched += 1
+				continue
 			var shipping: Dictionary = Catalog.SHIPPING[order.method]
 			var delay := rng.randi_range(1, 3) if rng.randf() >= shipping.reliability else 0
 			dispatch(state, order, order.method, delay)
@@ -93,7 +159,7 @@ static func deliver(state: Dictionary, rng: RandomNumberGenerator) -> void:
 static func complete(state: Dictionary, order: Dictionary, rng: RandomNumberGenerator) -> void:
 	var row: Dictionary = state.ledger.back()
 	var channel: Dictionary = row.channels[order.channel]
-	var fee := Catalog.fee(order.channel, order.total)
+	var fee := Stores.store_fee(Stores.get_store(state, int(order.get("store_id", order.channel))), order.channel, order.total)
 	order.channel_fee = fee
 	row.deposits -= order.total
 	row.sales += order.total

@@ -12,31 +12,42 @@ static func management(app: Control) -> void:
 	var name: LineEdit = app.field(setup, "Store name", "", 40)
 	var brand: LineEdit = app.field(setup, "Brand name", app.sim.state.brand, 40)
 	var kind: OptionButton = app.dropdown(setup, ["Marketplace", "Own Website"], 0)
-	var domain: LineEdit = app.field(setup, "Website domain (required for Own Website)", "your-brand.shop", 64)
+	var domain: LineEdit = app.field(setup, "Website domain (required for Own Website)", "", 64)
+	var platform: OptionButton = app.dropdown(setup, Stores.MARKETPLACES, 0)
 	var cost: Label = app.label("", 14, Style.GOLD)
 	setup.add_child(cost)
 	var update_cost := func(_index: int = 0):
+		platform.visible = kind.selected == 0
+		domain.editable = kind.selected == 1
 		cost.text = "Setup %s · Recurring %s per game day" % [
 			app.money(Stores.setup_cost(app.sim.state.country, kind.selected)),
 			app.money(Stores.daily_cost(app.sim.state.country, kind.selected))]
 	kind.item_selected.connect(update_cost)
 	update_cost.call()
-	var saved: Callable = app.watch_edits([name, brand, kind, domain])
-	app.action(setup, "Create store", func():
-		var result := Stores.create(app.sim.state, name.text, kind.selected, brand.text, domain.text)
+	var saved: Callable = app.watch_edits([name, brand, kind, domain, platform])
+	var create_store := func():
+		var result := Stores.create(app.sim.state, name.text, kind.selected, brand.text, domain.text, platform.selected)
 		if not result.is_empty():
 			app.set_notice(result, true)
 			return
 		saved.call()
 		app.persist("Store opened. Setup cost recorded in Finance.")
 		app.refresh_view()
+	app.action(setup, "Create store", func():
+		if kind.selected == 1:
+			app.confirm_action("Open website?", "One-time setup %s. Recurring %s per game day." % [
+				app.money(Stores.setup_cost(app.sim.state.country, 1)),
+				app.money(Stores.daily_cost(app.sim.state.country, 1))], "Open website", create_store)
+		else:
+			create_store.call()
 	, true)
 	var stores: VBoxContainer = app.card("Owned stores · %d" % app.sim.state.stores.size())
 	for store in app.sim.state.stores:
 		var id: int = store.id
 		var card: VBoxContainer = app.stack(stores, 7)
 		app.divider(card)
-		var detail: String = "Marketplace" if store.type == 0 else "Own Website · " + store.domain
+		var market: int = store.get("platform", -1)
+		var detail: String = Stores.MARKETPLACES[market] if store.type == 0 and market >= 0 else ("Marketplace" if store.type == 0 else "Own Website · " + store.domain)
 		app.metric(card, str(store.name), detail + (" · Active" if store.active else " · Paused"))
 		app.metric(card, "Brand", store.brand)
 		app.metric(card, "Additional daily store cost", app.money(store.daily_cost))

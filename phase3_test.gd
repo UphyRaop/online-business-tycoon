@@ -17,6 +17,9 @@ func _initialize() -> void:
 	test_campaign_controls_and_simulation()
 	test_campaign_attribution_refunds_and_save()
 	test_bundle_limits()
+	test_supplier_progression()
+	test_supplier_direct_fulfillment()
+	test_campaign_lifecycle()
 	test_save_migration()
 	print("Phase 3 simulation: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
@@ -52,8 +55,8 @@ func reconcile(sim: Sim, context: String) -> void:
 func test_stores() -> void:
 	var sim := game()
 	var state := sim.state
-	expect(Stores.setup_cost(0, 0) != Stores.setup_cost(1, 0) and Stores.daily_cost(0, 1) != Stores.daily_cost(1, 1),
-		"Store setup and recurring costs scale by country")
+	expect(Stores.setup_cost(0, 0) == 0 and Stores.setup_cost(1, 0) == 0 and Stores.setup_cost(0, 1) != Stores.setup_cost(1, 1) and Stores.daily_cost(0, 1) != Stores.daily_cost(1, 1),
+		"Marketplace registration is free and website costs scale by country")
 	var marketplace_cost := Stores.setup_cost(state.country, 0)
 	var before: int = state.cash
 	expect(Stores.create(state, "Extra Market", 0, "Aster") == "", "Create an additional marketplace store")
@@ -104,6 +107,21 @@ func test_campaign_controls_and_simulation() -> void:
 	expect(Ads.create(state, unpublished) != "", "Unlisted products cannot be promoted")
 	var unavailable := campaign_config(1, 0, 3)
 	expect(Ads.create(state, unavailable) != "", "Marketplace Sponsored Ads require a marketplace store")
+	var shopee := int(state.next_store)
+	expect(Stores.create(state, "Shopee Campaign Store", 0, "Aster", "", 0).is_empty(), "Create Shopee destination")
+	Stores.set_listing(state, shopee, 0, 9500, true)
+	var shopee_campaign := campaign_config(shopee, 0, 4)
+	shopee_campaign.draft = true
+	expect(Ads.create(state, shopee_campaign).is_empty(), "Shopee Sponsored Ads can target a Shopee listing")
+	var lazada := int(state.next_store)
+	expect(Stores.create(state, "Lazada Campaign Store", 0, "Aster", "", 2).is_empty(), "Create Lazada destination")
+	Stores.set_listing(state, lazada, 0, 9500, true)
+	var lazada_campaign := campaign_config(lazada, 0, 5)
+	lazada_campaign.draft = true
+	expect(Ads.create(state, lazada_campaign).is_empty(), "Lazada Sponsored Ads can target a Lazada listing")
+	var incompatible := campaign_config(shopee, 0, 5)
+	incompatible.draft = true
+	expect(Ads.create(state, incompatible) != "", "Lazada Sponsored Ads reject an incompatible Shopee destination")
 	var zero_budget := campaign_config(0, 0, 0, 0)
 	expect(Ads.create(state, zero_budget) != "", "Campaign rejects a zero daily budget")
 	var excess_budget := campaign_config(0, 0, 0, Catalog.local_cents(state.country, 10001.0))
@@ -257,3 +275,100 @@ func test_save_migration() -> void:
 	expect(state.offers[0][1].quantity == 10 and state.ledger == historic_ledger,
 		"Oversized bundle normalizes without changing historical ledger entries")
 	expect(Saves.valid(state), "Migrated Phase 2 data passes save validation")
+	var legacy_identity := game().state
+	legacy_identity.owner = ""
+	Stores.set_listing(legacy_identity, 0, 0, 9000, true)
+	legacy_identity.quotes[0] = {1: {"cost": 2400, "minimum": 3, "expires": 7, "discount": 8}}
+	expect(Ads.create(legacy_identity, campaign_config(0, 0)).is_empty(), "Legacy campaign fixture is valid")
+	var legacy_campaign_id: int = legacy_identity.advertising.next_campaign - 1
+	Ads.set_status(legacy_identity, legacy_campaign_id, "paused")
+	var stores_before: Array = legacy_identity.stores.duplicate(true)
+	var contracts_before: Dictionary = legacy_identity.quotes.duplicate(true)
+	var campaigns_before: Dictionary = legacy_identity.advertising.campaigns.duplicate(true)
+	Sim.upgrade(legacy_identity)
+	expect(legacy_identity.owner.is_empty() and legacy_identity.stores == stores_before and legacy_identity.quotes == contracts_before,
+		"Legacy save keeps blank entrepreneur identity and retains stores and supplier contracts for the identity prompt")
+	expect(legacy_identity.advertising.campaigns == campaigns_before and legacy_identity.products == game().state.products,
+		"Legacy save migration preserves campaigns and product inventory state")
+	expect(Saves.valid(legacy_identity), "Legacy save with missing CEO name remains loadable")
+
+func test_supplier_progression() -> void:
+	var sim := game(1)
+	var state := sim.state
+	expect(Supply.supplier_unlocked(state, 0), "Legacy supplier index zero remains available")
+	expect(not Supply.supplier_unlocked(state, 7), "Level 2 supplier starts locked")
+	state.supplier_thresholds_usd = [0, 10, 100, 1000]
+	var earned := Catalog.local_cents(state.country, 40.0)
+	state.ledger.back().sales += earned
+	state.cash += earned
+	Supply.ensure_progress(state)
+	expect(state.supplier_level == 2 and Supply.supplier_unlocked(state, 7), "USD equivalent sales unlock Level 2")
+	state.ledger[0].sales = 0
+	state.cash -= earned
+	Supply.ensure_progress(state)
+	expect(state.supplier_level == 2, "Supplier levels remain permanently unlocked after sales totals change")
+	var hundred_usd := Catalog.local_cents(state.country, 100.0 / Catalog.SCALE[1])
+	state.ledger[0].sales = hundred_usd
+	state.cash += hundred_usd
+	Supply.ensure_progress(state)
+	expect(state.supplier_level == 3 and Supply.supplier_unlocked(state, 12), "Cumulative USD sales unlock Level 3")
+	var million_usd := Catalog.local_cents(state.country, 1000000.0 / Catalog.SCALE[1])
+	state.ledger[0].sales = million_usd
+	state.cash += million_usd - hundred_usd
+	Supply.ensure_progress(state)
+	expect(state.supplier_level == 4 and Supply.supplier_unlocked(state, 17), "Cumulative USD sales unlock Level 4")
+	expect(Supply.negotiate(state, 0, 7, 100) == "", "Unlocked wholesale supplier can negotiate")
+	expect(Catalog.SUPPLIERS[7].minimum > Catalog.SUPPLIERS[0].minimum and Catalog.SUPPLIERS[7].lead > Catalog.SUPPLIERS[0].lead, "Wholesale MOQ and lead differ from legacy retail contracts")
+	expect(Saves.valid(state), "Supplier unlock and negotiated contract remain save-valid")
+	var progress_path := "user://phase3_supplier_progress.save"
+	expect(Saves.save(state, progress_path, 1.0) == OK, "Save supplier progress and existing contract")
+	var loaded := Saves.load_state(progress_path)
+	expect(loaded.get("supplier_level", 0) == 4 and loaded.get("supplier_unlocks", []) == state.get("supplier_unlocks", []),
+		"Supplier level and permanent unlock history survive Save and Load")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(progress_path))
+
+func test_campaign_lifecycle() -> void:
+	var sim := game()
+	var state := sim.state
+	add_delivered_stock(sim, 0, 5)
+	expect(Stores.set_listing(state, 0, 0, 9000, true).is_empty(), "Campaign fixture listing is eligible")
+	var config := campaign_config(0, 0, 0)
+	config.draft = true
+	expect(Ads.create(state, config).is_empty(), "Save a campaign draft")
+	var id: int = state.advertising.next_campaign - 1
+	var before: int = state.cash
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 10
+	Ads.simulate_day(sim, rng)
+	expect(state.cash == before and state.advertising.history.is_empty(), "Draft campaign does not spend")
+	expect(Ads.set_status(state, id, "active").is_empty(), "Launch draft campaign")
+	expect(Ads.set_status(state, id, "paused").is_empty(), "Pause active campaign")
+	before = state.cash
+	Ads.simulate_day(sim, rng)
+	expect(state.cash == before, "Paused campaign does not spend")
+	expect(Ads.set_status(state, id, "active").is_empty(), "Resume paused campaign")
+	expect(Ads.set_status(state, id, "stopped").is_empty(), "Stop campaign")
+	expect(Ads.duplicate_stopped(state, id).is_empty(), "Stopped campaign can be duplicated")
+	expect(state.advertising.campaigns[state.advertising.next_campaign - 1].status == "draft", "Duplicate starts as a draft")
+	expect(Saves.valid(state), "Campaign lifecycle state remains valid after transitions")
+
+func test_supplier_direct_fulfillment() -> void:
+	var sim := game(0, 721)
+	var state := sim.state
+	sim.select_supplier(0, 4)
+	var cash_before: int = state.cash
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2
+	var order_id: int = Storefront.complete_checkout(sim, 0, 12000, 0, {}, rng, 0)
+	expect(order_id > 0 and sim.stock(0) == 0, "Unlocked dropship supplier fulfills without reserving warehouse stock")
+	var order: Dictionary = state.orders.get(order_id, {})
+	expect(order.get("items", []).size() == 1 and order.items[0].get("direct_supplier", -1) == 4,
+		"Direct order records its supplier and landed cost")
+	expect(state.ledger.back().purchases > 0 and state.cash < cash_before + 12000,
+		"Direct supplier cost and freight are paid exactly once")
+	expect(Saves.valid(state), "Direct supplier order remains compatible with save validation")
+	sim.advance(8)
+	order = state.orders[order_id]
+	expect(order.status == "delivered" and sim.stock(0) == 0,
+		"Supplier lead time controls delivery without deducting or replenishing warehouse stock")
+	reconcile(sim, "Supplier direct fulfillment")

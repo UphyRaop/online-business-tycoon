@@ -130,7 +130,7 @@ static func details(app: Control) -> void:
 		for platform_name in platform_names: platform_picker.add_item(platform_name)
 		platform_picker.select(maxi(0, platform_ids.find(selected_platform)))
 	store_picker.item_selected.connect(update_store)
-	var save_campaign := func():
+	var save_campaign := func(as_draft: bool):
 		if product_ids.is_empty() or platform_ids.is_empty():
 			app.set_notice("This store needs an eligible listing and platform before campaign creation.", true)
 			return
@@ -141,7 +141,7 @@ static func details(app: Control) -> void:
 			"product": product_ids[product_picker.selected], "platform": platform_ids[platform_picker.selected],
 			"objective": objective_picker.selected, "daily_budget": budget_cents,
 			"audience": audience_picker.selected, "bid_strategy": bidding_picker.selected,
-			"bid": bid_cents, "creative": creative_picker.selected,
+			"bid": bid_cents, "creative": creative_picker.selected, "draft": as_draft,
 			"start_day": _integer(start.text, -1), "end_day": _integer(end.text, 0),
 		}
 		var error := Ads.create(state, config) if creating else Ads.edit(state, app.campaign_id, config)
@@ -153,10 +153,14 @@ static func details(app: Control) -> void:
 			app.campaign_id = state.advertising.next_campaign - 1
 		app.persist("Campaign saved. New settings apply from future simulated days.")
 		app.navigate("Campaign Manager")
-	app.action(view, "Create campaign" if creating else "Save campaign", save_campaign, true)
+	if creating:
+		app.action(view, "Create campaign", save_campaign.bind(false), true)
+		app.action(view, "Save Draft", save_campaign.bind(true))
+	else:
+		app.action(view, "Save campaign", save_campaign.bind(existing.status == "draft"), true)
 	if not creating:
 		var control_row: HBoxContainer = app.row(view)
-		var next_status: String = "Pause" if existing.status == "active" else "Resume"
+		var next_status: String = "Pause" if existing.status == "active" else ("Launch" if existing.status == "draft" else "Resume")
 		if existing.status != "stopped":
 			app.action(control_row, next_status, func():
 				Ads.set_status(state, app.campaign_id, "paused" if existing.status == "active" else "active")
@@ -169,6 +173,16 @@ static func details(app: Control) -> void:
 					app.persist("Campaign stopped.")
 					app.refresh_view()
 				)
+			)
+		else:
+			app.action(control_row, "Duplicate", func():
+				var error := Ads.duplicate_stopped(state, app.campaign_id)
+				if not error.is_empty():
+					app.set_notice(error, true)
+					return
+				app.campaign_id = state.advertising.next_campaign - 1
+				app.persist("Campaign duplicated as a draft.")
+				app.refresh_view()
 			)
 		var metrics: Dictionary = _lifetime(state, app.campaign_id)
 		app.metric(view, "Lifetime ad spend", app.money(metrics.spend))

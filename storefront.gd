@@ -3,6 +3,7 @@ extends RefCounted
 const Catalog = preload("res://catalog.gd")
 const Fulfillment = preload("res://fulfillment.gd")
 const Stores = preload("res://store_manager.gd")
+const Supply = preload("res://supply.gd")
 
 static func offers_for(state: Dictionary, product: int) -> Dictionary:
 	var stored: Variant = state.get("offers", {}).get(product, {})
@@ -31,6 +32,8 @@ static func offers_for(state: Dictionary, product: int) -> Dictionary:
 			value.price = int(value.get("price", 0))
 		value.enabled = value.get("enabled", true) == true
 		normalized[mode] = value
+	if normalized.get(1, {}).get("enabled", false) and normalized.get(2, {}).get("enabled", false):
+		normalized[2].enabled = false
 	return normalized
 
 static func set_bundle(state: Dictionary, product: int, quantity: int, discount: int, price: int = 0) -> String:
@@ -39,6 +42,7 @@ static func set_bundle(state: Dictionary, product: int, quantity: int, discount:
 	var offers := offers_for(state, product)
 	var enabled: bool = offers.get(1, {}).get("enabled", true)
 	offers[1] = {"mode": 1, "quantity": quantity, "discount": discount, "price": price, "enabled": enabled}
+	if enabled and offers.has(2): offers[2].enabled = false
 	state.offers[product] = offers
 	return ""
 
@@ -51,6 +55,7 @@ static func set_upsell(state: Dictionary, product: int, items: Array, discount: 
 	var offers := offers_for(state, product)
 	var enabled: bool = offers.get(2, {}).get("enabled", true)
 	offers[2] = {"mode": 2, "items": items.duplicate(), "discount": discount, "price": price, "enabled": enabled}
+	if enabled and offers.has(1): offers[1].enabled = false
 	state.offers[product] = offers
 	return ""
 
@@ -70,6 +75,7 @@ static func set_enabled(state: Dictionary, product: int, mode: int, enabled: boo
 	if not offers.has(mode):
 		return "Save this offer before enabling or disabling it."
 	offers[mode].enabled = enabled
+	if enabled and offers.has(3 - mode): offers[3 - mode].enabled = false
 	state.offers[product] = offers
 	return ""
 
@@ -150,7 +156,9 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 			needed[sku] = int(needed.get(sku, 0)) + 1
 		var available := true
 		for sku in needed:
-			if sim.stock(sku) < needed[sku]:
+			var missing := maxi(0, int(needed[sku]) - sim.stock(sku))
+			var supplier: int = int(sim.product_state(int(sku)).get("supplier", 0))
+			if missing > 0 and (not Supply.supplier_unlocked(sim.state, supplier) or not Catalog.SUPPLIERS[supplier].direct):
 				available = false
 				break
 		if not available:
@@ -174,7 +182,9 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 	for sku in basket:
 		final_counts[sku] = int(final_counts.get(sku, 0)) + 1
 	for sku in final_counts:
-		if sim.stock(sku) < final_counts[sku]:
+		var missing := maxi(0, int(final_counts[sku]) - sim.stock(sku))
+		var supplier: int = int(sim.product_state(int(sku)).get("supplier", 0))
+		if missing > 0 and (not Supply.supplier_unlocked(sim.state, supplier) or not Catalog.SUPPLIERS[supplier].direct):
 			totals.stockouts += 1
 			return 0
 	for i in range(1, basket.size()):

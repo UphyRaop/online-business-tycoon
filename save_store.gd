@@ -155,6 +155,16 @@ static func valid_operations(state: Dictionary, committed_cost: int, deposits: i
 			return false
 	if not state.get("advertising") is Dictionary:
 		return false
+	if not state.get("supplier_level") is int or state.supplier_level not in range(1, 5):
+		return false
+	if not state.get("supplier_unlocks") is Array or not state.get("supplier_thresholds_usd") is Array or state.supplier_thresholds_usd.size() != 4:
+		return false
+	for supplier in state.supplier_unlocks:
+		if not supplier is int or supplier not in range(Catalog.SUPPLIERS.size()):
+			return false
+	for threshold in state.supplier_thresholds_usd:
+		if not (threshold is int or threshold is float) or float(threshold) < 0 or not is_finite(float(threshold)):
+			return false
 	if state.next_order < 1 or state.next_purchase < 1 or state.shipping not in range(Catalog.SHIPPING.size()) or not state.get("auto_dispatch") is bool:
 		return false
 	if state.satisfaction not in range(101) or state.reputation not in range(101):
@@ -267,7 +277,7 @@ static func valid_advertising(state: Dictionary) -> bool:
 		for field in ["platform", "store_id", "channel", "product", "objective", "daily_budget", "start_day", "end_day", "audience", "bid_strategy", "bid", "creative", "created"]:
 			if not campaign.get(field) is int:
 				return false
-		if not campaign.get("name") is String or not campaign.get("status") in ["active", "paused", "stopped"] or not campaign.get("learning") is float:
+		if not campaign.get("name") is String or not campaign.get("status") in ["draft", "active", "paused", "stopped"] or not campaign.get("learning") is float:
 			return false
 		var store := Stores.get_store(state, campaign.store_id)
 		if store.is_empty() or campaign.platform not in range(Advertising.PLATFORMS.size()) or not Advertising.platform_available(state.country, campaign.platform, store):
@@ -344,7 +354,7 @@ static func migrate(old: Dictionary) -> Dictionary:
 	if country not in range(Catalog.COUNTRIES.size()) or difficulty not in range(3) or channel not in range(3):
 		return {}
 	var company := str(old.get("company", "My Online Store"))
-	var data := Sim.register(str(old.get("owner", "Founder")), company, company, country, difficulty, channel, randi())
+	var data := Sim.register(str(old.get("owner", "")), company, company, country, difficulty, channel, randi())
 	var sim := Sim.new(data)
 	data.ledger[0].capital = roundi(legacy_number(old.get("initial_cash")) * 100)
 	data.cash = data.ledger[0].capital

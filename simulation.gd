@@ -32,6 +32,7 @@ static func register(owner: String, company: String, store: String, country: int
 		"day": 1, "cash": opening.capital, "seed": rng.state,
 		"products": {}, "ledger": [opening],
 	}
+	data.stores = Stores.migration_defaults(data)
 	upgrade(data)
 	return data
 
@@ -66,12 +67,21 @@ static func upgrade(data: Dictionary) -> void:
 				if not channel.has(field):
 					channel[field] = 0
 	if not data.get("stores") is Array:
-		data.stores = Stores.migration_defaults(data)
+		data.stores = []
+		if int(data.get("channel", 0)) in [0, 2]:
+			var legacy_market: Dictionary = Stores.migration_defaults(data)[0]
+			legacy_market.active = true
+			data.stores.append(legacy_market)
+		if int(data.get("channel", 0)) in [1, 2]:
+			var legacy_site: Dictionary = Stores.migration_defaults(data)[1]
+			legacy_site.active = true
+			data.stores.append(legacy_site)
 	if not data.get("next_store") is int or data.next_store < 2:
 		data.next_store = 2
 	for product in data.get("offers", {}):
 		data.offers[product] = Storefront.offers_for(data, product)
 	Advertising.ensure_state(data)
+	Supply.ensure_progress(data)
 	data.version = VERSION
 
 static func _domain_for(name: String) -> String:
@@ -201,6 +211,7 @@ func advance(days: int) -> void:
 		var row: Dictionary = state.ledger.back()
 		Supply.receive(self)
 		Fulfillment.deliver(state, rng)
+		Supply.ensure_progress(state)
 		Service.tick(state)
 		row.overhead = Catalog.local_cents(state.country, Catalog.OVERHEAD[state.difficulty])
 		var has_legacy_website := false

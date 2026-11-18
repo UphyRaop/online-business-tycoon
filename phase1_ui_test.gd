@@ -3,6 +3,7 @@ extends SceneTree
 const Main = preload("res://main.tscn")
 const Saves = preload("res://save_store.gd")
 const Slots = preload("res://save_slots.gd")
+const Stores = preload("res://store_manager.gd")
 var app: Control
 var failures := 0
 
@@ -74,6 +75,10 @@ func run() -> void:
 	select(choices[2], 2)
 	press("Register company")
 	expect(app.sim.state.country == 4 and app.sim.state.difficulty == 2, "Registration saves choices")
+	# Legacy Phase 1 sales-flow fixture explicitly creates its two channel stores.
+	app.sim.state.stores = Stores.migration_defaults(app.sim.state)
+	app.sim.state.website_active = true
+
 	await settle("02-dashboard")
 	press("Browse product catalog")
 	choices = controls(app, "OptionButton")
