@@ -6,12 +6,12 @@ const Storefront = preload("res://storefront.gd")
 const Calendar = preload("res://game_calendar.gd")
 
 const PLATFORMS := [
-	{"name": "Meta Ads", "cpm": 8.0, "ctr": 2.3, "cart": 0.27, "checkout": 0.48, "purchase": 0.24, "competition": 1.08, "reach": 1.0},
-	{"name": "Google Ads", "cpm": 12.0, "ctr": 4.1, "cart": 0.33, "checkout": 0.57, "purchase": 0.31, "competition": 1.2, "reach": 0.72},
-	{"name": "TikTok Ads", "cpm": 5.5, "ctr": 1.9, "cart": 0.21, "checkout": 0.41, "purchase": 0.2, "competition": 0.95, "reach": 1.25},
-	{"name": "Marketplace Sponsored Ads", "cpm": 10.0, "ctr": 3.4, "cart": 0.38, "checkout": 0.65, "purchase": 0.4, "competition": 1.28, "reach": 0.62},
-	{"name": "Shopee Sponsored Ads", "cpm": 9.2, "ctr": 3.7, "cart": 0.39, "checkout": 0.66, "purchase": 0.41, "competition": 1.22, "reach": 0.68},
-	{"name": "Lazada Sponsored Ads", "cpm": 9.8, "ctr": 3.3, "cart": 0.37, "checkout": 0.63, "purchase": 0.39, "competition": 1.25, "reach": 0.65},
+	{"name": "Meta Ads", "cpm": 8.0, "ctr": 2.3, "cart": 0.27, "checkout": 0.48, "purchase": 0.07, "competition": 1.08, "reach": 1.0},
+	{"name": "Google Ads", "cpm": 12.0, "ctr": 4.1, "cart": 0.33, "checkout": 0.57, "purchase": 0.08, "competition": 1.2, "reach": 0.72},
+	{"name": "TikTok Ads", "cpm": 5.5, "ctr": 1.9, "cart": 0.21, "checkout": 0.41, "purchase": 0.06, "competition": 0.95, "reach": 1.25},
+	{"name": "Marketplace Sponsored Ads", "cpm": 10.0, "ctr": 3.4, "cart": 0.38, "checkout": 0.65, "purchase": 0.08, "competition": 1.28, "reach": 0.62},
+	{"name": "Shopee Sponsored Ads", "cpm": 9.2, "ctr": 3.7, "cart": 0.39, "checkout": 0.66, "purchase": 0.09, "competition": 1.22, "reach": 0.68},
+	{"name": "Lazada Sponsored Ads", "cpm": 9.8, "ctr": 3.3, "cart": 0.37, "checkout": 0.63, "purchase": 0.08, "competition": 1.25, "reach": 0.65},
 ]
 const AUDIENCES := ["Broad", "Interest", "Demographic", "Retargeting", "Lookalike"]
 const AUDIENCE_COST := [1.0, 1.12, 1.2, 1.42, 1.27]
@@ -106,13 +106,15 @@ static func edit(state: Dictionary, id: int, changes: Dictionary) -> String:
 			campaign[key] = changes[key]
 	var store := Stores.get_store(state, campaign.store_id)
 	var listing := Stores.listing(state, campaign.store_id, campaign.product)
-	if str(campaign.name).strip_edges().is_empty() or store.is_empty() or not platform_available(state.country, campaign.platform, store): return "Campaign name, store, or advertising platform is invalid."
+	if str(campaign.name).strip_edges().is_empty() or store.is_empty() or not store.active or not platform_available(state.country, campaign.platform, store): return "Choose an active destination store and a compatible advertising platform."
 	campaign.channel = Stores.channel(store)
 	if not listing.get("listed", false): return "Publish the promoted product in this store before saving changes."
 	if campaign.audience not in range(AUDIENCES.size()) or not audience_ready(state, campaign.store_id, campaign.audience): return "This audience is unavailable until its activity requirement is met."
 	if campaign.objective not in range(OBJECTIVES.size()) or campaign.bid_strategy not in range(BIDS.size()) or campaign.creative not in range(CREATIVES.size()): return "Choose valid campaign settings."
 	if campaign.daily_budget < 1 or campaign.daily_budget > Catalog.local_cents(state.country, 10000.0): return "Daily budget must be positive and no more than 10,000 in local currency."
 	if campaign.bid_strategy != 0 and campaign.bid < 1: return "Enter a positive bid limit for Cost cap or Bid cap."
+	if bool(changes.get("save_as_draft", false)):
+		campaign.status = "draft"
 	if campaign.end_day > 0 and campaign.end_day < state.day: campaign.status = "stopped"
 	state.advertising.campaigns[id] = campaign
 	return ""
@@ -254,7 +256,7 @@ static func aggregate(state: Dictionary, campaign_id: int, period: int, anchor: 
 	result.cpm = float(result.spend) / result.impressions * 1000.0 if result.impressions > 0 else 0.0
 	result.conversion_rate = 100.0 * result.purchases / result.clicks if result.clicks > 0 else 0.0
 	result.cpa = float(result.spend) / result.purchases if result.purchases > 0 else 0.0
-	result.roas = float(result.attributed_revenue - result.attributed_refunds) / result.spend if result.spend > 0 else 0.0
+	result.roas = float(result.attributed_revenue) / result.spend if result.spend > 0 else 0.0
 	result.net_attributed_revenue = result.attributed_revenue - result.attributed_refunds
 	result.estimated_profit = result.net_attributed_revenue - result.estimated_costs + result.estimated_costs_reversed - result.spend
 	return result

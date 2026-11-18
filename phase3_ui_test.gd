@@ -17,6 +17,8 @@ func run() -> void:
 	inputs[1].text = "Aster Labs"
 	press("Register company")
 	expect(app.sim.state.stores.is_empty() and app.sim.state.store.is_empty(), "New company has no default store or store name")
+	expect(controls(app, "Button").filter(func(button): return button.text == "Growth").is_empty(),
+		"Growth is not a standalone navigation destination")
 	expect(not app.sim.channel_enabled(0) and not app.sim.channel_enabled(1), "Legacy channel flags do not create a marketplace or website")
 	expect(has_label("Mira Founder, CEO"), "Dashboard displays the registered entrepreneur as CEO")
 	press("Business")
@@ -27,6 +29,8 @@ func run() -> void:
 	press("Save company profile")
 	expect(app.sim.state.owner == "Mira Rouf Kalil" and app.sim.state.company == "Aster Labs", "Company Profile edits CEO identity independently")
 	press("Store Management")
+	expect(not has_label("Open a new store"), "New-store form is collapsed by default")
+	press("Open New Store")
 	expect(has_label("Owned stores · 0"), "Business opens Store Management with no default stores")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "Aster Shop"
@@ -42,7 +46,7 @@ func run() -> void:
 	expect(app.sim.state.stores.back().active and app.notice == "Aster Shop is now active.",
 		"Store activation updates state and reports the active status")
 	app.sim.state.seed = 811
-	var stock_result: String = app.sim.buy(0, 2, 40)
+	var stock_result: String = app.sim.buy(0, Catalog.DEFAULT_SUPPLIER, 40)
 	expect(stock_result.is_empty(), "UI fixture obtains stock through the supplier system")
 	for batch in app.sim.state.inbound:
 		batch.eta = app.sim.state.day
@@ -54,7 +58,8 @@ func run() -> void:
 	expect(has_label("Mira Rouf Kalil, CEO"), "Dashboard updates CEO label")
 	app.persist("Identity test save.")
 	expect(Slots.latest().state.owner == "Mira Rouf Kalil", "Autosave persists entrepreneur name")
-	press("Growth")
+	press("Business")
+	press("Advertising")
 	expect(has_label("Advertising Overview"), "Growth tab opens the advertising overview")
 	await settle("phase3-growth")
 	press("Campaign Manager")
@@ -84,14 +89,16 @@ func run() -> void:
 	select(controls(app, "OptionButton").back(), 0)
 	expect(has_label("Portrait launch"), "Campaign status filter restores the all-status comparison")
 	await settle("phase3-analytics")
-	press("Growth")
+	press("Business")
 	press("Store Management")
 	expect(has_label("Owned stores"), "Growth opens multi-store management")
+	press("Open New Store")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "Aster Direct"
 	inputs[1].text = "Aster Brand"
 	inputs[2].text = "direct.aster.shop"
 	select(controls(app, "OptionButton")[0], 1)
+	select(controls(app, "OptionButton")[2], 2)
 	var website_setup_cost := Stores.setup_cost(app.sim.state.country, 1)
 	var website_cash_before: int = app.sim.state.cash
 	var store_setup_before: int = app.sim.state.ledger.back().store_setup

@@ -7,6 +7,13 @@ const MARKET_FEES := [12.0, 13.0, 11.0, 14.0]
 const WEBSITE_SETUP := 45.0
 const MARKET_DAILY := 2.0
 const WEBSITE_DAILY := 4.0
+const WEBSITE_PLATFORMS := [
+	{"id": "shopify", "name": "Shopify", "setup": 60.0, "daily": 5.5, "fee_bps": 290, "feature": "Integrated storefront tools", "traffic": 1.04, "conversion": 1.02},
+	{"id": "woocommerce", "name": "WooCommerce", "setup": 35.0, "daily": 3.5, "fee_bps": 340, "feature": "Flexible store configuration", "traffic": 0.98, "conversion": 1.05},
+	{"id": "wix", "name": "Wix", "setup": 45.0, "daily": 4.0, "fee_bps": 320, "feature": "Visual site building", "traffic": 1.02, "conversion": 1.0},
+	{"id": "squarespace", "name": "Squarespace", "setup": 55.0, "daily": 4.5, "fee_bps": 300, "feature": "Design-focused storefront", "traffic": 0.95, "conversion": 1.08},
+]
+const LEGACY_WEBSITE_FEE_BPS := 400
 const ACTIVITY_FIELDS := ["sales", "refunds", "cogs", "fees", "shipping", "advertising", "setup", "operating", "orders"]
 
 static func migration_defaults(state: Dictionary) -> Array:
@@ -17,21 +24,33 @@ static func migration_defaults(state: Dictionary) -> Array:
 		marketplace_name = str(state.get("company", "Marketplace Store")) + " Marketplace"
 	return [
 		{"id": 0, "name": marketplace_name, "type": 0,
-			"brand": brand, "domain": "", "active": int(state.get("channel", 0)) in [0, 2],
+			"brand": brand, "domain": "", "platform": -1, "website_platform": "", "website_fee_bps": 0,
+			"active": int(state.get("channel", 0)) in [0, 2],
 			"legacy": true, "created": 1, "setup_cost": 0, "daily_cost": 0, "listings": {}},
-		{"id": 1, "name": website_name, "type": 1, "brand": brand,
+		{"id": 1, "name": website_name, "type": 1, "brand": brand, "website_platform": "legacy", "website_fee_bps": LEGACY_WEBSITE_FEE_BPS,
 			"domain": str(state.get("website_domain", "my-business.shop")),
 			"active": state.get("website_active", int(state.get("channel", 0)) != 0),
 			"legacy": true, "created": 1, "setup_cost": 0, "daily_cost": 0, "listings": {}},
 	]
 
-static func setup_cost(country: int, kind: int) -> int:
-	return Catalog.local_cents(country, MARKET_SETUP if kind == 0 else WEBSITE_SETUP)
+static func website_platform_index(platform_id: String) -> int:
+	for i in WEBSITE_PLATFORMS.size():
+		if WEBSITE_PLATFORMS[i].id == platform_id: return i
+	return -1
 
-static func daily_cost(country: int, kind: int) -> int:
-	return Catalog.local_cents(country, MARKET_DAILY if kind == 0 else WEBSITE_DAILY)
+static func setup_cost(country: int, kind: int, website_platform: int = -1) -> int:
+	if kind == 0: return Catalog.local_cents(country, MARKET_SETUP)
+	if website_platform in range(WEBSITE_PLATFORMS.size()):
+		return Catalog.local_cents(country, WEBSITE_PLATFORMS[website_platform].setup)
+	return Catalog.local_cents(country, WEBSITE_SETUP)
 
-static func create(state: Dictionary, name: String, kind: int, brand: String, domain: String = "", platform: int = 0) -> String:
+static func daily_cost(country: int, kind: int, website_platform: int = -1) -> int:
+	if kind == 0: return Catalog.local_cents(country, MARKET_DAILY)
+	if website_platform in range(WEBSITE_PLATFORMS.size()):
+		return Catalog.local_cents(country, WEBSITE_PLATFORMS[website_platform].daily)
+	return Catalog.local_cents(country, WEBSITE_DAILY)
+
+static func create(state: Dictionary, name: String, kind: int, brand: String, domain: String = "", platform: int = 0, website_platform: int = -1) -> String:
 	name = name.strip_edges()
 	brand = brand.strip_edges()
 	domain = domain.strip_edges().to_lower()
@@ -41,20 +60,25 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 		return "Enter a simulated website domain."
 	if kind == 0 and platform not in range(MARKETPLACES.size()):
 		return "Choose a marketplace."
+	if kind == 1 and website_platform not in range(WEBSITE_PLATFORMS.size()):
+		return "Choose a website platform."
 	for existing in state.stores:
 		if existing.name.to_lower() == name.to_lower():
 			return "Store names must be unique."
 		if kind == 1 and existing.type == 1 and existing.domain.to_lower() == domain:
 			return "Website domains must be unique."
-	var cost := setup_cost(state.country, kind)
+	var cost := setup_cost(state.country, kind, website_platform)
 	if state.cash < cost:
 		return "Insufficient company cash for this store's setup cost."
 	var id: int = state.next_store
 	state.next_store += 1
 	var store := {
 		"id": id, "name": name, "type": kind, "brand": brand,
-		"domain": domain if kind == 1 else "", "platform": platform if kind == 0 else -1, "active": true, "legacy": false,
-		"created": state.day, "setup_cost": cost, "daily_cost": daily_cost(state.country, kind),
+		"domain": domain if kind == 1 else "", "platform": platform if kind == 0 else -1,
+		"website_platform": WEBSITE_PLATFORMS[website_platform].id if kind == 1 else "",
+		"website_fee_bps": int(WEBSITE_PLATFORMS[website_platform].fee_bps) if kind == 1 else 0,
+		"active": true, "legacy": false,
+		"created": state.day, "setup_cost": cost, "daily_cost": daily_cost(state.country, kind, website_platform),
 		"listings": {},
 	}
 	state.stores.append(store)
@@ -68,7 +92,21 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 
 static func store_fee(store: Dictionary, channel: int, total: int) -> int:
 	var platform: int = store.get("platform", -1)
-	return roundi(total * MARKET_FEES[platform] / 100.0) if channel == 0 and platform in range(MARKET_FEES.size()) else Catalog.fee(channel, total)
+	if channel == 0 and platform in range(MARKET_FEES.size()):
+		return roundi(total * MARKET_FEES[platform] / 100.0)
+	if channel == 1:
+		return roundi(total * int(store.get("website_fee_bps", LEGACY_WEBSITE_FEE_BPS)) / 10000.0)
+	return Catalog.fee(channel, total)
+
+static func traffic_multiplier(store: Dictionary) -> float:
+	if int(store.get("type", -1)) != 1: return 1.0
+	var index := website_platform_index(str(store.get("website_platform", "legacy")))
+	return float(WEBSITE_PLATFORMS[index].traffic) if index >= 0 else 1.0
+
+static func conversion_multiplier(store: Dictionary) -> float:
+	if int(store.get("type", -1)) != 1: return 1.0
+	var index := website_platform_index(str(store.get("website_platform", "legacy")))
+	return float(WEBSITE_PLATFORMS[index].conversion) if index >= 0 else 1.0
 
 static func set_active(state: Dictionary, store_id: int, enabled: bool) -> String:
 	var index := index_of(state, store_id)
@@ -121,7 +159,7 @@ static func listing(state: Dictionary, store_id: int, product: int) -> Dictionar
 		return {}
 	var base: Dictionary = state.products.get(product, {
 		"price": Catalog.local_cents(state.country, Catalog.PRODUCTS[product].cost * 2.7),
-		"listed": false, "channel_mask": 3, "supplier": 1, "lots": [],
+		"listed": false, "channel_mask": 3, "supplier": Catalog.DEFAULT_SUPPLIER, "supplier_id": Catalog.supplier_id(Catalog.DEFAULT_SUPPLIER), "lots": [],
 	})
 	if store.legacy:
 		var overrides: Dictionary = store.get("listings", {})

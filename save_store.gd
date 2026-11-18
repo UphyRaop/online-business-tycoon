@@ -137,6 +137,8 @@ static func valid(state: Dictionary) -> bool:
 			return false
 		if not item.get("supplier") is int or item.supplier not in range(Catalog.SUPPLIERS.size()) or not item.get("lots") is Array:
 			return false
+		if item.get("supplier_id", "") != Catalog.supplier_id(item.supplier):
+			return false
 		for lot in item.lots:
 			if not valid_lot(lot) or not lot.get("units") is int or lot.units < 1:
 				return false
@@ -166,10 +168,13 @@ static func valid_operations(state: Dictionary, committed_cost: int, goods_in_tr
 		return false
 	if not state.get("supplier_level") is int or state.supplier_level not in range(1, 5):
 		return false
-	if not state.get("supplier_unlocks") is Array or not state.get("supplier_thresholds_usd") is Array or state.supplier_thresholds_usd.size() != 4:
+	if not state.get("supplier_unlocks") is Array or not state.get("supplier_unlock_ids") is Array or not state.get("supplier_thresholds_usd") is Array or state.supplier_thresholds_usd.size() != 4:
 		return false
 	for supplier in state.supplier_unlocks:
 		if not supplier is int or supplier not in range(Catalog.SUPPLIERS.size()):
+			return false
+	for supplier_id in state.supplier_unlock_ids:
+		if not supplier_id is String or Catalog.supplier_index(supplier_id) < 0:
 			return false
 	for threshold in state.supplier_thresholds_usd:
 		if not (threshold is int or threshold is float) or float(threshold) < 0 or not is_finite(float(threshold)):
@@ -185,14 +190,20 @@ static func valid_operations(state: Dictionary, committed_cost: int, goods_in_tr
 		for field in ["id", "type", "created", "setup_cost", "daily_cost"]:
 			if not store.get(field) is int:
 				return false
-		for field in ["name", "brand", "domain"]:
+		for field in ["name", "brand", "domain", "website_platform"]:
 			if not store.get(field) is String:
 				return false
+		if not store.get("website_fee_bps") is int or store.website_fee_bps < 0 or store.website_fee_bps > 2000:
+			return false
 		if not store.get("active") is bool or not store.get("legacy") is bool or not store.get("listings") is Dictionary:
 			return false
 		if store.id < 0 or store_ids.has(store.id) or store.type not in [0, 1] or store.created < 1 or store.setup_cost < 0 or store.daily_cost < 0 or store.name.strip_edges().is_empty() or store.brand.strip_edges().is_empty():
 			return false
 		if store.type == 1 and store.domain.strip_edges().is_empty():
+			return false
+		if store.type == 1 and store.website_platform != "legacy" and Stores.website_platform_index(store.website_platform) < 0:
+			return false
+		if store.type == 0 and not store.legacy and int(store.get("platform", -1)) not in range(Stores.MARKETPLACES.size()):
 			return false
 		store_ids[store.id] = true
 		for product in store.listings:
@@ -213,6 +224,8 @@ static func valid_operations(state: Dictionary, committed_cost: int, goods_in_tr
 		if batch.id < 1 or batch.id >= state.next_purchase or inbound_ids.has(batch.id) or batch.units < 1 or batch.eta > batch.arrival:
 			return false
 		if batch.supplier not in range(Catalog.SUPPLIERS.size()) or not batch.get("delayed") is bool:
+			return false
+		if batch.get("supplier_id", "") != Catalog.supplier_id(batch.supplier) or batch.get("supplier_name", "") != Catalog.SUPPLIERS[batch.supplier].name:
 			return false
 		inbound_ids[batch.id] = true
 		committed_cost -= batch.units * batch.cost
@@ -349,6 +362,10 @@ static func valid_order(order: Variant, id: int) -> bool:
 		if item.has("direct_supplier"):
 			var direct_supplier: Variant = item.direct_supplier
 			if not direct_supplier is int or direct_supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.SUPPLIERS[direct_supplier].direct:
+				return false
+			if item.get("direct_supplier_id", "") != Catalog.supplier_id(direct_supplier):
+				return false
+			if not item.get("direct_supplier_name", "") is String or not item.get("supplier_lead", 0) is int or not item.get("supplier_reliability", -1.0) is float:
 				return false
 		if item.has("revenue") and (not item.revenue is int or item.revenue < 0 or item.revenue > order.total):
 			return false

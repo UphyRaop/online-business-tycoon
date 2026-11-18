@@ -24,8 +24,9 @@ static func overview(app: Control) -> void:
 	app.metric(view, "Active campaigns", str(active), Style.GOLD)
 	app.metric(view, "Lifetime ad spend", app.money(totals.spend))
 	app.metric(view, "Attributed revenue · net of refunds", app.money(totals.attributed_revenue - totals.attributed_refunds))
-	var roas: float = float(totals.attributed_revenue - totals.attributed_refunds) / totals.spend if totals.spend > 0 else 0.0
+	var roas: float = float(totals.attributed_revenue) / totals.spend if totals.spend > 0 else 0.0
 	app.metric(view, "ROAS · CPA", "%.2f× · %s" % [roas, _average_cost(app, totals.spend, totals.purchases)])
+	view.add_child(app.label("ROAS uses gross attributed revenue divided by ad spend. Refunds are reported separately.", 13, Style.MUTED))
 	app.metric(view, "Estimated advertising profit", app.money(totals.attributed_revenue - totals.attributed_refunds - totals.estimated_costs + totals.estimated_costs_reversed - totals.spend), app.profit_color(totals.attributed_revenue - totals.attributed_refunds - totals.estimated_costs + totals.estimated_costs_reversed - totals.spend))
 	view.add_child(app.label("Attributed revenue is measured when an order is placed. Income Statement revenue is recognized on delivery. A refund adds an attribution adjustment to its campaign history.", 13, Style.MUTED))
 	var platform_card: VBoxContainer = app.card("Platforms")
@@ -35,7 +36,7 @@ static func overview(app: Control) -> void:
 static func manager(app: Control) -> void:
 	var view: VBoxContainer = app.card("Campaign Manager")
 	var links: HBoxContainer = app.row(view)
-	app.action(links, "Overview", app.navigate.bind("Growth"))
+	app.action(links, "Overview", app.navigate.bind("Advertising"))
 	app.action(links, "Analytics", app.navigate.bind("Advertising Analytics"))
 	app.action(view, "Create campaign", func():
 		app.campaign_id = 0
@@ -70,17 +71,38 @@ static func details(app: Control) -> void:
 		return
 	var view: VBoxContainer = app.card("Create campaign" if creating else existing.name)
 	app.action(view, "Campaign Manager", app.navigate.bind("Campaign Manager"))
-	if state.stores.is_empty():
-		view.add_child(app.label("Create a store before setting up ads.", 14, Style.MUTED))
-		app.action(view, "Store Management", app.navigate.bind("Store Management"))
+	if not creating and existing.status == "stopped":
+		view.add_child(app.label("Stopped campaigns are read-only. Duplicate this campaign to create a new Draft.", 14, Style.MUTED))
+		var stopped_metrics: Dictionary = _lifetime(state, app.campaign_id)
+		app.metric(view, "Lifetime ad spend", app.money(stopped_metrics.spend))
+		app.metric(view, "Attributed purchases · revenue", "%d · %s" % [stopped_metrics.purchases, app.money(stopped_metrics.attributed_revenue - stopped_metrics.attributed_refunds)])
+		app.action(view, "Duplicate", func():
+			var error := Ads.duplicate_stopped(state, app.campaign_id)
+			if not error.is_empty():
+				app.set_notice(error, true)
+				return
+			app.campaign_id = state.advertising.next_campaign - 1
+			app.persist("Campaign duplicated as a draft.")
+			app.refresh_view()
+		)
 		return
 	var store_ids: Array[int] = []
 	var store_names: Array[String] = []
 	for store in state.stores:
-		store_ids.append(store.id)
-		store_names.append(store.name + (" · paused" if not store.active else ""))
+		if store.active:
+			store_ids.append(int(store.id))
+			store_names.append(str(store.name))
+	if store_ids.is_empty():
+		view.add_child(app.label("Create a store before launching an advertising campaign.", 14, Style.MUTED))
+		app.action(view, "Store Management", app.navigate.bind("Store Management"))
+		return
 	var selected_store: int = int(existing.get("store_id", store_ids[0])) if not creating else store_ids[0]
+	if selected_store not in store_ids:
+		view.add_child(app.label("This campaign's destination is inactive. Activate an eligible store before editing it.", 14, Style.MUTED))
+		app.action(view, "Store Management", app.navigate.bind("Store Management"))
+		return
 	var store_index := maxi(0, store_ids.find(selected_store))
+	view.add_child(app.label("Destination store", 14, Style.MUTED))
 	var store_picker: OptionButton = app.dropdown(view, store_names, store_index)
 	var name: LineEdit = app.field(view, "Campaign name", str(existing.get("name", "")), 48)
 	var product_ids: Array[int] = []
@@ -89,21 +111,35 @@ static func details(app: Control) -> void:
 	var platform_names: Array[String] = []
 	var selected_product: int = int(existing.get("product", app.selected_product))
 	var selected_platform: int = int(existing.get("platform", 0))
-	_fill_store_choices(state, store_ids[store_picker.selected], creating, selected_product if not creating else -1, product_ids, product_names, platform_ids, platform_names)
+	_fill_store_choices(state, store_ids[store_picker.selected], product_ids, product_names, platform_ids, platform_names)
 	if not product_ids.has(selected_product) and not product_ids.is_empty(): selected_product = product_ids[0]
 	if not platform_ids.has(selected_platform) and not platform_ids.is_empty(): selected_platform = platform_ids[0]
+	if product_names.is_empty(): product_names.append("Select Product")
+	if platform_names.is_empty(): platform_names.append("Select Advertising Platform")
+	view.add_child(app.label("Listed product in selected store", 14, Style.MUTED))
 	var product_picker: OptionButton = app.dropdown(view, product_names, maxi(0, product_ids.find(selected_product)))
+	product_picker.disabled = product_ids.is_empty()
+	view.add_child(app.label("Compatible advertising platform", 14, Style.MUTED))
 	var platform_picker: OptionButton = app.dropdown(view, platform_names, maxi(0, platform_ids.find(selected_platform)))
+	platform_picker.disabled = platform_ids.is_empty()
+	if product_ids.is_empty():
+		view.add_child(app.label("List a product in an active store before creating a product campaign.", 14, Style.MUTED))
+	if platform_ids.is_empty():
+		view.add_child(app.label("No advertising platform is compatible with this destination store.", 14, Style.MUTED))
+	view.add_child(app.label("Campaign objective", 14, Style.MUTED))
 	var objective_picker: OptionButton = app.dropdown(view, Ads.OBJECTIVES, int(existing.get("objective", 3)))
 	var budget: LineEdit = app.field(view, "Daily budget (%s)" % Catalog.CURRENCIES[state.country], _money_field(app, int(existing.get("daily_budget", Catalog.local_cents(state.country, 20.0)))), 16)
 	budget.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
+	view.add_child(app.label("Audience", 14, Style.MUTED))
 	var audience_picker: OptionButton = app.dropdown(view, Ads.AUDIENCES, int(existing.get("audience", 0)))
 	for audience_id in Ads.AUDIENCES.size():
 		if audience_id >= 3 and not Ads.audience_ready(state, store_ids[store_picker.selected], audience_id):
 			audience_picker.set_item_disabled(audience_id, true)
+	view.add_child(app.label("Bidding strategy", 14, Style.MUTED))
 	var bidding_picker: OptionButton = app.dropdown(view, Ads.BIDS, int(existing.get("bid_strategy", 0)))
 	var bid: LineEdit = app.field(view, "Bid limit (%s · 0 if Lowest cost)" % Catalog.CURRENCIES[state.country], _money_field(app, int(existing.get("bid", 0))), 16)
 	bid.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
+	view.add_child(app.label("Creative format", 14, Style.MUTED))
 	var creative_picker: OptionButton = app.dropdown(view, Ads.CREATIVES, int(existing.get("creative", 0)))
 	var start: LineEdit = app.field(view, "Start game day", str(existing.get("start_day", state.day)), 8)
 	start.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
@@ -122,13 +158,25 @@ static func details(app: Control) -> void:
 		product_names.clear()
 		platform_ids.clear()
 		platform_names.clear()
-		_fill_store_choices(state, store_ids[store_picker.selected], creating, old_product if not creating else -1, product_ids, product_names, platform_ids, platform_names)
+		_fill_store_choices(state, store_ids[store_picker.selected], product_ids, product_names, platform_ids, platform_names)
 		product_picker.clear()
-		for item_name in product_names: product_picker.add_item(item_name)
+		if product_names.is_empty():
+			product_picker.add_item("Select Product")
+			product_picker.disabled = true
+		else:
+			for item_name in product_names: product_picker.add_item(item_name)
+			product_picker.disabled = false
 		product_picker.select(maxi(0, product_ids.find(old_product)))
 		platform_picker.clear()
-		for platform_name in platform_names: platform_picker.add_item(platform_name)
+		if platform_names.is_empty():
+			platform_picker.add_item("Select Advertising Platform")
+			platform_picker.disabled = true
+		else:
+			for platform_name in platform_names: platform_picker.add_item(platform_name)
+			platform_picker.disabled = false
 		platform_picker.select(maxi(0, platform_ids.find(selected_platform)))
+		product_picker.tooltip_text = "List a product in an active store before creating a product campaign." if product_ids.is_empty() else ""
+		platform_picker.tooltip_text = "No advertising platform is compatible with this destination store." if platform_ids.is_empty() else ""
 	store_picker.item_selected.connect(update_store)
 	var save_campaign := func(as_draft: bool):
 		if product_ids.is_empty() or platform_ids.is_empty():
@@ -142,6 +190,7 @@ static func details(app: Control) -> void:
 			"objective": objective_picker.selected, "daily_budget": budget_cents,
 			"audience": audience_picker.selected, "bid_strategy": bidding_picker.selected,
 			"bid": bid_cents, "creative": creative_picker.selected, "draft": as_draft,
+			"save_as_draft": as_draft,
 			"start_day": _integer(start.text, -1), "end_day": _integer(end.text, 0),
 		}
 		var error := Ads.create(state, config) if creating else Ads.edit(state, app.campaign_id, config)
@@ -158,6 +207,21 @@ static func details(app: Control) -> void:
 		app.action(view, "Save Draft", save_campaign.bind(true))
 	else:
 		app.action(view, "Save campaign", save_campaign.bind(existing.status == "draft"), true)
+		if existing.status != "stopped":
+			app.action(view, "Save as Draft", save_campaign.bind(true))
+	var cancel_edit := func(return_to_manager: bool):
+		if app.has_form_edits():
+			app.confirm_action("Discard unsaved changes?", "Your campaign settings have not been saved.", "Discard Changes", func():
+				app.edit_checks.clear()
+				if return_to_manager: app.navigate("Campaign Manager")
+				else: app.refresh_view()
+			)
+		else:
+			app.edit_checks.clear()
+			if return_to_manager: app.navigate("Campaign Manager")
+			else: app.refresh_view()
+	app.action(view, "Cancel", cancel_edit.bind(true))
+	app.action(view, "Discard Changes", func(): cancel_edit.call(false))
 	if not creating:
 		var control_row: HBoxContainer = app.row(view)
 		var next_status: String = "Pause" if existing.status == "active" else ("Launch" if existing.status == "draft" else "Resume")
@@ -193,7 +257,7 @@ static func details(app: Control) -> void:
 static func analytics(app: Control) -> void:
 	var view: VBoxContainer = app.card("Advertising Analytics")
 	var nav: HBoxContainer = app.row(view)
-	app.action(nav, "Overview", app.navigate.bind("Growth"))
+	app.action(nav, "Overview", app.navigate.bind("Advertising"))
 	app.action(nav, "Campaigns", app.navigate.bind("Campaign Manager"))
 	var periods: OptionButton = app.dropdown(view, Calendar.PERIODS, app.ad_period)
 	periods.item_selected.connect(func(index: int):
@@ -246,10 +310,11 @@ static func analytics(app: Control) -> void:
 		var metric: Dictionary = Ads.aggregate(app.sim.state, id, app.ad_period, anchor)
 		count += 1
 		for field in Ads.METRIC_FIELDS + ["estimated_profit"]: total[field] += int(metric.get(field, 0))
-	var roas: float = float(total.attributed_revenue - total.attributed_refunds) / total.spend if total.spend > 0 else 0.0
+	var roas: float = float(total.attributed_revenue) / total.spend if total.spend > 0 else 0.0
 	app.metric(view, "Campaigns compared", str(count))
 	app.metric(view, "Ad spend · attributed net revenue", "%s · %s" % [app.money(total.spend), app.money(total.attributed_revenue - total.attributed_refunds)])
 	app.metric(view, "ROAS · CPA", "%.2f× · %s" % [roas, _average_cost(app, total.spend, total.purchases)])
+	view.add_child(app.label("ROAS uses gross attributed revenue divided by ad spend. Refunds are reported separately.", 13, Style.MUTED))
 	app.metric(view, "Estimated advertising profit", app.money(total.attributed_revenue - total.attributed_refunds - total.estimated_costs + total.estimated_costs_reversed - total.spend), app.profit_color(total.attributed_revenue - total.attributed_refunds - total.estimated_costs + total.estimated_costs_reversed - total.spend))
 	for id in ids:
 		var campaign: Dictionary = campaigns[id]
@@ -267,7 +332,7 @@ static func analytics(app: Control) -> void:
 		app.metric(detail, "Clicks · CTR · CPC", "%d · %.2f%% · %s" % [metric.clicks, metric.ctr, _average_cost(app, metric.spend, metric.clicks)])
 		app.metric(detail, "Add to cart · Checkouts", "%d · %d" % [metric.add_to_cart, metric.checkouts])
 		app.metric(detail, "Purchases · Conversion · CPA", "%d · %.2f%% · %s" % [metric.purchases, metric.conversion_rate, _average_cost(app, metric.spend, metric.purchases)])
-		app.metric(detail, "Attributed revenue · ROAS", "%s · %.2f×" % [app.money(metric.attributed_revenue - metric.attributed_refunds), metric.roas], Style.GOLD)
+		app.metric(detail, "Attributed revenue · refunds · ROAS", "%s · %s · %.2f×" % [app.money(metric.attributed_revenue), app.money(metric.attributed_refunds), metric.roas], Style.GOLD)
 		var trend: Dictionary = _seven_day_trend(app.sim.state, int(id))
 		detail.add_child(app.label("7-day spend  %s" % _sparkline(trend.spend), 13, Style.MUTED))
 		detail.add_child(app.label("7-day net revenue  %s" % _sparkline(trend.revenue), 13, Style.MUTED))
@@ -276,12 +341,12 @@ static func analytics(app: Control) -> void:
 			app.navigate("Campaign Details")
 		)
 
-static func _fill_store_choices(state: Dictionary, store_id: int, creating: bool, include_product: int, product_ids: Array[int], product_names: Array[String], platform_ids: Array[int], platform_names: Array[String]) -> void:
+static func _fill_store_choices(state: Dictionary, store_id: int, product_ids: Array[int], product_names: Array[String], platform_ids: Array[int], platform_names: Array[String]) -> void:
 	var store := Stores.get_store(state, store_id)
-	if store.is_empty(): return
+	if store.is_empty() or not store.active: return
 	for product in Catalog.PRODUCTS.size():
 		var listing := Stores.listing(state, store_id, product)
-		if listing.get("listed", false) or (not creating and product == include_product):
+		if listing.get("listed", false):
 			product_ids.append(product)
 			product_names.append(Catalog.PRODUCTS[product].name + (" · unpublished" if not listing.get("listed", false) else ""))
 	for id in Ads.PLATFORMS.size():
@@ -294,7 +359,7 @@ static func _lifetime(state: Dictionary, campaign_id: int) -> Dictionary:
 	for record in state.advertising.history:
 		if record.campaign_id != campaign_id: continue
 		for field in Ads.METRIC_FIELDS: result[field] += int(record.get(field, 0))
-	result.roas = float(result.attributed_revenue - result.attributed_refunds) / result.spend if result.spend > 0 else 0.0
+	result.roas = float(result.attributed_revenue) / result.spend if result.spend > 0 else 0.0
 	result.estimated_profit = result.attributed_revenue - result.attributed_refunds - result.estimated_costs + result.estimated_costs_reversed - result.spend
 	return result
 

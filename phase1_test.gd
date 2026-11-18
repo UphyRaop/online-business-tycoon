@@ -4,6 +4,7 @@ const Sim = preload("res://simulation.gd")
 const Catalog = preload("res://catalog.gd")
 const Saves = preload("res://save_store.gd")
 const Stores = preload("res://store_manager.gd")
+const Supply = preload("res://supply.gd")
 
 var failures := 0
 
@@ -29,12 +30,12 @@ func _initialize() -> void:
 func play_loop(sim: RefCounted) -> void:
 	var state: Dictionary = sim.state
 	var price := Catalog.local_cents(state.country, 65)
-	var quote := Catalog.quote(state.country, 1, 0) + Catalog.inbound_freight(state.country, 0)
-	var other_quote := Catalog.quote(state.country, 1, 2) + Catalog.inbound_freight(state.country, 2)
+	var quote := Catalog.quote(state.country, 1, 3) + Catalog.inbound_freight(state.country, 3)
+	var other_quote := Catalog.quote(state.country, 1, 4) + Catalog.inbound_freight(state.country, 4)
 	var opening: int = state.cash
-	expect(sim.buy(1, 0, 1) != "", "Supplier minimum enforced")
-	expect(sim.buy(1, 2, 999) != "", "Unaffordable purchase rejected")
-	expect(sim.buy(1, 0, 10) == "" and sim.buy(1, 2, 2) == "", "Buy from two suppliers")
+	expect(sim.buy(1, 3, 0) != "", "Supplier minimum enforced")
+	expect(sim.buy(1, 3, 999) != "", "Unaffordable purchase rejected")
+	expect(sim.buy(1, 3, 10) == "" and Supply.purchase(state, 1, 4, 2) == "", "Buy from two active suppliers while retaining the chosen restock source")
 	expect(state.cash == opening - quote * 10 - other_quote * 2, "Purchase reduces cash")
 	var initial: Dictionary = sim.report(1)
 	expect(initial.inventory == quote * 10 + other_quote * 2 and Sim.net(initial) == 0, "Stock is capitalized before sale")
@@ -72,7 +73,7 @@ func test_save() -> void:
 	var path := id + ".save"
 	var state := Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 1, 0, 22)
 	var sim := Sim.new(state)
-	sim.buy(1, 0, 10)
+	sim.buy(1, 3, 10)
 	sim.list_product(1, 6500)
 	expect(Saves.save(state, path) == OK, "Write local save")
 	expect(Saves.load_state(path, id) == state, "Exact save and load")
@@ -116,7 +117,7 @@ func test_channel_operations() -> void:
 		sim.advance(1)
 		var empty := sim.report(1, 1)
 		expect(empty.sales == 0 and empty.overhead > 0, "Out-of-stock listing creates no sales")
-		sim.buy(4, 2, 10)
+		sim.buy(4, 3, 10)
 		sim.advance(14)
 		var active := sim.report(14, 15)
 		expect(active.channels[channel].orders > 0 and active.channels[1 - channel].orders == 0, "Exclusive channel routing")

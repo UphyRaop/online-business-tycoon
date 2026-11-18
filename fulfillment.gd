@@ -19,7 +19,7 @@ static func place(sim: RefCounted, channel: int, items: Array, total: int, offer
 		if stock_remaining > 0:
 			available_stock[product_id] = stock_remaining - 1
 		else:
-			var source: int = int(sim.product_state(product_id).get("supplier", 0))
+			var source: int = int(sim.product_state(product_id).get("supplier", Catalog.DEFAULT_SUPPLIER))
 			if not Supply.supplier_unlocked(state, source) or not Catalog.SUPPLIERS[source].direct:
 				return 0
 			required_direct += Catalog.quote(state.country, product_id, source) + Catalog.inbound_freight(state.country, source)
@@ -38,13 +38,15 @@ static func place(sim: RefCounted, channel: int, items: Array, total: int, offer
 			line = sim.reserve_unit(product)
 		else:
 			var product_state: Dictionary = sim.product_state(product)
-			var supplier: int = int(product_state.get("supplier", 0))
+			var supplier: int = int(product_state.get("supplier", Catalog.DEFAULT_SUPPLIER))
 			var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 			var freight: int = Catalog.inbound_freight(state.country, supplier)
 			var goods: int = Catalog.quote(state.country, product, supplier)
 			var landed := goods + freight
 			line = {"product": product, "cost": landed, "quality": provider.quality, "freight": freight,
-				"direct_supplier": supplier, "supplier_name": provider.name}
+				"direct_supplier": supplier, "direct_supplier_id": Catalog.supplier_id(supplier),
+				"supplier_name": provider.name, "supplier_lead": provider.lead,
+				"supplier_reliability": provider.reliability}
 			direct_cost += landed
 			direct_freight += freight
 		if prices.size() == items.size():
@@ -114,14 +116,14 @@ static func auto_dispatch(state: Dictionary, rng: RandomNumberGenerator) -> void
 			var direct_lead := 0
 			for item in order.items:
 				if item.has("direct_supplier"):
-					direct_lead = maxi(direct_lead, int(Catalog.SUPPLIERS[int(item.direct_supplier)].lead))
+					direct_lead = maxi(direct_lead, int(item.get("supplier_lead", Catalog.SUPPLIERS[int(item.direct_supplier)].lead)))
 			if direct_lead > 0:
 				var supplier_delay := 0
 				var supplier_reliability := 1.0
 				for item in order.items:
 					if item.has("direct_supplier"):
-						var provider: Dictionary = Catalog.SUPPLIERS[int(item.direct_supplier)]
-						supplier_reliability = minf(supplier_reliability, float(provider.reliability))
+						var reliability: float = float(item.get("supplier_reliability", Catalog.SUPPLIERS[int(item.direct_supplier)].reliability))
+						supplier_reliability = minf(supplier_reliability, reliability)
 				if rng.randf() >= supplier_reliability:
 					supplier_delay = rng.randi_range(1, 3)
 				var has_warehouse_item := false

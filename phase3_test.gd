@@ -14,6 +14,7 @@ var failures := 0
 
 func _initialize() -> void:
 	test_stores()
+	test_website_platforms()
 	test_campaign_controls_and_simulation()
 	test_campaign_attribution_refunds_and_save()
 	test_bundle_limits()
@@ -21,6 +22,8 @@ func _initialize() -> void:
 	test_supplier_direct_fulfillment()
 	test_campaign_lifecycle()
 	test_save_migration()
+	test_supplier_catalog_migration()
+	test_marketplace_sales_pipeline()
 	print("Phase 3 simulation: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 
@@ -36,7 +39,7 @@ func game(country: int = 0, seed_value: int = 153) -> Sim:
 	return Sim.new(data)
 
 func add_delivered_stock(sim: Sim, product: int, units: int) -> void:
-	var result := sim.buy(product, 2, units)
+	var result := sim.buy(product, Catalog.DEFAULT_SUPPLIER, units)
 	expect(result == "", "Supplier accepts a stock purchase for product %d" % product)
 	for batch in sim.state.inbound:
 		batch.eta = sim.state.day
@@ -82,7 +85,7 @@ func test_stores() -> void:
 	expect(Stores.create(state, "Second Shopee", 0, "Aster", "", 0).is_empty(), "Create another store on the same marketplace")
 	var lazada_id: int = state.next_store
 	expect(Stores.create(state, "Aster Lazada", 0, "Aster", "", 2).is_empty(), "Create a store on a second marketplace")
-	expect(Stores.create(state, "Aster Direct", 1, "Aster", "direct.aster.shop") == "", "Create a website store")
+	expect(Stores.create(state, "Aster Direct", 1, "Aster", "direct.aster.shop", 0, 2) == "", "Create a website store on Wix")
 	var site_id: int = state.next_store - 1
 	var website := Stores.get_store(state, site_id)
 	expect(website.domain == "direct.aster.shop" and website.active, "Website store keeps its configured domain and active status")
@@ -94,6 +97,7 @@ func test_stores() -> void:
 	expect(state.ledger[0].store_expenses == 3 * Stores.daily_cost(state.country, 0) + Stores.daily_cost(state.country, 1),
 		"New active stores incur their type-specific daily recurring costs once")
 	expect(state.cash < cash_before_day, "Recurring store costs reduce company cash")
+	expect(website.website_platform == "wix" and website.website_fee_bps == 320, "Website platform and simulated transaction fee are stored")
 	expect(Stores.set_active(state, site_id, false) == "", "Deactivate a website store")
 	var second_day_cost: int = state.ledger[1].store_expenses
 	sim.advance(1)
@@ -136,6 +140,58 @@ func test_stores() -> void:
 	expect(state.ledger[0].store_activity[extra_id].setup == marketplace_cost,
 		"Store management attributes setup spending to the correct store")
 	reconcile(sim, "Multiple stores")
+
+func test_website_platforms() -> void:
+	var data := Sim.register("Mira", "Platform Labs", "", 0, 0, 2, 170)
+	var expected_ids := ["shopify", "woocommerce", "wix", "squarespace"]
+	var store_ids: Array[int] = []
+	var expected_recurring := 0
+	var total_setup := 0
+	for platform in Stores.WEBSITE_PLATFORMS.size():
+		var spec: Dictionary = Stores.WEBSITE_PLATFORMS[platform]
+		var id: int = int(data.next_store)
+		var error := Stores.create(data, "Platform Site %d" % platform, 1, "Platform Labs",
+			"site-%d.platform-labs.shop" % platform, 0, platform)
+		expect(error.is_empty(), "Create a website using %s" % spec.name)
+		var site := Stores.get_store(data, id)
+		store_ids.append(id)
+		expect(site.get("website_platform", "") == expected_ids[platform]
+			and site.setup_cost == Stores.setup_cost(data.country, 1, platform)
+			and site.daily_cost == Stores.daily_cost(data.country, 1, platform),
+			"%s stores its platform-specific setup and recurring costs" % spec.name)
+		expect(Stores.store_fee(site, 1, 10000) == roundi(10000 * float(spec.fee_bps) / 10000.0),
+			"%s uses its simulated transaction fee" % spec.name)
+		expect(Stores.traffic_multiplier(site) == spec.traffic and Stores.conversion_multiplier(site) == spec.conversion,
+			"%s has distinct simulated storefront characteristics" % spec.name)
+		expected_recurring += site.daily_cost
+		total_setup += site.setup_cost
+	var site_count: int = data.stores.size()
+	var cash_after_setup: int = data.cash
+	expect(data.ledger.back().store_setup == total_setup and cash_after_setup == data.ledger[0].capital - total_setup,
+		"Website setup charges are recorded once across all platforms")
+	expect(Stores.create(data, "Duplicate Domain", 1, "Platform Labs", "site-0.platform-labs.shop", 0, 1) != "",
+		"Website domains remain unique across platforms")
+	data.cash = Stores.setup_cost(data.country, 1, 0) - 1
+	var store_count_before: int = data.stores.size()
+	expect(not Stores.create(data, "Insufficient", 1, "Platform Labs", "insufficient.platform-labs.shop", 0, 0).is_empty()
+		and data.stores.size() == store_count_before,
+		"Insufficient funds prevent website creation before charging setup fees")
+	data.cash = cash_after_setup
+	var sim := Sim.new(data)
+	sim.advance(1)
+	expect(data.ledger[0].store_expenses == expected_recurring and data.stores.size() == site_count,
+		"Active website recurring fees are charged once according to each selected platform")
+	var inactive_id: int = store_ids[0]
+	Stores.set_active(data, inactive_id, false)
+	var inactive_site := Stores.get_store(data, inactive_id)
+	Stores.set_listing(data, inactive_id, 0, 9000, true)
+	var config := campaign_config(inactive_id, 0)
+	expect(Ads.create(data, config) != "", "Inactive websites cannot receive advertising campaigns")
+	sim.add_stock(0, {"units": 50, "cost": 4000, "quality": 0.9, "freight": 100})
+	sim.advance(4)
+	var inactive_sales: int = int(Stores.report(data, inactive_id).sales)
+	expect(not inactive_site.active and inactive_sales == 0,
+		"Inactive websites cannot receive organic sales after advancing game days")
 
 func test_campaign_controls_and_simulation() -> void:
 	var sim := game(0, 811)
@@ -211,9 +267,23 @@ func test_campaign_controls_and_simulation() -> void:
 		expect(metrics.cpc == (float(metrics.spend) / metrics.clicks if metrics.clicks else 0.0), "CPC handles zero clicks")
 		expect(metrics.cpm == (float(metrics.spend) / metrics.impressions * 1000.0 if metrics.impressions else 0.0), "CPM handles zero impressions")
 		expect(metrics.cpa == (float(metrics.spend) / metrics.purchases if metrics.purchases else 0.0), "CPA handles zero purchases")
-		expect(metrics.roas == (float(metrics.attributed_revenue - metrics.attributed_refunds) / metrics.spend if metrics.spend else 0.0), "ROAS uses net attributed revenue")
+		expect(metrics.roas == (float(metrics.attributed_revenue) / metrics.spend if metrics.spend else 0.0), "ROAS uses gross attributed revenue divided by spend")
 	expect(first_metrics.spend > 0 and second_metrics.spend > 0, "Active campaign budgets fund ad delivery")
 	expect(int(state.advertising.visitors.get(0, 0)) >= 15, "Campaign clicks accumulate retargeting activity")
+	var active_history_size: int = state.advertising.history.size()
+	var active_metrics_before := Ads.aggregate(state, first, 3, state.day - 1)
+	expect(Ads.edit(state, first, {"daily_budget": 4200, "save_as_draft": true}).is_empty()
+		and state.advertising.campaigns[first].status == "draft",
+		"An active campaign can be edited and saved as a non-spending draft")
+	expect(Ads.aggregate(state, first, 3, state.day - 1) == active_metrics_before
+		and state.advertising.history.size() == active_history_size,
+		"Saving an active campaign as a draft preserves its historical performance")
+	Ads.set_status(state, second, "paused")
+	var advertising_spend_before: int = state.ledger.back().advertising
+	sim.advance(1)
+	expect(state.ledger.back().advertising == advertising_spend_before
+		and not state.advertising.history.slice(active_history_size).any(func(record): return int(record.campaign_id) == first),
+		"Edited draft campaigns do not spend or append performance history")
 	var retarget := campaign_config(0, 0)
 	retarget.name = "Warm audience"
 	retarget.audience = 3
@@ -340,12 +410,13 @@ func test_save_migration() -> void:
 	expect(Stores.create(legacy_identity, "Legacy Second Market", 0, "Aster", "", 0).is_empty(),
 		"Legacy save fixture has another marketplace store")
 	var added_website_id: int = legacy_identity.next_store
-	expect(Stores.create(legacy_identity, "Legacy Website", 1, "Aster", "legacy-site.aster.shop").is_empty(),
+	expect(Stores.create(legacy_identity, "Legacy Website", 1, "Aster", "legacy-site.aster.shop", 0, 2).is_empty(),
 		"Legacy save fixture has a manually-created website")
 	Stores.set_listing(legacy_identity, added_market_id, 0, 9500, true)
 	Stores.set_listing(legacy_identity, added_website_id, 1, 8700, true)
 	var legacy_sim := Sim.new(legacy_identity)
-	expect(legacy_sim.buy(0, 2, 3).is_empty(), "Legacy supplier purchase is preserved")
+	expect(not legacy_sim.buy(0, 2, 3).is_empty(), "Removed suppliers cannot be selected for new purchases")
+	expect(legacy_sim.buy(0, Catalog.DEFAULT_SUPPLIER, 3).is_empty(), "Legacy companies can choose a retained supplier for replenishment")
 	legacy_identity.quotes[0] = {1: {"cost": 2400, "minimum": 3, "expires": 7, "discount": 8}}
 	expect(Ads.create(legacy_identity, campaign_config(0, 0)).is_empty(), "Legacy campaign fixture is valid")
 	var legacy_campaign_id: int = legacy_identity.advertising.next_campaign - 1
@@ -356,8 +427,13 @@ func test_save_migration() -> void:
 	var contracts_before: Dictionary = legacy_identity.quotes.duplicate(true)
 	var campaigns_before: Dictionary = legacy_identity.advertising.campaigns.duplicate(true)
 	Sim.upgrade(legacy_identity)
-	expect(legacy_identity.owner.is_empty() and legacy_identity.stores == stores_before and legacy_identity.quotes == contracts_before,
-		"Legacy migration keeps blank CEO identity, all marketplace/web stores, and supplier terms")
+	expect(legacy_identity.owner.is_empty() and legacy_identity.stores == stores_before
+		and legacy_identity.quotes[0][1].cost == contracts_before[0][1].cost
+		and legacy_identity.quotes[0][1].minimum == contracts_before[0][1].minimum
+		and legacy_identity.quotes[0][1].expires == contracts_before[0][1].expires
+		and legacy_identity.quotes[0][1].discount == contracts_before[0][1].discount
+		and legacy_identity.quotes[0][1].supplier_id == Catalog.supplier_id(1),
+		"Legacy migration keeps blank CEO identity, all stores, original supplier terms, and adds stable historical supplier identity")
 	expect(legacy_identity.advertising.campaigns == campaigns_before and legacy_identity.products == products_before
 		and legacy_identity.inbound == inbound_before,
 		"Legacy save migration preserves campaigns, supplier orders, and product inventory state")
@@ -373,7 +449,9 @@ func test_save_migration() -> void:
 func test_supplier_progression() -> void:
 	var sim := game(1)
 	var state := sim.state
-	expect(Supply.supplier_unlocked(state, 0), "Legacy supplier index zero remains available")
+	expect(Supply.supplier_unlocked(state, Catalog.DEFAULT_SUPPLIER), "Retained Level 1 supplier is immediately available")
+	expect(not Catalog.supplier_available_for_sourcing(0) and Catalog.supplier_id(0) == "legacy_value_supply",
+		"Original supplier index is preserved as a historical supplier identity")
 	expect(not Supply.supplier_unlocked(state, 7), "Level 2 supplier starts locked")
 	state.supplier_thresholds_usd = [0, 10, 100, 1000]
 	var earned := Catalog.local_cents(state.country, 40.0)
@@ -396,7 +474,7 @@ func test_supplier_progression() -> void:
 	Supply.ensure_progress(state)
 	expect(state.supplier_level == 4 and Supply.supplier_unlocked(state, 17), "Cumulative USD sales unlock Level 4")
 	expect(Supply.negotiate(state, 0, 7, 100) == "", "Unlocked wholesale supplier can negotiate")
-	expect(Catalog.SUPPLIERS[7].minimum > Catalog.SUPPLIERS[0].minimum and Catalog.SUPPLIERS[7].lead > Catalog.SUPPLIERS[0].lead, "Wholesale MOQ and lead differ from legacy retail contracts")
+	expect(Catalog.SUPPLIERS[7].minimum > Catalog.SUPPLIERS[Catalog.DEFAULT_SUPPLIER].minimum and Catalog.SUPPLIERS[7].lead > Catalog.SUPPLIERS[Catalog.DEFAULT_SUPPLIER].lead, "Wholesale MOQ and lead differ from entry-level suppliers")
 	expect(Saves.valid(state), "Supplier unlock and negotiated contract remain save-valid")
 	var progress_path := "user://phase3_supplier_progress.save"
 	expect(Saves.save(state, progress_path, 1.0) == OK, "Save supplier progress and existing contract")
@@ -404,6 +482,121 @@ func test_supplier_progression() -> void:
 	expect(loaded.get("supplier_level", 0) == 4 and loaded.get("supplier_unlocks", []) == state.get("supplier_unlocks", []),
 		"Supplier level and permanent unlock history survive Save and Load")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(progress_path))
+
+func test_supplier_catalog_migration() -> void:
+	var retained_names: Array[String] = []
+	for supplier in Catalog.SUPPLIER_SELECTION_INDICES:
+		retained_names.append(Catalog.SUPPLIERS[supplier].name)
+	expect(retained_names == ["AliExpress", "CJdropshipping", "Alibaba.com", "1688.com", "Taobao",
+		"Made-in-China.com", "Global Sources", "HyperSKU", "Global Enterprise Network"],
+		"New supplier selection contains exactly the nine approved platforms in level order")
+	var migration := game().state
+	migration.supplier_level = 4
+	migration.supplier_unlocks = range(Catalog.SUPPLIERS.size())
+	for supplier in Catalog.SUPPLIERS.size():
+		var product_id: int = supplier % Catalog.PRODUCTS.size()
+		if not migration.quotes.has(product_id): migration.quotes[product_id] = {}
+		migration.products[supplier] = {"supplier": supplier, "listed": true, "price": 8000, "channel_mask": 3,
+			"lots": [{"units": 1, "cost": 5000 + supplier, "quality": 0.9, "freight": 200}]}
+		migration.inbound.append({"id": supplier + 1, "product": supplier % Catalog.PRODUCTS.size(), "supplier": supplier,
+			"units": 2, "cost": 5000 + supplier, "freight": 200, "quality": 0.9,
+			"eta": 10, "arrival": 12, "delayed": false})
+		migration.quotes[product_id][supplier] = {"cost": 3000 + supplier,
+			"minimum": 10, "expires": 7, "discount": 5}
+	Supply.ensure_progress(migration)
+	Supply.migrate_references(migration)
+	for supplier in Catalog.SUPPLIERS.size():
+		var provider_id := Catalog.supplier_id(supplier)
+		var item: Dictionary = migration.products[supplier]
+		var batch: Dictionary = migration.inbound[supplier]
+		var quote: Dictionary = migration.quotes[supplier % Catalog.PRODUCTS.size()][supplier]
+		expect(not provider_id.is_empty() and item.lots[0].cost == 5000 + supplier
+			and item.lots[0].supplier_id == provider_id and batch.supplier == supplier
+			and batch.supplier_id == provider_id and batch.supplier_name == Catalog.SUPPLIERS[supplier].name
+			and batch.cost == 5000 + supplier and quote.cost == 3000 + supplier and quote.supplier_id == provider_id,
+			"Legacy supplier index %d keeps its recorded costs and receives a stable ID" % supplier)
+		if not Catalog.supplier_available_for_sourcing(supplier):
+			expect(item.supplier == supplier and item.supplier_id == provider_id and item.legacy_supplier.id == provider_id
+				and not Supply.supplier_unlocked(migration, supplier),
+				"Removed supplier %s stays assigned historically and cannot be sourced again" % Catalog.SUPPLIERS[supplier].name)
+	expect(migration.supplier_unlocks == range(Catalog.SUPPLIERS.size()) and migration.supplier_unlock_ids.size() == Catalog.SUPPLIERS.size(),
+		"Existing unlocked supplier progression remains preserved by stable ID")
+	var legacy := game().state
+	legacy.products[0] = {"supplier": 5, "listed": true, "price": 9000, "channel_mask": 3,
+		"lots": [{"units": 1, "cost": 2300, "quality": 0.92, "freight": 100}]}
+	Sim.upgrade(legacy)
+	var migrated_sim := Sim.new(legacy)
+	expect(migrated_sim.stock(0) == 1 and migrated_sim.product_on_store(0, 0)
+		and legacy.products[0].supplier == 5 and legacy.products[0].legacy_supplier.name == "EPROLO"
+		and legacy.products[0].lots[0].cost == 2300,
+		"Inventory sourced from a removed supplier stays owned, listed and sellable without changing its cost")
+	expect(not Supply.purchase(legacy, 0, 5, 10).is_empty()
+		and legacy.products[0].supplier == 5 and migrated_sim.buy(0, Catalog.DEFAULT_SUPPLIER, 10).is_empty()
+		and legacy.products[0].supplier == Catalog.DEFAULT_SUPPLIER,
+		"Legacy supplier is retained until the player explicitly selects a retained supplier for replenishment")
+
+func test_marketplace_sales_pipeline() -> void:
+	var organic_sales_runs := 0
+	var organic_zero_runs := 0
+	var ad_click_runs := 0
+	var ad_sales_runs := 0
+	var ad_zero_sales_runs := 0
+	for seed_value in 128:
+		var organic_state := Sim.register("QA", "Organic %d" % seed_value, "", 0, 0, 0, seed_value)
+		Stores.create(organic_state, "Organic Market", 0, "QA", "", 0)
+		var organic_store_id: int = int(organic_state.stores.back().id)
+		var organic_sim := Sim.new(organic_state)
+		organic_sim.add_stock(0, {"units": 100, "cost": 4000, "quality": 0.9, "freight": 100})
+		Stores.set_listing(organic_state, organic_store_id, 0, 8500, true)
+		organic_sim.advance(1)
+		var organic_orders := 0
+		for order in organic_state.orders.values():
+			if int(order.store_id) == organic_store_id: organic_orders += 1
+		if organic_orders > 0: organic_sales_runs += 1
+		else: organic_zero_runs += 1
+		var ad_state := Sim.register("QA", "Ads %d" % seed_value, "", 0, 0, 0, seed_value)
+		Stores.create(ad_state, "Ad Market", 0, "QA", "", 0)
+		var ad_store_id: int = int(ad_state.stores.back().id)
+		var ad_sim := Sim.new(ad_state)
+		ad_sim.add_stock(0, {"units": 100, "cost": 4000, "quality": 0.9, "freight": 100})
+		Stores.set_listing(ad_state, ad_store_id, 0, 8500, true)
+		var config := campaign_config(ad_store_id, 0, 0, 500)
+		config.name = "Seeded campaign"
+		if not Ads.create(ad_state, config).is_empty(): continue
+		ad_sim.advance(1)
+		var metrics: Dictionary = Ads.aggregate(ad_state, 1, 3, 1)
+		if metrics.clicks > 0: ad_click_runs += 1
+		if metrics.purchases > 0: ad_sales_runs += 1
+		elif metrics.spend > 0: ad_zero_sales_runs += 1
+		expect(metrics.roas == (float(metrics.attributed_revenue) / metrics.spend if metrics.spend > 0 else 0.0),
+			"Seeded campaign ROAS uses attributed gross revenue over spend")
+		for order in ad_state.orders.values():
+			if int(order.campaign_id) == 1:
+				expect(int(order.store_id) == ad_store_id and int(order.items[0].product) == 0,
+					"Campaign orders retain the selected store and product attribution")
+	expect(organic_sales_runs > 0 and organic_zero_runs > 0,
+		"Seeded organic marketplace runs produce sales sometimes and zero-sales days sometimes")
+	expect(ad_click_runs > 0 and ad_sales_runs > 0 and ad_zero_sales_runs > 0,
+		"Ads generate qualified traffic, sometimes convert, and can spend without a sale")
+	var inactive_state := Sim.register("QA", "Inactive", "", 0, 0, 0, 811)
+	Stores.create(inactive_state, "Inactive Market", 0, "QA", "", 0)
+	var inactive_id: int = inactive_state.stores.back().id
+	var invalid_sim := Sim.new(inactive_state)
+	invalid_sim.add_stock(0, {"units": 10, "cost": 4000, "quality": 0.9, "freight": 100})
+	Stores.set_listing(inactive_state, inactive_id, 0, 8500, true)
+	Stores.set_active(inactive_state, inactive_id, false)
+	invalid_sim.advance(3)
+	expect(inactive_state.orders.is_empty(), "Paused marketplace stores receive no new organic orders")
+	Stores.set_active(inactive_state, inactive_id, true)
+	Stores.set_listing(inactive_state, inactive_id, 0, 8500, false)
+	invalid_sim.advance(3)
+	expect(inactive_state.orders.is_empty(), "Invalid or unpublished listings receive no new orders")
+	Stores.set_listing(inactive_state, inactive_id, 0, 8500, true)
+	inactive_state.products[0].lots.clear()
+	var out_of_stock_sim := Sim.new(inactive_state)
+	out_of_stock_sim.advance(3)
+	expect(inactive_state.orders.is_empty() and out_of_stock_sim.stock(0) == 0,
+		"Out-of-stock products receive no new orders")
 
 func test_campaign_lifecycle() -> void:
 	var sim := game()

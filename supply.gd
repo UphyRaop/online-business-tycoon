@@ -25,14 +25,63 @@ static func ensure_progress(state: Dictionary) -> void:
 			state.supplier_level = maxi(state.supplier_level, level)
 	if not state.get("supplier_unlocks") is Array:
 		state.supplier_unlocks = []
-	for supplier in Catalog.SUPPLIERS.size():
+	for supplier in Catalog.SUPPLIER_SELECTION_INDICES:
 		if Catalog.SUPPLIERS[supplier].level <= state.supplier_level and supplier not in state.supplier_unlocks:
 			state.supplier_unlocks.append(supplier)
+	var unlock_ids: Array[String] = []
+	for supplier in state.supplier_unlocks:
+		if int(supplier) in range(Catalog.SUPPLIERS.size()):
+			var stable_id := Catalog.supplier_id(int(supplier))
+			if stable_id not in unlock_ids: unlock_ids.append(stable_id)
+	state.supplier_unlock_ids = unlock_ids
+
+static func migrate_references(state: Dictionary) -> void:
+	# Numeric supplier fields remain in their original positions for historical
+	# records. Stable IDs make those references explicit across future catalog edits.
+	for product in state.get("products", {}):
+		var item: Dictionary = state.products[product]
+		var original: int = int(item.get("supplier", Catalog.DEFAULT_SUPPLIER))
+		if original not in range(Catalog.SUPPLIERS.size()):
+			original = Catalog.DEFAULT_SUPPLIER
+		item.supplier_id = Catalog.supplier_id(original)
+		if not Catalog.supplier_available_for_sourcing(original):
+			item.legacy_supplier = {"id": Catalog.supplier_id(original), "name": Catalog.SUPPLIERS[original].name}
+		for lot in item.get("lots", []):
+			if not lot.has("supplier"):
+				lot.supplier = original
+			lot.supplier_id = Catalog.supplier_id(int(lot.supplier))
+			lot.supplier_name = Catalog.SUPPLIERS[int(lot.supplier)].name
+		state.products[product] = item
+	for batch in state.get("inbound", []):
+		var supplier: int = int(batch.get("supplier", Catalog.DEFAULT_SUPPLIER))
+		if supplier in range(Catalog.SUPPLIERS.size()):
+			batch.supplier_id = Catalog.supplier_id(supplier)
+			batch.supplier_name = Catalog.SUPPLIERS[supplier].name
+	for product in state.get("quotes", {}):
+		for supplier in state.quotes[product]:
+			if int(supplier) in range(Catalog.SUPPLIERS.size()):
+				var quote: Dictionary = state.quotes[product][supplier]
+				quote.supplier_id = Catalog.supplier_id(int(supplier))
+				quote.supplier_name = Catalog.SUPPLIERS[int(supplier)].name
+	for order_id in state.get("orders", {}):
+		var order: Dictionary = state.orders[order_id]
+		for item in order.get("items", []):
+			if item.has("direct_supplier"):
+				var supplier: int = int(item.direct_supplier)
+				if supplier in range(Catalog.SUPPLIERS.size()):
+					item.direct_supplier_id = Catalog.supplier_id(supplier)
+					item.direct_supplier_name = str(item.get("supplier_name", Catalog.SUPPLIERS[supplier].name))
+					item.supplier_lead = int(item.get("supplier_lead", Catalog.SUPPLIERS[supplier].lead))
+					item.supplier_reliability = float(item.get("supplier_reliability", Catalog.SUPPLIERS[supplier].reliability))
+	state.supplier_schema_version = 2
 
 static func supplier_unlocked(state: Dictionary, supplier: int) -> bool:
-	return supplier in range(Catalog.SUPPLIERS.size()) and (supplier in state.get("supplier_unlocks", []) or Catalog.SUPPLIERS[supplier].level <= state.get("supplier_level", 1))
+	return Catalog.supplier_available_for_sourcing(supplier) and supplier in range(Catalog.SUPPLIERS.size()) \
+		and (supplier in state.get("supplier_unlocks", []) or Catalog.SUPPLIERS[supplier].level <= state.get("supplier_level", 1))
 
 static func quote(state: Dictionary, product: int, supplier: int) -> Dictionary:
+	if supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.supplier_available_for_sourcing(supplier):
+		return {"cost": 0, "minimum": 0, "expires": 0, "discount": 0}
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 	if not supplier_unlocked(state, supplier): return {"cost": 0, "minimum": provider.minimum, "expires": 0, "discount": 0}
 	var base := Catalog.quote(state.country, product, supplier)
@@ -42,6 +91,7 @@ static func quote(state: Dictionary, product: int, supplier: int) -> Dictionary:
 	return {"cost": base, "minimum": provider.minimum, "expires": 0, "discount": 0}
 
 static func negotiate(state: Dictionary, product: int, supplier: int, units: int) -> String:
+	if supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.supplier_available_for_sourcing(supplier): return "This supplier is retained for historical records and is unavailable for new sourcing."
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 	if not supplier_unlocked(state, supplier): return "Supplier platform is locked."
 	var threshold: int = negotiation_minimum(supplier)
@@ -56,6 +106,7 @@ static func negotiate(state: Dictionary, product: int, supplier: int, units: int
 	deals[supplier] = {
 		"cost": maxi(1, roundi(Catalog.quote(state.country, product, supplier) * (1.0 - discount / 100.0))),
 		"minimum": minimum, "expires": state.day + QUOTE_DAYS - 1, "discount": discount,
+		"supplier_id": Catalog.supplier_id(supplier), "supplier_name": provider.name,
 	}
 	state.quotes[product] = deals
 	return ""
@@ -64,6 +115,7 @@ static func negotiation_minimum(supplier: int) -> int:
 	return maxi(10, Catalog.SUPPLIERS[supplier].minimum * 4)
 
 static func purchase(state: Dictionary, product: int, supplier: int, units: int) -> String:
+	if supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.supplier_available_for_sourcing(supplier): return "This supplier is retained for historical records and is unavailable for new sourcing."
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 	if not supplier_unlocked(state, supplier): return "Supplier platform is locked."
 	var offer := quote(state, product, supplier)
@@ -81,9 +133,10 @@ static func purchase(state: Dictionary, product: int, supplier: int, units: int)
 	var id: int = state.next_purchase
 	state.next_purchase += 1
 	state.inbound.append({
-		"id": id, "product": product, "supplier": supplier, "units": units, "cost": cost,
+		"id": id, "product": product, "supplier": supplier, "supplier_id": Catalog.supplier_id(supplier),
+		"supplier_name": provider.name, "units": units, "cost": cost,
 		"freight": freight,
-		"quality": provider.quality, "eta": state.day + provider.lead, "arrival": state.day + provider.lead + delay,
+		"quality": provider.quality, "lead_time": provider.lead, "eta": state.day + provider.lead, "arrival": state.day + provider.lead + delay,
 		"delayed": false,
 	})
 	state.cash -= cost * units
@@ -96,7 +149,9 @@ static func receive(sim: RefCounted) -> void:
 	var pending: Array = []
 	for batch in sim.state.inbound:
 		if batch.arrival <= sim.state.day:
-			sim.add_stock(batch.product, {"units": batch.units, "cost": batch.cost, "quality": batch.quality, "freight": batch.get("freight", 0)})
+			sim.add_stock(batch.product, {"units": batch.units, "cost": batch.cost, "quality": batch.quality, "freight": batch.get("freight", 0),
+				"supplier": batch.get("supplier", Catalog.DEFAULT_SUPPLIER), "supplier_id": batch.get("supplier_id", Catalog.supplier_id(int(batch.get("supplier", Catalog.DEFAULT_SUPPLIER)))),
+				"supplier_name": batch.get("supplier_name", Catalog.SUPPLIERS[int(batch.get("supplier", Catalog.DEFAULT_SUPPLIER))].name)})
 		else:
 			batch.delayed = sim.state.day >= batch.eta
 			pending.append(batch)

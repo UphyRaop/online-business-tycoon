@@ -88,14 +88,16 @@ static func run_product(sim: RefCounted, product: int, item: Dictionary, channel
 	var fair := Catalog.local_cents(state.country, definition.cost * 2.7)
 	var value := clampf(float(fair) / item.price, 0.2, 1.8)
 	var reputation: float = state.reputation / 100.0
-	var expected: float = 3.7 * definition.demand * value * Catalog.TRAFFIC[channel] * (0.60 + reputation * 0.65)
+	var store := Stores.get_store(state, store_id) if store_id >= 0 else {}
+	var expected: float = 3.7 * definition.demand * value * Catalog.TRAFFIC[channel] * (0.60 + reputation * 0.65) * Stores.traffic_multiplier(store)
 	var attempts := floori(expected)
 	if rng.randf() < expected - attempts:
 		attempts += 1
 	var row: Dictionary = state.ledger.back()
 	var totals: Dictionary = row.channels[channel]
-	var conversion := clampf(0.59 + (reputation - 0.7) * 0.40 + (value - 1.0) * 0.19
-		+ (2 - Catalog.SHIPPING[state.shipping].days) * 0.027, 0.15, 0.92)
+	var conversion := clampf(0.30 + (reputation - 0.7) * 0.25 + (value - 1.0) * 0.15
+		+ (2 - Catalog.SHIPPING[state.shipping].days) * 0.02, 0.05, 0.65) * Stores.conversion_multiplier(store)
+	conversion = clampf(conversion, 0.03, 0.70)
 	var offers := offers_for(state, product)
 	if store_id >= 0:
 		state.advertising.visitors[store_id] = int(state.advertising.visitors.get(store_id, 0)) + attempts
@@ -157,7 +159,7 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 		var available := true
 		for sku in needed:
 			var missing := maxi(0, int(needed[sku]) - sim.stock(sku))
-			var supplier: int = int(sim.product_state(int(sku)).get("supplier", 0))
+			var supplier: int = int(sim.product_state(int(sku)).get("supplier", Catalog.DEFAULT_SUPPLIER))
 			if missing > 0 and (not Supply.supplier_unlocked(sim.state, supplier) or not Catalog.SUPPLIERS[supplier].direct):
 				available = false
 				break
@@ -183,7 +185,7 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 		final_counts[sku] = int(final_counts.get(sku, 0)) + 1
 	for sku in final_counts:
 		var missing := maxi(0, int(final_counts[sku]) - sim.stock(sku))
-		var supplier: int = int(sim.product_state(int(sku)).get("supplier", 0))
+		var supplier: int = int(sim.product_state(int(sku)).get("supplier", Catalog.DEFAULT_SUPPLIER))
 		if missing > 0 and (not Supply.supplier_unlocked(sim.state, supplier) or not Catalog.SUPPLIERS[supplier].direct):
 			totals.stockouts += 1
 			return 0
