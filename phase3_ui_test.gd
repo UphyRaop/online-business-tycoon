@@ -93,5 +93,25 @@ func run() -> void:
 	await settle("phase3-store-listings")
 	expect(Slots.latest().state.advertising.campaigns.size() == 1 and Slots.latest().state.stores.size() == 2,
 		"Campaign and additional store persist through autosave")
+	var legacy_snapshot: Dictionary = app.sim.state.duplicate(true)
+	legacy_snapshot.owner = ""
+	var preserved_stores: Array = legacy_snapshot.stores.duplicate(true)
+	var preserved_products: Dictionary = legacy_snapshot.products.duplicate(true)
+	var preserved_campaigns: Dictionary = legacy_snapshot.advertising.campaigns.duplicate(true)
+	expect(Slots.write(3, legacy_snapshot, Time.get_unix_time_from_system()) == OK,
+		"Write a legacy save missing its entrepreneur identity")
+	app.dirty = false
+	app.request_load(Slots.read(3))
+	if is_instance_valid(app.confirmation):
+		app.confirmation.confirmed.emit()
+	expect(app.screen == "Entrepreneur name" and has_label("Enter your entrepreneur name to continue this saved company."),
+		"Loading a legacy save asks for a CEO name instead of inventing one")
+	inputs = controls(app, "LineEdit")
+	if not inputs.is_empty(): inputs[0].text = "Mira Restored"
+	press("Save and continue")
+	expect(app.sim.state.owner == "Mira Restored" and app.sim.state.company == "Aster Labs"
+		and app.sim.state.stores == preserved_stores and app.sim.state.products == preserved_products
+		and app.sim.state.advertising.campaigns == preserved_campaigns,
+		"Entering the missing name resumes the same saved company and progress")
 	print("Phase 3 UI (390 × 844): %d failures" % failures)
 	quit(0 if failures == 0 else 1)
