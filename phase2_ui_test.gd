@@ -1,5 +1,6 @@
 extends "res://phase1_ui_test.gd"
 
+
 func run() -> void:
 	if OS.get_environment("OBT_ISOLATED_TEST_PROFILE") != "1" or not Slots.latest().is_empty():
 		push_error("Run the UI test with OBT_ISOLATED_TEST_PROFILE=1 and a fresh APPDATA folder.")
@@ -13,6 +14,8 @@ func run() -> void:
 	inputs[0].text = "Mira Founder"
 	inputs[1].text = "Aster Labs"
 	press("Register company")
+	app.sim.state.stores = Stores.migration_defaults(app.sim.state)
+	app.sim.state.website_active = true
 	app.sim.state.seed = 153
 	press("Market")
 	var choices := controls(app, "OptionButton")
@@ -41,10 +44,9 @@ func run() -> void:
 	expect(app.sim.state.offers[4].has(1), "Market saves a bundle")
 	press("Save upsell")
 	expect(app.sim.state.offers[4].has(1) and app.sim.state.offers[4].has(2), "Market saves an upsell independently")
-	press("Disable bundle")
-	expect(not app.sim.state.offers[4][1].enabled and app.sim.state.offers[4][2].enabled, "Disable one offer while keeping the other enabled")
+	expect(not app.sim.state.offers[4][1].enabled and app.sim.state.offers[4][2].enabled, "Saving an active upsell disables the bundle")
 	press("Enable bundle")
-	expect(app.sim.state.offers[4][1].enabled, "Re-enable the saved bundle")
+	expect(app.sim.state.offers[4][1].enabled and not app.sim.state.offers[4][2].enabled, "Re-enabling the bundle disables the upsell")
 	await settle("phase2-market")
 
 	press("Orders")

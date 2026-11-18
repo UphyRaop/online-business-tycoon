@@ -69,6 +69,8 @@ static func refund(sim: RefCounted, id: int) -> String:
 	state.cash -= order.total
 	if order.restockable:
 		for item in order.items:
+			if item.has("direct_supplier"):
+				continue
 			sim.add_stock(item.product, {"units": 1, "cost": item.cost, "quality": item.quality, "freight": item.get("freight", 0)})
 			row.cogs -= item.cost
 			channel.cogs -= item.cost
@@ -77,7 +79,8 @@ static func refund(sim: RefCounted, id: int) -> String:
 	var reversed_cost := 0
 	if order.restockable:
 		for item in order.items:
-			reversed_cost += item.cost
+			if not item.has("direct_supplier"):
+				reversed_cost += item.cost
 	Advertising.note_refund(state, int(order.get("campaign_id", 0)), int(order.get("store_id", order.channel)), order.total, reversed_cost)
 	order.refunded = true
 	close_case(state, order, "refunded")

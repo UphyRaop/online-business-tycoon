@@ -9,7 +9,7 @@ const Calendar = preload("res://game_calendar.gd")
 const Stores = preload("res://store_manager.gd")
 const Advertising = preload("res://advertising.gd")
 const PERIODS := [1, 7, 30, 365]
-const FIELDS := ["sales", "cogs", "fees", "overhead", "hosting", "legacy", "purchases", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses"]
+const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses"]
 const CHANNEL_FIELDS := ["orders", "sales", "cogs", "fees", "hosting", "shipping", "refunds",
 	"placed", "dispatched", "tracked_deliveries", "on_time", "checkouts", "abandoned", "stockouts", "bundles", "upsells", "refunded"]
 const VERSION := 3
@@ -21,21 +21,26 @@ func _init(data: Dictionary) -> void:
 
 static func register(owner: String, company: String, store: String, country: int,
 		difficulty: int, channel: int, seed_value: int) -> Dictionary:
+	if company.strip_edges().is_empty() or country not in range(Catalog.COUNTRIES.size()) or difficulty not in range(Catalog.DIFFICULTIES.size()) or channel not in range(Catalog.CHANNELS.size()):
+		return {}
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var opening := entry()
 	opening.capital = Catalog.local_cents(country, Catalog.CAPITAL[difficulty])
 	var data := {
 		"version": 1, "owner": owner, "company": company, "store": store,
-		"brand": company.strip_edges(), "website_domain": _domain_for(company), "website_active": channel != 0,
+		"brand": company.strip_edges(), "website_domain": _domain_for(company), "website_active": false,
 		"country": country, "difficulty": difficulty, "channel": channel,
 		"day": 1, "cash": opening.capital, "seed": rng.state,
 		"products": {}, "ledger": [opening],
 	}
+	data.stores = []
 	upgrade(data)
 	return data
 
 static func upgrade(data: Dictionary) -> void:
+	if not data.get("owner") is String:
+		data.owner = ""
 	if not data.has("brand") or not data.get("brand") is String or str(data.brand).strip_edges().is_empty():
 		data.brand = str(data.get("company", "My Online Business"))
 	if not data.has("website_domain") or not data.get("website_domain") is String or str(data.website_domain).strip_edges().is_empty():
@@ -66,12 +71,21 @@ static func upgrade(data: Dictionary) -> void:
 				if not channel.has(field):
 					channel[field] = 0
 	if not data.get("stores") is Array:
-		data.stores = Stores.migration_defaults(data)
+		data.stores = []
+		if int(data.get("channel", 0)) in [0, 2]:
+			var legacy_market: Dictionary = Stores.migration_defaults(data)[0]
+			legacy_market.active = true
+			data.stores.append(legacy_market)
+		if int(data.get("channel", 0)) in [1, 2]:
+			var legacy_site: Dictionary = Stores.migration_defaults(data)[1]
+			legacy_site.active = true
+			data.stores.append(legacy_site)
 	if not data.get("next_store") is int or data.next_store < 2:
 		data.next_store = 2
 	for product in data.get("offers", {}):
 		data.offers[product] = Storefront.offers_for(data, product)
 	Advertising.ensure_state(data)
+	Supply.ensure_progress(data)
 	data.version = VERSION
 
 static func _domain_for(name: String) -> String:
@@ -201,6 +215,7 @@ func advance(days: int) -> void:
 		var row: Dictionary = state.ledger.back()
 		Supply.receive(self)
 		Fulfillment.deliver(state, rng)
+		Supply.ensure_progress(state)
 		Service.tick(state)
 		row.overhead = Catalog.local_cents(state.country, Catalog.OVERHEAD[state.difficulty])
 		var has_legacy_website := false
@@ -236,7 +251,7 @@ static func net(row: Dictionary) -> int:
 	return row.sales - row.refunds - row.cogs - row.fees - row.overhead - row.hosting - row.shipping - row.legacy - row.get("advertising", 0) - row.get("store_setup", 0) - row.get("store_expenses", 0)
 
 static func cash_change(row: Dictionary) -> int:
-	return net(row) + row.cogs - row.purchases + row.capital + row.deposits
+	return net(row) + row.cogs - row.purchases - row.get("direct_purchases", 0) + row.capital + row.deposits
 
 func calendar_report(period: int, anchor: int) -> Dictionary:
 	var boundaries := Calendar.bounds(period, clampi(anchor, 1, state.day))
@@ -249,12 +264,14 @@ func report(days: int, end_day: int = 0) -> Dictionary:
 	var result := entry()
 	var opening_cash := 0
 	var inventory := 0
+	var goods_in_transit := 0
 	var capital := 0
 	var retained := 0
 	var deposits := 0
 	for i in range(end):
 		var row: Dictionary = state.ledger[i]
-		inventory += row.purchases - row.cogs
+		inventory += row.purchases - (row.cogs - row.get("direct_cogs", 0))
+		goods_in_transit += row.get("direct_purchases", 0) - row.get("direct_cogs", 0)
 		capital += row.capital
 		retained += net(row)
 		deposits += row.deposits
@@ -272,9 +289,10 @@ func report(days: int, end_day: int = 0) -> Dictionary:
 	result.opening_cash = opening_cash
 	result.closing_cash = opening_cash + cash_change(result)
 	result.inventory = inventory
+	result.goods_in_transit = goods_in_transit
 	result.equity_capital = capital
 	result.retained = retained
-	result.assets = maxi(0, result.closing_cash) + inventory
+	result.assets = maxi(0, result.closing_cash) + inventory + goods_in_transit
 	result.overdraft = maxi(0, -result.closing_cash)
 	result.customer_deposits = deposits
 	return result

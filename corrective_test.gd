@@ -10,6 +10,7 @@ const Fulfillment = preload("res://fulfillment.gd")
 const Service = preload("res://customer_service.gd")
 const Supply = preload("res://supply.gd")
 const Summary = preload("res://product_summary.gd")
+const Stores = preload("res://store_manager.gd")
 
 var failures := 0
 
@@ -33,7 +34,10 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func game() -> Sim:
-	return Sim.new(Sim.register("Mira", "Aster Labs", "Aster", 0, 1, 2, 153))
+	var state := Sim.register("Mira", "Aster Labs", "Aster", 0, 1, 2, 153)
+	state.website_active = true
+	state.stores = Stores.migration_defaults(state) # Explicit legacy fixture stores for historical compatibility tests.
+	return Sim.new(state)
 
 func test_calendar() -> void:
 	var sim := game()

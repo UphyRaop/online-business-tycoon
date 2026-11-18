@@ -120,6 +120,8 @@ func register_company(name: String) -> void:
 	inputs[1].text = name
 	select(controls(app, "OptionButton")[2], 2)
 	press("Register company")
+	app.sim.state.stores = Stores.migration_defaults(app.sim.state)
+	app.sim.state.website_active = true
 
 func resolve_dialog(confirm: bool) -> void:
 	for dialog in controls(app, "ConfirmationDialog"):

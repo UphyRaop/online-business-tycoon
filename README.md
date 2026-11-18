@@ -78,7 +78,7 @@ Install the matching **Godot 4.7.2 Standard export templates** from **Editor →
 
 The browser uses IndexedDB for the game's local saves. Saves belong to that browser profile and site origin. A hosted HTTPS URL has separate progress from localhost, a LAN URL, or the Windows game. Privacy settings or cleared site data can remove or prevent persistence. Some Safari devices may encounter WebGL issues or reload the tab under memory pressure. [Godot Web export limitations](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_web.html)
 
-The earlier Phase 2 export was exercised in Chrome over HTTP. For Phase 3, the updated gameplay screens pass the automated Godot UI suite at a 390 × 844 viewport, but this environment could not complete a browser request to its local server, so Web startup and browser IndexedDB persistence for this build remain unverified. Physical iPhone Safari compatibility has not been tested. On an iPhone, check that tapping name, quantity, and price fields opens the appropriate keyboard, swiping scrolls Market and Business, and your save survives closing and reopening the same Safari URL.
+The Phase 3 Web export starts successfully in Chromium at a 390 × 844 viewport. The local browser origin is a secure context and Godot mounts `/userfs` in IndexedDB (version 21). The UI suites verify manual and autosave behavior; a browser-profile close-and-reopen save round trip and physical iPhone Safari compatibility have not been exercised. On an iPhone, check that tapping name, quantity, and price fields opens the appropriate keyboard, swiping scrolls Market and Business, and your save survives closing and reopening the same Safari URL.
 
 ## Earlier browser prototype
 

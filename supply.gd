@@ -4,8 +4,37 @@ const Catalog = preload("res://catalog.gd")
 const Calendar = preload("res://game_calendar.gd")
 const QUOTE_DAYS := 7
 
+static func ensure_progress(state: Dictionary) -> void:
+	if not state.get("supplier_level") is int:
+		state.supplier_level = 1
+	var sales := 0
+	for row in state.get("ledger", []):
+		sales += int(row.get("sales", 0))
+	var usd_scale: float = Catalog.SCALE[state.get("country", 0)] / Catalog.SCALE[1]
+	var equivalent := float(sales) / (usd_scale * 100.0)
+	var thresholds: Array = state.get("supplier_thresholds_usd", Catalog.SUPPLIER_THRESHOLDS_USD.duplicate())
+	var valid_thresholds := state.has("supplier_thresholds_usd") and thresholds.size() == 4
+	for value in thresholds:
+		if not (value is int or value is float) or float(value) < 0:
+			valid_thresholds = false
+	if not valid_thresholds:
+		thresholds = Catalog.SUPPLIER_THRESHOLDS_USD.duplicate()
+	state.supplier_thresholds_usd = thresholds
+	for level in range(2, 5):
+		if equivalent >= float(thresholds[level - 1]):
+			state.supplier_level = maxi(state.supplier_level, level)
+	if not state.get("supplier_unlocks") is Array:
+		state.supplier_unlocks = []
+	for supplier in Catalog.SUPPLIERS.size():
+		if Catalog.SUPPLIERS[supplier].level <= state.supplier_level and supplier not in state.supplier_unlocks:
+			state.supplier_unlocks.append(supplier)
+
+static func supplier_unlocked(state: Dictionary, supplier: int) -> bool:
+	return supplier in range(Catalog.SUPPLIERS.size()) and (supplier in state.get("supplier_unlocks", []) or Catalog.SUPPLIERS[supplier].level <= state.get("supplier_level", 1))
+
 static func quote(state: Dictionary, product: int, supplier: int) -> Dictionary:
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+	if not supplier_unlocked(state, supplier): return {"cost": 0, "minimum": provider.minimum, "expires": 0, "discount": 0}
 	var base := Catalog.quote(state.country, product, supplier)
 	var negotiated: Dictionary = state.quotes.get(product, {}).get(supplier, {})
 	if not negotiated.is_empty() and state.day <= negotiated.expires:
@@ -14,6 +43,7 @@ static func quote(state: Dictionary, product: int, supplier: int) -> Dictionary:
 
 static func negotiate(state: Dictionary, product: int, supplier: int, units: int) -> String:
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+	if not supplier_unlocked(state, supplier): return "Supplier platform is locked."
 	var threshold: int = negotiation_minimum(supplier)
 	if units < threshold or units > 999:
 		return "This supplier negotiates orders of %d to 999 units." % threshold
@@ -35,6 +65,7 @@ static func negotiation_minimum(supplier: int) -> int:
 
 static func purchase(state: Dictionary, product: int, supplier: int, units: int) -> String:
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+	if not supplier_unlocked(state, supplier): return "Supplier platform is locked."
 	var offer := quote(state, product, supplier)
 	if units < provider.minimum or units > 999:
 		return "Enter a quantity from %d to 999." % provider.minimum

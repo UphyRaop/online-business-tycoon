@@ -247,6 +247,10 @@ func request_load(record: Dictionary) -> void:
 		return
 	var autosave := Slots.read(Slots.AUTOSAVE)
 	var load := func():
+		if str(record.state.get("owner", "")).strip_edges().is_empty():
+			identity_record = record
+			show_screen("Entrepreneur name")
+			return
 		enter_game(record.state)
 		set_notice("Loaded %s%s." % [Slots.name_for(record.slot), " from backup" if record.get("recovered", false) else ""])
 	var replaces_autosave: bool = record.slot != Slots.AUTOSAVE and not autosave.is_empty() and record.state != autosave.state
@@ -259,6 +263,31 @@ func request_load(record: Dictionary) -> void:
 		confirm_action("Load manual save?", "Future gameplay will replace the current autosave. This manual slot will keep its snapshot.", "Load game", load)
 	else:
 		load.call()
+
+var identity_record: Dictionary = {}
+
+func complete_identity() -> void:
+	var profile := card(identity_record.state.company)
+	profile.add_child(label("Enter your entrepreneur name to continue this saved company.", 15, Style.MUTED))
+	var owner := field(profile, "Entrepreneur name", "")
+	action(profile, "Save and continue", func():
+		var name := owner.text.strip_edges()
+		if name.is_empty():
+			set_notice("Enter your entrepreneur name.", true)
+			return
+		var updated: Dictionary = identity_record.state.duplicate(true)
+		updated.owner = name
+		var result := Slots.write(identity_record.slot, updated, identity_record.saved_at)
+		if result != OK:
+			set_notice("Could not update this save. " + error_string(result), true)
+			return
+		identity_record.clear()
+		enter_game(updated)
+	, true)
+	action(profile, "Back", func():
+		identity_record.clear()
+		show_screen("Load")
+	)
 
 func enter_game(data: Dictionary) -> void:
 	sim = Sim.new(data)
@@ -368,6 +397,7 @@ func render() -> void:
 		match screen:
 			"Title": Menu.title(self)
 			"Setup": setup()
+			"Entrepreneur name": complete_identity()
 			"Load": Menu.slots(self, false)
 			"Save": Menu.slots(self, true)
 			"Settings": Menu.settings(self)
@@ -434,8 +464,11 @@ func setup() -> void:
 			return
 		if store_name.is_empty():
 			store_name = company_name
-		enter_game(Sim.register(owner_name, company_name, store_name,
-			country.selected, difficulty.selected, channel.selected, randi()))
+		var new_state := Sim.register(owner_name, company_name, store_name,
+			country.selected, difficulty.selected, channel.selected, randi())
+		new_state.stores = []
+		new_state.website_active = false
+		enter_game(new_state)
 		persist("Company registered.")
 	, true)
 	action(details, "Back", open_screen.bind("Title"))
@@ -443,6 +476,7 @@ func setup() -> void:
 func dashboard() -> void:
 	var totals := sim.report(sim.state.day)
 	var overview := card(sim.state.company)
+	overview.add_child(label(sim.state.owner + ", CEO", 16, Style.MUTED))
 	overview.add_child(label("CASH BALANCE", 13, Style.MUTED))
 	overview.add_child(label(money(sim.state.cash), 32, Style.GOLD))
 	divider(overview)
@@ -576,6 +610,16 @@ func business() -> void:
 	var controls := row(saves)
 	action(controls, "Manage Saves", open_screen.bind("Save"))
 	action(controls, "Load Game", open_screen.bind("Load"))
+	var identity_name := field(saves, "Entrepreneur name", sim.state.owner)
+	action(saves, "Save entrepreneur name", func():
+		var value := identity_name.text.strip_edges()
+		if value.is_empty():
+			set_notice("Enter your entrepreneur name.", true)
+			return
+		sim.state.owner = value
+		persist("Entrepreneur name saved.")
+		refresh_view()
+	)
 
 func finance() -> void:
 	var controls := card("Financial statements")
@@ -639,7 +683,8 @@ func balance_sheet(report: Dictionary) -> void:
 	view.add_child(label("As of %s" % Calendar.format(report.end), 14, Style.MUTED))
 	metric(view, "Cash", money(maxi(0, report.closing_cash)))
 	metric(view, "Inventory at cost", money(report.inventory))
-	view.add_child(label("Includes inbound and reserved stock.", 13, Style.MUTED))
+	metric(view, "Supplier goods in transit", money(report.goods_in_transit))
+	view.add_child(label("Inventory is on hand or reserved for warehouse fulfillment.", 13, Style.MUTED))
 	metric(view, "Total assets", money(report.assets), Style.GOLD)
 	divider(view)
 	metric(view, "Overdraft liability", money(report.overdraft))
@@ -654,7 +699,8 @@ func cash_flow(report: Dictionary) -> void:
 	divider(view)
 	metric(view, "Receipts from customers", money(report.sales + report.deposits))
 	metric(view, "Refunds paid", money(-report.refunds))
-	metric(view, "Inventory goods paid", money(-(report.purchases - report.inbound_freight)))
+	metric(view, "Warehouse goods paid", money(-(report.purchases - (report.inbound_freight - report.direct_inbound_freight))))
+	metric(view, "Supplier-direct goods paid", money(-(report.direct_purchases - report.direct_inbound_freight)))
 	metric(view, "Inbound freight paid", money(-report.inbound_freight))
 	metric(view, "Outbound shipping paid", money(-report.shipping))
 	metric(view, "Advertising paid", money(-report.advertising))

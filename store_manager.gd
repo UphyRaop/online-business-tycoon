@@ -1,7 +1,9 @@
 extends RefCounted
 
 const Catalog = preload("res://catalog.gd")
-const MARKET_SETUP := 120.0
+const MARKET_SETUP := 0.0
+const MARKETPLACES := ["Shopee", "TikTok Shop", "Lazada", "SHEIN"]
+const MARKET_FEES := [12.0, 13.0, 11.0, 14.0]
 const WEBSITE_SETUP := 45.0
 const MARKET_DAILY := 2.0
 const WEBSITE_DAILY := 4.0
@@ -26,7 +28,7 @@ static func setup_cost(country: int, kind: int) -> int:
 static func daily_cost(country: int, kind: int) -> int:
 	return Catalog.local_cents(country, MARKET_DAILY if kind == 0 else WEBSITE_DAILY)
 
-static func create(state: Dictionary, name: String, kind: int, brand: String, domain: String = "") -> String:
+static func create(state: Dictionary, name: String, kind: int, brand: String, domain: String = "", platform: int = 0) -> String:
 	name = name.strip_edges()
 	brand = brand.strip_edges()
 	domain = domain.strip_edges().to_lower()
@@ -34,6 +36,13 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 		return "Enter a store name and brand, then choose Marketplace or Own Website."
 	if kind == 1 and domain.is_empty():
 		return "Enter a simulated website domain."
+	if kind == 0 and platform not in range(MARKETPLACES.size()):
+		return "Choose a marketplace."
+	for existing in state.stores:
+		if existing.name.to_lower() == name.to_lower():
+			return "Store names must be unique."
+		if kind == 1 and existing.type == 1 and existing.domain.to_lower() == domain:
+			return "Website domains must be unique."
 	var cost := setup_cost(state.country, kind)
 	if state.cash < cost:
 		return "Insufficient company cash for this store's setup cost."
@@ -41,7 +50,7 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 	state.next_store += 1
 	var store := {
 		"id": id, "name": name, "type": kind, "brand": brand,
-		"domain": domain if kind == 1 else "", "active": true, "legacy": false,
+		"domain": domain if kind == 1 else "", "platform": platform if kind == 0 else -1, "active": true, "legacy": false,
 		"created": state.day, "setup_cost": cost, "daily_cost": daily_cost(state.country, kind),
 		"listings": {},
 	}
@@ -53,6 +62,10 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 	activity.setup += cost
 	row.store_activity[id] = activity
 	return ""
+
+static func store_fee(store: Dictionary, channel: int, total: int) -> int:
+	var platform: int = store.get("platform", -1)
+	return roundi(total * MARKET_FEES[platform] / 100.0) if channel == 0 and platform in range(MARKET_FEES.size()) else Catalog.fee(channel, total)
 
 static func set_active(state: Dictionary, store_id: int, enabled: bool) -> String:
 	var index := index_of(state, store_id)

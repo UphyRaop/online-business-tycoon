@@ -10,6 +10,8 @@ const PLATFORMS := [
 	{"name": "Google Ads", "cpm": 12.0, "ctr": 4.1, "cart": 0.33, "checkout": 0.57, "purchase": 0.31, "competition": 1.2, "reach": 0.72},
 	{"name": "TikTok Ads", "cpm": 5.5, "ctr": 1.9, "cart": 0.21, "checkout": 0.41, "purchase": 0.2, "competition": 0.95, "reach": 1.25},
 	{"name": "Marketplace Sponsored Ads", "cpm": 10.0, "ctr": 3.4, "cart": 0.38, "checkout": 0.65, "purchase": 0.4, "competition": 1.28, "reach": 0.62},
+	{"name": "Shopee Sponsored Ads", "cpm": 9.2, "ctr": 3.7, "cart": 0.39, "checkout": 0.66, "purchase": 0.41, "competition": 1.22, "reach": 0.68},
+	{"name": "Lazada Sponsored Ads", "cpm": 9.8, "ctr": 3.3, "cart": 0.37, "checkout": 0.63, "purchase": 0.39, "competition": 1.25, "reach": 0.65},
 ]
 const AUDIENCES := ["Broad", "Interest", "Demographic", "Retargeting", "Lookalike"]
 const AUDIENCE_COST := [1.0, 1.12, 1.2, 1.42, 1.27]
@@ -42,6 +44,8 @@ static func ensure_state(state: Dictionary) -> void:
 static func platform_available(country: int, platform: int, store: Dictionary) -> bool:
 	if platform not in range(PLATFORMS.size()) or store.is_empty(): return false
 	if platform == 3: return int(store.type) == 0
+	if platform == 4: return int(store.type) == 0 and int(store.get("platform", -1)) == 0
+	if platform == 5: return int(store.type) == 0 and int(store.get("platform", -1)) == 2
 	# Mainland China blocks Meta and TikTok ad inventory in this simulation.
 	if country == 5 and platform in [0, 2]: return false
 	return true
@@ -89,7 +93,7 @@ static func create(state: Dictionary, config: Dictionary) -> String:
 		"channel": Stores.channel(store), "product": product, "objective": objective,
 		"daily_budget": budget, "start_day": start, "end_day": end,
 		"audience": audience, "bid_strategy": bid_strategy, "bid": bid,
-		"creative": creative, "status": "active", "learning": 1.0,
+		"creative": creative, "status": "draft" if config.get("draft", false) else "active", "learning": 1.0,
 		"created": state.day,
 	}
 	return ""
@@ -114,11 +118,40 @@ static func edit(state: Dictionary, id: int, changes: Dictionary) -> String:
 	return ""
 
 static func set_status(state: Dictionary, id: int, status: String) -> String:
-	if status not in ["active", "paused", "stopped"]: return "Choose a valid campaign status."
+	if status not in ["draft", "active", "paused", "stopped"]: return "Choose a valid campaign status."
 	var campaign: Dictionary = state.advertising.campaigns.get(id, {})
 	if campaign.is_empty() or campaign.status == "stopped": return "This campaign cannot be resumed."
+	if campaign.status == "draft" and status == "paused":
+		return "Launch a draft before pausing it."
+	if campaign.status == "active" and status == "active":
+		return "This campaign is already active."
+	if campaign.status == "paused" and status == "paused":
+		return "This campaign is already paused."
+	if status == "active":
+		var store := Stores.get_store(state, campaign.store_id)
+		if store.is_empty() or not store.active or not Stores.listing(state, campaign.store_id, campaign.product).get("listed", false):
+			return "Campaign launch requires an active store and listed product."
+		if campaign.end_day > 0 and campaign.end_day < state.day:
+			return "Campaign end date has passed."
+		campaign.start_day = maxi(campaign.start_day, state.day)
 	campaign.status = status
 	state.advertising.campaigns[id] = campaign
+	return ""
+
+static func duplicate_stopped(state: Dictionary, id: int) -> String:
+	var source: Dictionary = state.advertising.campaigns.get(id, {})
+	if source.get("status") != "stopped":
+		return "Only stopped campaigns can be duplicated."
+	var campaign := source.duplicate(true)
+	campaign.id = state.advertising.next_campaign
+	campaign.name += " (copy)"
+	campaign.status = "draft"
+	campaign.start_day = state.day
+	campaign.end_day = 0
+	campaign.learning = 1.0
+	campaign.created = state.day
+	state.advertising.campaigns[campaign.id] = campaign
+	state.advertising.next_campaign += 1
 	return ""
 
 static func simulate_day(sim: RefCounted, rng: RandomNumberGenerator) -> void:
@@ -170,8 +203,11 @@ static func simulate_day(sim: RefCounted, rng: RandomNumberGenerator) -> void:
 				metrics.purchases += 1
 				metrics.attributed_revenue += order.total
 				for line in order.items: metrics.estimated_costs += line.cost
-				metrics.estimated_costs += roundi(order.total * Catalog.FEES[campaign.channel] / 100.0)
-				metrics.estimated_costs += Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)
+				metrics.estimated_costs += Stores.store_fee(Stores.get_store(state, int(order.store_id)), int(order.channel), int(order.total))
+				for line in order.items:
+					if not line.has("direct_supplier"):
+						metrics.estimated_costs += Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)
+						break
 		metrics.estimated_profit = metrics.attributed_revenue - metrics.estimated_costs - spend
 		state.advertising.history.append(metrics)
 		state.advertising.visitors[campaign.store_id] = int(state.advertising.visitors.get(campaign.store_id, 0)) + metrics.clicks

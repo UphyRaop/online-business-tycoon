@@ -83,6 +83,7 @@ static func valid(state: Dictionary) -> bool:
 		return false
 	var computed_cash := 0
 	var inventory := 0
+	var goods_in_transit := 0
 	var deposits := 0
 	for row in state.ledger:
 		if not row is Dictionary or not row.get("channels") is Array or row.channels.size() != 3:
@@ -96,7 +97,7 @@ static func valid(state: Dictionary) -> bool:
 			if not row.get(field) is int:
 				return false
 		var inbound_freight: Variant = row.get("inbound_freight", 0)
-		if not inbound_freight is int or inbound_freight < 0 or inbound_freight > row.purchases:
+		if not inbound_freight is int or inbound_freight < 0 or inbound_freight > row.purchases + row.get("direct_purchases", 0):
 			return false
 		for channel in row.channels:
 			if not channel is Dictionary:
@@ -113,7 +114,15 @@ static func valid(state: Dictionary) -> bool:
 				if not row.store_activity[store_id].get(field) is int:
 					return false
 		computed_cash += Sim.cash_change(row)
-		inventory += row.purchases - row.cogs
+		var direct_cogs: int = row.get("direct_cogs", 0)
+		var direct_purchases: int = row.get("direct_purchases", 0)
+		var direct_freight: int = row.get("direct_inbound_freight", 0)
+		if direct_cogs < 0 or direct_purchases < 0 or direct_freight < 0 or direct_freight > direct_purchases:
+			return false
+		inventory += row.purchases - (row.cogs - direct_cogs)
+		goods_in_transit += direct_purchases - direct_cogs
+		if goods_in_transit < 0:
+			return false
 		deposits += row.deposits
 	if not state.get("products") is Dictionary or computed_cash != state.cash:
 		return false
@@ -132,7 +141,7 @@ static func valid(state: Dictionary) -> bool:
 			if not valid_lot(lot) or not lot.get("units") is int or lot.units < 1:
 				return false
 			stock_value += lot.units * lot.cost
-	return valid_operations(state, inventory - stock_value, deposits)
+	return valid_operations(state, inventory - stock_value, goods_in_transit, deposits)
 
 static func valid_product(product: Variant) -> bool:
 	return product is int and product in range(Catalog.PRODUCTS.size())
@@ -143,7 +152,7 @@ static func valid_lot(lot: Variant) -> bool:
 	var freight: Variant = lot.get("freight", 0)
 	return freight is int and freight >= 0 and freight < lot.cost
 
-static func valid_operations(state: Dictionary, committed_cost: int, deposits: int) -> bool:
+static func valid_operations(state: Dictionary, committed_cost: int, goods_in_transit: int, deposits: int) -> bool:
 	for field in ["inbound", "active_orders", "open_cases", "stores"]:
 		if not state.get(field) is Array:
 			return false
@@ -155,6 +164,16 @@ static func valid_operations(state: Dictionary, committed_cost: int, deposits: i
 			return false
 	if not state.get("advertising") is Dictionary:
 		return false
+	if not state.get("supplier_level") is int or state.supplier_level not in range(1, 5):
+		return false
+	if not state.get("supplier_unlocks") is Array or not state.get("supplier_thresholds_usd") is Array or state.supplier_thresholds_usd.size() != 4:
+		return false
+	for supplier in state.supplier_unlocks:
+		if not supplier is int or supplier not in range(Catalog.SUPPLIERS.size()):
+			return false
+	for threshold in state.supplier_thresholds_usd:
+		if not (threshold is int or threshold is float) or float(threshold) < 0 or not is_finite(float(threshold)):
+			return false
 	if state.next_order < 1 or state.next_purchase < 1 or state.shipping not in range(Catalog.SHIPPING.size()) or not state.get("auto_dispatch") is bool:
 		return false
 	if state.satisfaction not in range(101) or state.reputation not in range(101):
@@ -199,6 +218,7 @@ static func valid_operations(state: Dictionary, committed_cost: int, deposits: i
 		committed_cost -= batch.units * batch.cost
 	var active := {}
 	var cases := {}
+	var direct_commitments := 0
 	for id in state.orders:
 		var order: Variant = state.orders[id]
 		if not id is int or id < 1 or id >= state.next_order or not valid_order(order, id):
@@ -216,8 +236,11 @@ static func valid_operations(state: Dictionary, committed_cost: int, deposits: i
 		active[id] = true
 		deposits -= order.total
 		for item in order.items:
-			committed_cost -= item.cost
-	if committed_cost != 0 or deposits != 0 or not matches_ids(active, state.active_orders) or not matches_ids(cases, state.open_cases):
+			if item.has("direct_supplier"):
+				direct_commitments += item.cost
+			else:
+				committed_cost -= item.cost
+	if committed_cost != 0 or goods_in_transit != direct_commitments or deposits != 0 or not matches_ids(active, state.active_orders) or not matches_ids(cases, state.open_cases):
 		return false
 	for product in state.offers:
 		if not valid_product(product) or not state.offers[product] is Dictionary:
@@ -267,7 +290,7 @@ static func valid_advertising(state: Dictionary) -> bool:
 		for field in ["platform", "store_id", "channel", "product", "objective", "daily_budget", "start_day", "end_day", "audience", "bid_strategy", "bid", "creative", "created"]:
 			if not campaign.get(field) is int:
 				return false
-		if not campaign.get("name") is String or not campaign.get("status") in ["active", "paused", "stopped"] or not campaign.get("learning") is float:
+		if not campaign.get("name") is String or not campaign.get("status") in ["draft", "active", "paused", "stopped"] or not campaign.get("learning") is float:
 			return false
 		var store := Stores.get_store(state, campaign.store_id)
 		if store.is_empty() or campaign.platform not in range(Advertising.PLATFORMS.size()) or not Advertising.platform_available(state.country, campaign.platform, store):
@@ -323,6 +346,10 @@ static func valid_order(order: Variant, id: int) -> bool:
 	for item in order.items:
 		if not valid_lot(item) or not valid_product(item.get("product")):
 			return false
+		if item.has("direct_supplier"):
+			var direct_supplier: Variant = item.direct_supplier
+			if not direct_supplier is int or direct_supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.SUPPLIERS[direct_supplier].direct:
+				return false
 		if item.has("revenue") and (not item.revenue is int or item.revenue < 0 or item.revenue > order.total):
 			return false
 		if item.has("revenue"):
@@ -344,7 +371,9 @@ static func migrate(old: Dictionary) -> Dictionary:
 	if country not in range(Catalog.COUNTRIES.size()) or difficulty not in range(3) or channel not in range(3):
 		return {}
 	var company := str(old.get("company", "My Online Store"))
-	var data := Sim.register(str(old.get("owner", "Founder")), company, company, country, difficulty, channel, randi())
+	var data := Sim.register(str(old.get("owner", "")), company, company, country, difficulty, channel, randi())
+	data.website_active = channel != 0
+	data.stores = Stores.migration_defaults(data)
 	var sim := Sim.new(data)
 	data.ledger[0].capital = roundi(legacy_number(old.get("initial_cash")) * 100)
 	data.cash = data.ledger[0].capital

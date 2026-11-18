@@ -7,6 +7,7 @@ const Catalog = preload("res://catalog.gd")
 const Summary = preload("res://product_summary.gd")
 const Fulfillment = preload("res://fulfillment.gd")
 const Service = preload("res://customer_service.gd")
+const Stores = preload("res://store_manager.gd")
 
 var failures := 0
 
@@ -26,7 +27,10 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func game(company: String) -> Sim:
-	return Sim.new(Sim.register("Mira", company, "Aster Shop", 0, 1, 2, 153))
+	var state := Sim.register("Mira", company, "Aster Shop", 0, 1, 2, 153)
+	state.website_active = true
+	state.stores = Stores.migration_defaults(state) # Explicit legacy fixture stores for old-save and channel regression coverage.
+	return Sim.new(state)
 
 func test_slots() -> void:
 	var legacy := game("Legacy Company")
