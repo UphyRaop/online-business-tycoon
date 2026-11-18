@@ -25,10 +25,33 @@ func controls(node: Node, type: String) -> Array:
 
 func press(title: String) -> void:
 	for button in controls(app, "Button"):
-		if button.text == title and not button.disabled:
+		if button.text == title and not button.disabled and button.is_visible_in_tree():
 			button.pressed.emit()
 			return
 	expect(false, "Missing enabled button " + title)
+
+func has_visible_label(prefix: String) -> bool:
+	for node in controls(app, "Label"):
+		if node.text.begins_with(prefix) and node.is_visible_in_tree(): return true
+	return false
+
+func field_for_label(prefix: String) -> LineEdit:
+	for node in controls(app, "Label"):
+		if not node.text.begins_with(prefix) or not node.is_visible_in_tree(): continue
+		var parent: Node = node.get_parent()
+		var next_index: int = node.get_index() + 1
+		if next_index < parent.get_child_count() and parent.get_child(next_index) is LineEdit:
+			return parent.get_child(next_index)
+	return null
+
+func option_after_label(prefix: String) -> OptionButton:
+	for node in controls(app, "Label"):
+		if not node.text.begins_with(prefix) or not node.is_visible_in_tree(): continue
+		var parent: Node = node.get_parent()
+		var next_index: int = node.get_index() + 1
+		if next_index < parent.get_child_count() and parent.get_child(next_index) is OptionButton:
+			return parent.get_child(next_index)
+	return null
 
 func open_first_store_listing() -> void:
 	press("Manage stores")

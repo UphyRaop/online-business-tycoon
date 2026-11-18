@@ -46,13 +46,53 @@ func run() -> void:
 	press("Market")
 	choices = controls(app, "OptionButton")
 	select(choices[3], 0)
+	var offers_before: Dictionary = app.sim.state.offers.get(4, {}).duplicate(true)
+	expect(has_visible_label("No offers saved") and not has_visible_label("Units per bundle")
+		and not has_visible_label("Upsell quantity") and controls(app, "Button").any(func(button): return button.text == "Create Offer" and button.is_visible_in_tree()),
+		"Offer forms start collapsed while the existing-offer summary and Create Offer action remain visible")
+	press("Create Offer")
+	expect(has_visible_label("Choose the type of offer") and not has_visible_label("Units per bundle")
+		and not has_visible_label("Upsell quantity"), "Create Offer asks the player to choose an offer type before showing a form")
+	press("Bundle")
+	expect(has_visible_label("Units per bundle") and not has_visible_label("Upsell quantity"), "Selecting Bundle shows only the bundle form")
+	var bundle_quantity := field_for_label("Units per bundle")
+	bundle_quantity.text = "3"
+	press("Upsell")
+	expect(has_visible_label("Upsell quantity") and not has_visible_label("Units per bundle"), "Offer form can switch to Upsell without showing both forms")
+	press("Bundle")
+	expect(field_for_label("Units per bundle").text == "3", "Switching offer type retains unsaved form values")
+	press("Cancel")
+	expect(not has_visible_label("Units per bundle") and not has_visible_label("Upsell quantity")
+		and app.sim.state.offers.get(4, {}) == offers_before,
+		"Cancel closes offer creation without changing saved offers")
+	press("Create Offer")
+	press("Bundle")
+	field_for_label("Units per bundle").text = "3"
 	press("Save bundle")
-	expect(app.sim.state.offers[4].has(1), "Market saves a bundle")
+	expect(app.sim.state.offers[4].has(1) and app.sim.state.offers[4][1].quantity == 3,
+		"Saving a Bundle records the configured quantity")
+	press("Edit bundle")
+	expect(field_for_label("Units per bundle").text == "3", "Editing a saved Bundle preserves its settings in the form")
+	field_for_label("Units per bundle").text = "4"
+	press("Save bundle")
+	expect(app.sim.state.offers[4][1].quantity == 4, "Editing a saved Bundle updates its quantity")
+	press("Edit bundle")
+	field_for_label("Units per bundle").text = "6"
+	press("Cancel")
+	expect(app.sim.state.offers[4][1].quantity == 4 and not has_visible_label("Units per bundle"),
+		"Cancel closes an edit without changing the saved Bundle")
+	press("Create Offer")
+	press("Upsell")
 	press("Save upsell")
-	expect(app.sim.state.offers[4].has(1) and app.sim.state.offers[4].has(2), "Market saves an upsell independently")
-	expect(not app.sim.state.offers[4][1].enabled and app.sim.state.offers[4][2].enabled, "Saving an active upsell disables the bundle")
+	expect(app.sim.state.offers[4].has(1) and app.sim.state.offers[4].has(2), "Bundle and Upsell configurations can both be retained")
+	expect(not app.sim.state.offers[4][1].enabled and app.sim.state.offers[4][2].enabled, "Saving an active upsell disables the Bundle")
+	press("Edit upsell")
+	field_for_label("Discount percent").text = "15"
+	press("Save upsell")
+	expect(app.sim.state.offers[4][2].discount == 15 and app.sim.state.offers[4][2].enabled,
+		"Editing an Upsell preserves its offer and saves the changed discount")
 	press("Enable bundle")
-	expect(app.sim.state.offers[4][1].enabled and not app.sim.state.offers[4][2].enabled, "Re-enabling the bundle disables the upsell")
+	expect(app.sim.state.offers[4][1].enabled and not app.sim.state.offers[4][2].enabled, "Enabling the Bundle disables the Upsell")
 	await settle("phase2-market")
 
 	press("Orders")
