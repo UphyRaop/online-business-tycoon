@@ -35,6 +35,12 @@ func run() -> void:
 	press("Create store")
 	expect(app.sim.state.stores.size() == 1, "Marketplace creation is performed through Store Management")
 	var store_id: int = app.sim.state.stores.back().id
+	press("Deactivate")
+	expect(not app.sim.state.stores.back().active and app.notice == "Aster Shop is now inactive.",
+		"Store deactivation updates state and reports the inactive status")
+	press("Activate")
+	expect(app.sim.state.stores.back().active and app.notice == "Aster Shop is now active.",
+		"Store activation updates state and reports the active status")
 	app.sim.state.seed = 811
 	var stock_result: String = app.sim.buy(0, 2, 40)
 	expect(stock_result.is_empty(), "UI fixture obtains stock through the supplier system")
