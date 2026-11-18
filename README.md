@@ -60,7 +60,15 @@ node tools/serve-web.mjs
 
 Open [the local game](http://localhost:8060/). For a quick iPhone test on the same Wi-Fi, run `node tools/serve-web.mjs --lan` and open `http://<Windows IPv4 address>:8060/` in Safari. Use the active Wi-Fi IPv4 address shown by `ipconfig` and leave the server running.
 
-### Free HTTPS link for iPhone
+### GitHub Pages deployment
+
+The Pages workflow runs on pushes to `main` and can also be run manually on `main`. It runs all nine regression and UI suites with isolated save profiles before exporting and deploying the single-threaded Web release.
+
+In the repository's **Settings → Pages**, select **GitHub Actions** as the source and set **Custom domain** to `obt.ur-project.biz`. In the DNS settings for `ur-project.biz`, point the `obt` CNAME record to `uphyraop.github.io`. Once GitHub provisions the certificate, enable **Enforce HTTPS**. The deployment target is `https://obt.ur-project.biz/`.
+
+Browser saves use IndexedDB. Keep using the same HTTPS hostname and browser profile to retain saves across deployments. Saves from a localhost, LAN, or different hosted origin stay with that origin.
+
+### Separate GitHub Pages playtest repository
 
 Create a public GitHub repository dedicated to the playtest. Copy the **contents** of `web-build/` into its root, then commit and push with GitHub Desktop or Git. The WebAssembly file is about 38 MiB, so use a Git push for the upload. In the repository, open **Settings → Pages**, choose **Deploy from a branch**, and select **main / (root)**. Open the HTTPS URL shown on the Pages screen on your iPhone. [GitHub Pages publishing guide](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site) · [GitHub file limits](https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github)
 
