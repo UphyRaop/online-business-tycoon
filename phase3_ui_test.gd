@@ -98,7 +98,13 @@ func run() -> void:
 	inputs[1].text = "Aster Brand"
 	inputs[2].text = "direct.aster.shop"
 	select(controls(app, "OptionButton")[0], 1)
-	select(controls(app, "OptionButton")[2], 2)
+	var stores_before_unselected_website: int = app.sim.state.stores.size()
+	press("Create store")
+	expect(app.sim.state.stores.size() == stores_before_unselected_website
+		and not is_instance_valid(app.confirmation)
+		and app.notice == "Select a website platform before creating the website.",
+		"Website cannot be created before the player chooses a platform")
+	select(controls(app, "OptionButton")[2], 3)
 	var website_setup_cost := Stores.setup_cost(app.sim.state.country, 1)
 	var website_cash_before: int = app.sim.state.cash
 	var store_setup_before: int = app.sim.state.ledger.back().store_setup

@@ -144,6 +144,10 @@ func test_stores() -> void:
 func test_website_platforms() -> void:
 	var data := Sim.register("Mira", "Platform Labs", "", 0, 0, 2, 170)
 	var expected_ids := ["shopify", "woocommerce", "wix", "squarespace"]
+	var unselected_count: int = data.stores.size()
+	expect(not Stores.create(data, "Unselected Platform", 1, "Platform Labs", "unselected.platform-labs.shop", 0, -1).is_empty()
+		and data.stores.size() == unselected_count,
+		"Website creation requires an explicit supported website platform")
 	var store_ids: Array[int] = []
 	var expected_recurring := 0
 	var total_setup := 0

@@ -49,7 +49,11 @@ static func management(app: Control) -> void:
 		var domain: LineEdit = app.field(setup, "Website domain (required for Own Website)", "", 64)
 		var platform: OptionButton = app.dropdown(setup, Stores.MARKETPLACES, 0)
 		var website_platform_names: Array[String] = []
+		website_platform_names.append("Select Website Platform")
 		for value in Stores.WEBSITE_PLATFORMS: website_platform_names.append(value.name)
+		var website_platform_label: Label = app.label("Website platform", 14, Style.MUTED)
+		setup.add_child(website_platform_label)
+		website_platform_label.visible = false
 		var website_platform: OptionButton = app.dropdown(setup, website_platform_names, 0)
 		setup.add_child(app.label("Website platform values are simulated for gameplay and do not represent current real-world prices.", 13, Style.MUTED))
 		var cost: Label = app.label("", 14, Style.GOLD)
@@ -57,8 +61,12 @@ static func management(app: Control) -> void:
 		var update_cost := func(_index: int = 0):
 			platform.visible = kind.selected == 0
 			website_platform.visible = kind.selected == 1
+			website_platform_label.visible = kind.selected == 1
 			domain.editable = kind.selected == 1
-			var setup_platform := website_platform.selected if kind.selected == 1 else -1
+			var setup_platform := website_platform.selected - 1 if kind.selected == 1 and website_platform.selected > 0 else -1
+			if kind.selected == 1 and setup_platform < 0:
+				cost.text = "Select a website platform to see its simulated costs."
+				return
 			cost.text = "Setup %s · Recurring %s per game day · Transaction fee %.1f%%" % [
 				app.money(Stores.setup_cost(app.sim.state.country, kind.selected, setup_platform)),
 				app.money(Stores.daily_cost(app.sim.state.country, kind.selected, setup_platform)),
@@ -69,7 +77,8 @@ static func management(app: Control) -> void:
 		update_cost.call()
 		var saved: Callable = app.watch_edits([name, brand, kind, domain, platform, website_platform])
 		var create_store := func():
-			var result := Stores.create(app.sim.state, name.text, kind.selected, brand.text, domain.text, platform.selected, website_platform.selected if kind.selected == 1 else -1)
+			var selected_website_platform := website_platform.selected - 1 if website_platform.selected > 0 else -1
+			var result := Stores.create(app.sim.state, name.text, kind.selected, brand.text, domain.text, platform.selected, selected_website_platform if kind.selected == 1 else -1)
 			if not result.is_empty():
 				app.set_notice(result, true)
 				return
@@ -79,10 +88,14 @@ static func management(app: Control) -> void:
 			app.refresh_view()
 		app.action(setup, "Create store", func():
 			if kind.selected == 1:
-				var selected_platform: Dictionary = Stores.WEBSITE_PLATFORMS[website_platform.selected]
+				if website_platform.selected <= 0:
+					app.set_notice("Select a website platform before creating the website.", true)
+					return
+				var website_index := website_platform.selected - 1
+				var selected_platform: Dictionary = Stores.WEBSITE_PLATFORMS[website_index]
 				app.confirm_action("Open %s website?" % selected_platform.name, "%s · One-time setup %s · Recurring %s per game day · Transaction fee %.1f%%." % [
-					selected_platform.feature, app.money(Stores.setup_cost(app.sim.state.country, 1, website_platform.selected)),
-					app.money(Stores.daily_cost(app.sim.state.country, 1, website_platform.selected)), float(selected_platform.fee_bps) / 100.0], "Open website", create_store)
+					selected_platform.feature, app.money(Stores.setup_cost(app.sim.state.country, 1, website_index)),
+					app.money(Stores.daily_cost(app.sim.state.country, 1, website_index)), float(selected_platform.fee_bps) / 100.0], "Open website", create_store)
 			else:
 				create_store.call()
 		, true)
