@@ -73,6 +73,7 @@ func run() -> void:
 	select(choices[1], 2)
 	select(choices[2], 2)
 	press("Register company")
+	app.sim.state.stores = app.StoreManager.migration_defaults(app.sim.state)
 	expect(app.sim.state.country == 4 and app.sim.state.difficulty == 2, "Registration saves choices")
 	await settle("02-dashboard")
 	press("Browse product catalog")

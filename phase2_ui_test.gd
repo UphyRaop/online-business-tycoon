@@ -13,6 +13,7 @@ func run() -> void:
 	inputs[0].text = "Mira Founder"
 	inputs[1].text = "Aster Labs"
 	press("Register company")
+	app.sim.state.stores = app.StoreManager.migration_defaults(app.sim.state)
 	app.sim.state.seed = 153
 	press("Market")
 	var choices := controls(app, "OptionButton")
@@ -41,10 +42,9 @@ func run() -> void:
 	expect(app.sim.state.offers[4].has(1), "Market saves a bundle")
 	press("Save upsell")
 	expect(app.sim.state.offers[4].has(1) and app.sim.state.offers[4].has(2), "Market saves an upsell independently")
-	press("Disable bundle")
-	expect(not app.sim.state.offers[4][1].enabled and app.sim.state.offers[4][2].enabled, "Disable one offer while keeping the other enabled")
+	expect(not app.sim.state.offers[4][1].enabled and app.sim.state.offers[4][2].enabled, "Saving an active upsell disables the bundle")
 	press("Enable bundle")
-	expect(app.sim.state.offers[4][1].enabled, "Re-enable the saved bundle")
+	expect(app.sim.state.offers[4][1].enabled and not app.sim.state.offers[4][2].enabled, "Enabling the saved bundle disables the upsell")
 	await settle("phase2-market")
 
 	press("Orders")

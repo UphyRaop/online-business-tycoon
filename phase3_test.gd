@@ -27,7 +27,7 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func game(country: int = 0, seed_value: int = 153) -> Sim:
-	return Sim.new(Sim.register("Mira", "Aster Labs", "Aster Market", country, 0, 2, seed_value))
+	return Sim.new(Sim.register("Mira", "Aster Labs", "Aster Market", country, 0, 2, seed_value, true))
 
 func add_delivered_stock(sim: Sim, product: int, units: int) -> void:
 	var result := sim.buy(product, 2, units)
@@ -52,8 +52,8 @@ func reconcile(sim: Sim, context: String) -> void:
 func test_stores() -> void:
 	var sim := game()
 	var state := sim.state
-	expect(Stores.setup_cost(0, 0) != Stores.setup_cost(1, 0) and Stores.daily_cost(0, 1) != Stores.daily_cost(1, 1),
-		"Store setup and recurring costs scale by country")
+	expect(Stores.setup_cost(0, 0) == 0 and Stores.setup_cost(1, 0) == 0 and Stores.daily_cost(0, 1) != Stores.daily_cost(1, 1),
+		"Marketplace setup is free and website recurring costs scale by country")
 	var marketplace_cost := Stores.setup_cost(state.country, 0)
 	var before: int = state.cash
 	expect(Stores.create(state, "Extra Market", 0, "Aster") == "", "Create an additional marketplace store")

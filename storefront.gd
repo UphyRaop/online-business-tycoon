@@ -1,6 +1,7 @@
 extends RefCounted
 
 const Catalog = preload("res://catalog.gd")
+const Supply = preload("res://supply.gd")
 const Fulfillment = preload("res://fulfillment.gd")
 const Stores = preload("res://store_manager.gd")
 
@@ -31,6 +32,9 @@ static func offers_for(state: Dictionary, product: int) -> Dictionary:
 			value.price = int(value.get("price", 0))
 		value.enabled = value.get("enabled", true) == true
 		normalized[mode] = value
+	# Legacy conflicts keep the bundle, the first offer considered at checkout.
+	if normalized.get(1, {}).get("enabled", false) and normalized.get(2, {}).get("enabled", false):
+		normalized[2].enabled = false
 	return normalized
 
 static func set_bundle(state: Dictionary, product: int, quantity: int, discount: int, price: int = 0) -> String:
@@ -39,6 +43,8 @@ static func set_bundle(state: Dictionary, product: int, quantity: int, discount:
 	var offers := offers_for(state, product)
 	var enabled: bool = offers.get(1, {}).get("enabled", true)
 	offers[1] = {"mode": 1, "quantity": quantity, "discount": discount, "price": price, "enabled": enabled}
+	if enabled and offers.has(2):
+		offers[2].enabled = false
 	state.offers[product] = offers
 	return ""
 
@@ -51,6 +57,8 @@ static func set_upsell(state: Dictionary, product: int, items: Array, discount: 
 	var offers := offers_for(state, product)
 	var enabled: bool = offers.get(2, {}).get("enabled", true)
 	offers[2] = {"mode": 2, "items": items.duplicate(), "discount": discount, "price": price, "enabled": enabled}
+	if enabled and offers.has(1):
+		offers[1].enabled = false
 	state.offers[product] = offers
 	return ""
 
@@ -70,6 +78,8 @@ static func set_enabled(state: Dictionary, product: int, mode: int, enabled: boo
 	if not offers.has(mode):
 		return "Save this offer before enabling or disabling it."
 	offers[mode].enabled = enabled
+	if enabled and offers.has(3 - mode):
+		offers[3 - mode].enabled = false
 	state.offers[product] = offers
 	return ""
 
@@ -142,20 +152,9 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 					valid = false
 					break
 				proposed.append(add_on)
-				references.append(sim.product_state(add_on).price)
+				references.append(Stores.listing(sim.state, store_id, add_on).price if store_id >= 0 else sim.product_state(add_on).price)
 			if not valid:
 				continue
-		var needed := {product: 1}
-		for sku in proposed:
-			needed[sku] = int(needed.get(sku, 0)) + 1
-		var available := true
-		for sku in needed:
-			if sim.stock(sku) < needed[sku]:
-				available = false
-				break
-		if not available:
-			totals.stockouts += 1
-			return 0
 		basket = [product]
 		basket.append_array(proposed)
 		reference_prices = [price]
@@ -170,18 +169,29 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 			total = maxi(1, total)
 		kind = "bundles" if mode == 1 else "upsells"
 		break
-	var final_counts := {}
-	for sku in basket:
-		final_counts[sku] = int(final_counts.get(sku, 0)) + 1
-	for sku in final_counts:
-		if sim.stock(sku) < final_counts[sku]:
+	var reserved := {}
+	var direct := {}
+	var direct_cost := 0
+	for i in basket.size():
+		var sku: int = basket[i]
+		var units: int = reserved.get(sku, 0) + 1
+		reserved[sku] = units
+		if units <= sim.stock(sku):
+			continue
+		var unit := Supply.direct_unit(sim.state, sku, sim.product_state(sku).supplier)
+		if unit.is_empty():
 			totals.stockouts += 1
 			return 0
+		direct[i] = unit
+		direct_cost += unit.cost
+	if direct_cost > 0 and direct_cost > sim.state.cash + total:
+		totals.stockouts += 1
+		return 0
 	for i in range(1, basket.size()):
 		var sku: int = basket[i]
 		row.demand[sku] = row.demand.get(sku, 0) + 1
 	var prices := allocate(total, reference_prices)
-	return Fulfillment.place(sim, channel, basket, total, kind, prices, store_id, campaign_id)
+	return Fulfillment.place(sim, channel, basket, total, kind, prices, store_id, campaign_id, direct)
 
 static func offer_uptake(mode: int, discount: int) -> float:
 	return (0.45 if mode == 1 else 0.22) + float(discount) / 200.0

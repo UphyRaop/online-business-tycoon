@@ -153,6 +153,8 @@ static func valid_operations(state: Dictionary, committed_cost: int, deposits: i
 	for field in ["next_order", "next_purchase", "shipping", "satisfaction", "reputation", "next_store"]:
 		if not state.get(field) is int:
 			return false
+	if not state.get("supplier_level") is int or state.supplier_level not in range(1, 5):
+		return false
 	if not state.get("advertising") is Dictionary:
 		return false
 	if state.next_order < 1 or state.next_purchase < 1 or state.shipping not in range(Catalog.SHIPPING.size()) or not state.get("auto_dispatch") is bool:
@@ -267,7 +269,7 @@ static func valid_advertising(state: Dictionary) -> bool:
 		for field in ["platform", "store_id", "channel", "product", "objective", "daily_budget", "start_day", "end_day", "audience", "bid_strategy", "bid", "creative", "created"]:
 			if not campaign.get(field) is int:
 				return false
-		if not campaign.get("name") is String or not campaign.get("status") in ["active", "paused", "stopped"] or not campaign.get("learning") is float:
+		if not campaign.get("name") is String or not campaign.get("status") in ["active", "paused", "stopped", "draft"] or not campaign.get("learning") is float:
 			return false
 		var store := Stores.get_store(state, campaign.store_id)
 		if store.is_empty() or campaign.platform not in range(Advertising.PLATFORMS.size()) or not Advertising.platform_available(state.country, campaign.platform, store):
@@ -323,6 +325,8 @@ static func valid_order(order: Variant, id: int) -> bool:
 	for item in order.items:
 		if not valid_lot(item) or not valid_product(item.get("product")):
 			return false
+		if item.has("direct_supplier") and (not item.direct_supplier is int or item.direct_supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.SUPPLIERS[item.direct_supplier].get("direct", false)):
+			return false
 		if item.has("revenue") and (not item.revenue is int or item.revenue < 0 or item.revenue > order.total):
 			return false
 		if item.has("revenue"):
@@ -330,7 +334,7 @@ static func valid_order(order: Variant, id: int) -> bool:
 			order_revenue += item.revenue
 	if priced_lines > 0 and (priced_lines != order.items.size() or order_revenue != order.total):
 		return false
-	for field in ["shipping_cost", "channel_fee"]:
+	for field in ["shipping_cost", "channel_fee", "quoted_fee"]:
 		if order.has(field) and (not order[field] is int or order[field] < 0):
 			return false
 	return true
@@ -344,7 +348,7 @@ static func migrate(old: Dictionary) -> Dictionary:
 	if country not in range(Catalog.COUNTRIES.size()) or difficulty not in range(3) or channel not in range(3):
 		return {}
 	var company := str(old.get("company", "My Online Store"))
-	var data := Sim.register(str(old.get("owner", "Founder")), company, company, country, difficulty, channel, randi())
+	var data := Sim.register(str(old.owner) if old.get("owner") is String else "", company, company, country, difficulty, channel, randi(), true)
 	var sim := Sim.new(data)
 	data.ledger[0].capital = roundi(legacy_number(old.get("initial_cash")) * 100)
 	data.cash = data.ledger[0].capital

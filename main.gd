@@ -247,6 +247,10 @@ func request_load(record: Dictionary) -> void:
 		return
 	var autosave := Slots.read(Slots.AUTOSAVE)
 	var load := func():
+		if record.state.owner.strip_edges().is_empty():
+			identity_record = record
+			show_screen("Entrepreneur name")
+			return
 		enter_game(record.state)
 		set_notice("Loaded %s%s." % [Slots.name_for(record.slot), " from backup" if record.get("recovered", false) else ""])
 	var replaces_autosave: bool = record.slot != Slots.AUTOSAVE and not autosave.is_empty() and record.state != autosave.state
@@ -259,6 +263,34 @@ func request_load(record: Dictionary) -> void:
 		confirm_action("Load manual save?", "Future gameplay will replace the current autosave. This manual slot will keep its snapshot.", "Load game", load)
 	else:
 		load.call()
+
+var identity_record: Dictionary = {}
+
+func complete_identity() -> void:
+	var profile := card(identity_record.state.company)
+	profile.add_child(label("Enter your entrepreneur name to continue this company. Your saved progress will be kept.", 15, Style.MUTED))
+	var owner := field(profile, "Entrepreneur name", "")
+	watch_edits([owner])
+	action(profile, "Save and continue", func():
+		var name := owner.text.strip_edges()
+		if name.is_empty() or name == identity_record.state.company.strip_edges():
+			set_notice("Enter your entrepreneur name separately from the company name.", true)
+			return
+		var updated: Dictionary = identity_record.state.duplicate(true)
+		updated.owner = name
+		var result := Slots.write(identity_record.slot, updated, identity_record.saved_at)
+		if result != OK:
+			set_notice("Could not update this save. " + error_string(result), true)
+			return
+		identity_record.clear()
+		enter_game(updated)
+	, true)
+	action(profile, "Back", func():
+		discard_form_then(func():
+			identity_record.clear()
+			show_screen("Load")
+		)
+	)
 
 func enter_game(data: Dictionary) -> void:
 	sim = Sim.new(data)
@@ -368,6 +400,7 @@ func render() -> void:
 		match screen:
 			"Title": Menu.title(self)
 			"Setup": setup()
+			"Entrepreneur name": complete_identity()
 			"Load": Menu.slots(self, false)
 			"Save": Menu.slots(self, true)
 			"Settings": Menu.settings(self)
@@ -443,6 +476,7 @@ func setup() -> void:
 func dashboard() -> void:
 	var totals := sim.report(sim.state.day)
 	var overview := card(sim.state.company)
+	overview.add_child(label(sim.state.owner + ", CEO", 16, Style.MUTED))
 	overview.add_child(label("CASH BALANCE", 13, Style.MUTED))
 	overview.add_child(label(money(sim.state.cash), 32, Style.GOLD))
 	divider(overview)
@@ -531,9 +565,11 @@ func business() -> void:
 	metric(profile, "Difficulty", Catalog.DIFFICULTIES[sim.state.difficulty])
 	var company := field(profile, "Company name", sim.state.company)
 	var brand := field(profile, "Brand name", sim.state.brand)
-	var store := field(profile, "Store name", sim.state.store)
-	var domain := field(profile, "Website domain", sim.state.website_domain)
-	var website := dropdown(profile, ["Website inactive", "Website active"], 1 if sim.state.website_active else 0)
+	var legacy_settings := stack(profile)
+	legacy_settings.visible = sim.state.stores.any(func(entry): return entry.legacy)
+	var store := field(legacy_settings, "Store name", sim.state.store)
+	var domain := field(legacy_settings, "Website domain", sim.state.website_domain)
+	var website := dropdown(legacy_settings, ["Website inactive", "Website active"], 1 if sim.state.website_active else 0)
 	var names_saved := watch_edits([company, brand, store, domain, website])
 	action(profile, "Save names", func():
 		var company_name := company.text.strip_edges()
@@ -543,11 +579,18 @@ func business() -> void:
 		if company_name.is_empty() or brand_name.is_empty() or store_name.is_empty() or website_domain.is_empty():
 			set_notice("Enter a company name, brand, store, and website domain.", true)
 			return
+		if legacy_settings.visible:
+			var conflict := StoreManager.identity_conflict(sim.state, store_name, "", 0)
+			if conflict.is_empty():
+				conflict = StoreManager.identity_conflict(sim.state, "", website_domain, 1)
+			if not conflict.is_empty():
+				set_notice(conflict, true)
+				return
 		sim.state.company = company_name
 		sim.state.brand = brand_name
 		sim.state.store = store_name
 		sim.state.website_domain = website_domain
-		sim.state.website_active = website.selected == 1
+		sim.state.website_active = legacy_settings.visible and website.selected == 1
 		if not sim.state.website_active and sim.state.channel == 1:
 			sim.state.channel = 0
 		StoreManager.sync_legacy(sim.state)
@@ -558,6 +601,7 @@ func business() -> void:
 	action(card("Inventory and listings"), "My Products", navigate.bind("My Products"))
 	action(card("Growth and expansion"), "Advertising and Stores", navigate.bind("Growth"), true)
 	var channels := card("Sales channels")
+	channels.get_parent().visible = legacy_settings.visible
 	channels.add_child(label("Marketplace charges %d%% per sale. Your website charges %d%% per sale plus %s per simulated day.\nMarketplace store: %s · Brand: %s\nWebsite: %s · %s" % [
 		Catalog.FEES[0], Catalog.FEES[1], money(Catalog.local_cents(sim.state.country, Catalog.HOSTING)),
 		sim.state.store, sim.state.brand, sim.state.website_domain, "Active" if sim.state.website_active else "Inactive"], 14, Style.MUTED))
@@ -576,6 +620,21 @@ func business() -> void:
 	var controls := row(saves)
 	action(controls, "Manage Saves", open_screen.bind("Save"))
 	action(controls, "Load Game", open_screen.bind("Load"))
+	var identity := card("Entrepreneur identity")
+	var owner := field(identity, "Entrepreneur name", sim.state.owner)
+	owner.name = "EntrepreneurName"
+	var identity_saved := watch_edits([owner])
+	action(identity, "Save entrepreneur name", func():
+		var name := owner.text.strip_edges()
+		if name.is_empty():
+			set_notice("Enter your entrepreneur name.", true)
+			return
+		sim.state.owner = name
+		identity_saved.call()
+		persist("Entrepreneur name saved.")
+		refresh_view()
+	)
+
 
 func finance() -> void:
 	var controls := card("Financial statements")

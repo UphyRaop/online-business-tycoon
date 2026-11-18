@@ -14,7 +14,7 @@ func expect(condition: bool, message: String) -> void:
 func _initialize() -> void:
 	for country in Catalog.COUNTRIES.size():
 		for difficulty in Catalog.DIFFICULTIES.size():
-			var sim := Sim.new(Sim.register("Mira", "Aster Labs", "Aster Shop", country, difficulty, 2, 153))
+			var sim := Sim.new(Sim.register("Mira", "Aster Labs", "Aster Shop", country, difficulty, 2, 153, true))
 			play_loop(sim)
 	test_save()
 	test_migration()
@@ -66,7 +66,7 @@ func play_loop(sim: RefCounted) -> void:
 func test_save() -> void:
 	var id := "user://phase1_test_%d" % Time.get_ticks_usec()
 	var path := id + ".save"
-	var state := Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 1, 0, 22)
+	var state := Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 1, 0, 22, true)
 	var sim := Sim.new(state)
 	sim.buy(1, 0, 10)
 	sim.list_product(1, 6500)
@@ -104,7 +104,7 @@ func test_migration() -> void:
 
 func test_channel_operations() -> void:
 	for channel in [0, 1]:
-		var sim := Sim.new(Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 2, channel, 153))
+		var sim := Sim.new(Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 2, channel, 153, true))
 		sim.list_product(4, 3200)
 		sim.advance(1)
 		var empty := sim.report(1, 1)

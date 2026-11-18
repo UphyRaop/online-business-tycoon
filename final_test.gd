@@ -26,7 +26,7 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func game(company: String) -> Sim:
-	return Sim.new(Sim.register("Mira", company, "Aster Shop", 0, 1, 2, 153))
+	return Sim.new(Sim.register("Mira", company, "Aster Shop", 0, 1, 2, 153, true))
 
 func test_slots() -> void:
 	var legacy := game("Legacy Company")

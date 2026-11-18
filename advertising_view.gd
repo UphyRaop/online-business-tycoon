@@ -74,40 +74,61 @@ static func details(app: Control) -> void:
 		view.add_child(app.label("Create a store before setting up ads.", 14, Style.MUTED))
 		app.action(view, "Store Management", app.navigate.bind("Store Management"))
 		return
-	var store_ids: Array[int] = []
-	var store_names: Array[String] = []
-	for store in state.stores:
-		store_ids.append(store.id)
-		store_names.append(store.name + (" · paused" if not store.active else ""))
-	var selected_store: int = int(existing.get("store_id", store_ids[0])) if not creating else store_ids[0]
-	var store_index := maxi(0, store_ids.find(selected_store))
-	var store_picker: OptionButton = app.dropdown(view, store_names, store_index)
-	var name: LineEdit = app.field(view, "Campaign name", str(existing.get("name", "")), 48)
-	var product_ids: Array[int] = []
-	var product_names: Array[String] = []
+	var editable_destination: bool = creating or existing.get("status") == "draft"
 	var platform_ids: Array[int] = []
 	var platform_names: Array[String] = []
-	var selected_product: int = int(existing.get("product", app.selected_product))
-	var selected_platform: int = int(existing.get("platform", 0))
-	_fill_store_choices(state, store_ids[store_picker.selected], creating, selected_product if not creating else -1, product_ids, product_names, platform_ids, platform_names)
-	if not product_ids.has(selected_product) and not product_ids.is_empty(): selected_product = product_ids[0]
-	if not platform_ids.has(selected_platform) and not platform_ids.is_empty(): selected_platform = platform_ids[0]
-	var product_picker: OptionButton = app.dropdown(view, product_names, maxi(0, product_ids.find(selected_product)))
-	var platform_picker: OptionButton = app.dropdown(view, platform_names, maxi(0, platform_ids.find(selected_platform)))
+	for id in Ads.PLATFORMS.size():
+		if id == 3 and existing.get("platform", -1) != id:
+			continue
+		platform_ids.append(id)
+		platform_names.append(Ads.PLATFORMS[id].name)
+	view.add_child(app.label("Advertising platform", 14, Style.MUTED))
+	var platform_picker: OptionButton = app.dropdown(view, platform_names, maxi(0, platform_ids.find(existing.get("platform", 0))))
+	view.add_child(app.label("Destination store", 14, Style.MUTED))
+	var store_picker: OptionButton = app.dropdown(view, [], -1)
+	view.add_child(app.label("Listed product", 14, Style.MUTED))
+	var product_picker: OptionButton = app.dropdown(view, [], -1)
+	var store_ids: Array[int] = []
+	var product_ids: Array[int] = []
+	var selected_store: int = existing.get("store_id", -1)
+	var selected_product: int = existing.get("product", app.selected_product)
+	var name: LineEdit = app.field(view, "Campaign name", str(existing.get("name", "")), 48)
+	var update_products := func(_index: int):
+		product_picker.clear()
+		product_ids.clear()
+		if store_picker.selected < 0:
+			return
+		var store_id: int = store_ids[store_picker.selected]
+		for product in Catalog.PRODUCTS.size():
+			var listing := Stores.listing(state, store_id, product)
+			if listing.get("listed", false) or (store_id == selected_store and product == existing.get("product", -1)):
+				product_ids.append(product)
+				product_picker.add_item(Catalog.PRODUCTS[product].name)
+		product_picker.select(maxi(0, product_ids.find(selected_product)) if not product_ids.is_empty() else -1)
+	var update_destinations := func(_index: int):
+		var previous: int = store_ids[store_picker.selected] if store_picker.selected >= 0 else selected_store
+		store_picker.clear()
+		store_ids.clear()
+		for store in state.stores:
+			if (store.id == selected_store and platform_ids[platform_picker.selected] == existing.get("platform", -1)) or (store.active and Ads.platform_available(state.country, platform_ids[platform_picker.selected], store)):
+				store_ids.append(store.id)
+				store_picker.add_item(store.name)
+		store_picker.select(maxi(0, store_ids.find(previous)) if not store_ids.is_empty() else -1)
+		update_products.call(store_picker.selected)
+	update_destinations.call(platform_picker.selected)
+	for picker in [platform_picker, store_picker, product_picker]:
+		picker.disabled = not editable_destination
 	var objective_picker: OptionButton = app.dropdown(view, Ads.OBJECTIVES, int(existing.get("objective", 3)))
 	var budget: LineEdit = app.field(view, "Daily budget (%s)" % Catalog.CURRENCIES[state.country], _money_field(app, int(existing.get("daily_budget", Catalog.local_cents(state.country, 20.0)))), 16)
 	budget.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
 	var audience_picker: OptionButton = app.dropdown(view, Ads.AUDIENCES, int(existing.get("audience", 0)))
-	for audience_id in Ads.AUDIENCES.size():
-		if audience_id >= 3 and not Ads.audience_ready(state, store_ids[store_picker.selected], audience_id):
-			audience_picker.set_item_disabled(audience_id, true)
 	var bidding_picker: OptionButton = app.dropdown(view, Ads.BIDS, int(existing.get("bid_strategy", 0)))
 	var bid: LineEdit = app.field(view, "Bid limit (%s · 0 if Lowest cost)" % Catalog.CURRENCIES[state.country], _money_field(app, int(existing.get("bid", 0))), 16)
 	bid.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
 	var creative_picker: OptionButton = app.dropdown(view, Ads.CREATIVES, int(existing.get("creative", 0)))
 	var start: LineEdit = app.field(view, "Start game day", str(existing.get("start_day", state.day)), 8)
 	start.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
-	start.editable = creating
+	start.editable = creating or existing.get("status") == "draft"
 	var end: LineEdit = app.field(view, "End game day (optional, 0 means no end)", str(existing.get("end_day", 0)), 8)
 	end.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
 	if not creating:
@@ -116,22 +137,20 @@ static func details(app: Control) -> void:
 			Catalog.CHANNELS[existing.channel]], 13, Style.MUTED))
 	var form: Array = [name, store_picker, product_picker, platform_picker, objective_picker, budget, audience_picker, bidding_picker, bid, creative_picker, start, end]
 	var saved: Callable = app.watch_edits(form)
-	var update_store := func(_index: int):
-		var old_product: int = product_ids[product_picker.selected] if not product_ids.is_empty() else selected_product
-		product_ids.clear()
-		product_names.clear()
-		platform_ids.clear()
-		platform_names.clear()
-		_fill_store_choices(state, store_ids[store_picker.selected], creating, old_product if not creating else -1, product_ids, product_names, platform_ids, platform_names)
-		product_picker.clear()
-		for item_name in product_names: product_picker.add_item(item_name)
-		product_picker.select(maxi(0, product_ids.find(old_product)))
-		platform_picker.clear()
-		for platform_name in platform_names: platform_picker.add_item(platform_name)
-		platform_picker.select(maxi(0, platform_ids.find(selected_platform)))
-	store_picker.item_selected.connect(update_store)
-	var save_campaign := func():
-		if product_ids.is_empty() or platform_ids.is_empty():
+	var update_audiences := func():
+		for id in range(3, Ads.AUDIENCES.size()):
+			audience_picker.set_item_disabled(id, store_picker.selected < 0 or not Ads.audience_ready(state, store_ids[store_picker.selected], id))
+	platform_picker.item_selected.connect(func(index: int):
+		update_destinations.call(index)
+		update_audiences.call()
+	)
+	store_picker.item_selected.connect(func(index: int):
+		update_products.call(index)
+		update_audiences.call()
+	)
+	update_audiences.call()
+	var save_campaign := func(draft: bool):
+		if product_picker.selected < 0 or store_picker.selected < 0:
 			app.set_notice("This store needs an eligible listing and platform before campaign creation.", true)
 			return
 		var budget_cents: int = app.price_cents(budget.text)
@@ -142,7 +161,7 @@ static func details(app: Control) -> void:
 			"objective": objective_picker.selected, "daily_budget": budget_cents,
 			"audience": audience_picker.selected, "bid_strategy": bidding_picker.selected,
 			"bid": bid_cents, "creative": creative_picker.selected,
-			"start_day": _integer(start.text, -1), "end_day": _integer(end.text, 0),
+			"draft": draft, "start_day": _integer(start.text, -1), "end_day": _integer(end.text, 0),
 		}
 		var error := Ads.create(state, config) if creating else Ads.edit(state, app.campaign_id, config)
 		if not error.is_empty():
@@ -153,14 +172,21 @@ static func details(app: Control) -> void:
 			app.campaign_id = state.advertising.next_campaign - 1
 		app.persist("Campaign saved. New settings apply from future simulated days.")
 		app.navigate("Campaign Manager")
-	app.action(view, "Create campaign" if creating else "Save campaign", save_campaign, true)
+	if creating or existing.status != "stopped":
+		app.action(view, "Create campaign" if creating else "Save campaign", save_campaign.bind(false), true)
+	if creating:
+		app.action(view, "Save Draft", save_campaign.bind(true))
 	if not creating:
 		var control_row: HBoxContainer = app.row(view)
-		var next_status: String = "Pause" if existing.status == "active" else "Resume"
+		view.add_child(app.label("Drafts do not spend. Paused campaigns can resume. Stopped campaigns retain their history and can be duplicated.", 14, Style.MUTED))
+		var next_status: String = {"active": "Pause", "draft": "Launch", "paused": "Resume"}.get(existing.status, "")
 		if existing.status != "stopped":
 			app.action(control_row, next_status, func():
-				Ads.set_status(state, app.campaign_id, "paused" if existing.status == "active" else "active")
-				app.persist("Campaign %s." % ("paused" if existing.status == "active" else "resumed"))
+				var error := Ads.set_status(state, app.campaign_id, "paused" if next_status == "Pause" else "active")
+				if not error.is_empty():
+					app.set_notice(error, true)
+					return
+				app.persist("Campaign is %s." % state.advertising.campaigns[app.campaign_id].status)
 				app.refresh_view()
 			)
 			app.action(control_row, "Stop", func():
@@ -169,6 +195,16 @@ static func details(app: Control) -> void:
 					app.persist("Campaign stopped.")
 					app.refresh_view()
 				)
+			)
+		else:
+			app.action(control_row, "Duplicate", func():
+				var error := Ads.duplicate_stopped(state, app.campaign_id)
+				if not error.is_empty():
+					app.set_notice(error, true)
+					return
+				app.campaign_id = state.advertising.next_campaign - 1
+				app.persist("Campaign duplicated as a draft.")
+				app.refresh_view()
 			)
 		var metrics: Dictionary = _lifetime(state, app.campaign_id)
 		app.metric(view, "Lifetime ad spend", app.money(metrics.spend))
@@ -218,7 +254,7 @@ static func analytics(app: Control) -> void:
 	for item in Catalog.PRODUCTS: products.append(item.name)
 	var product_filter: OptionButton = app.dropdown(view, products, app.ad_product_filter + 1)
 	product_filter.item_selected.connect(func(index: int): app.ad_product_filter = index - 1; app.render())
-	var statuses := ["All statuses", "Active", "Paused", "Stopped"]
+	var statuses := ["All statuses", "Active", "Paused", "Stopped", "Draft"]
 	var status_filter: OptionButton = app.dropdown(view, statuses, app.ad_status_filter + 1)
 	status_filter.item_selected.connect(func(index: int): app.ad_status_filter = index - 1; app.render())
 	var total := Ads.empty_metrics()
@@ -228,7 +264,7 @@ static func analytics(app: Control) -> void:
 		if app.ad_platform_filter >= 0 and campaign.platform != app.ad_platform_filter: continue
 		if app.ad_store_filter >= 0 and campaign.store_id != app.ad_store_filter: continue
 		if app.ad_product_filter >= 0 and campaign.product != app.ad_product_filter: continue
-		if app.ad_status_filter >= 0 and campaign.status != ["active", "paused", "stopped"][app.ad_status_filter]: continue
+		if app.ad_status_filter >= 0 and campaign.status != ["active", "paused", "stopped", "draft"][app.ad_status_filter]: continue
 		var metric: Dictionary = Ads.aggregate(app.sim.state, id, app.ad_period, anchor)
 		count += 1
 		for field in Ads.METRIC_FIELDS + ["estimated_profit"]: total[field] += int(metric.get(field, 0))
@@ -242,7 +278,7 @@ static func analytics(app: Control) -> void:
 		if app.ad_platform_filter >= 0 and campaign.platform != app.ad_platform_filter: continue
 		if app.ad_store_filter >= 0 and campaign.store_id != app.ad_store_filter: continue
 		if app.ad_product_filter >= 0 and campaign.product != app.ad_product_filter: continue
-		if app.ad_status_filter >= 0 and campaign.status != ["active", "paused", "stopped"][app.ad_status_filter]: continue
+		if app.ad_status_filter >= 0 and campaign.status != ["active", "paused", "stopped", "draft"][app.ad_status_filter]: continue
 		var metric: Dictionary = Ads.aggregate(app.sim.state, id, app.ad_period, anchor)
 		var detail: VBoxContainer = app.card(campaign.name)
 		app.metric(detail, "Platform · Status", "%s · %s" % [Ads.PLATFORMS[campaign.platform].name, campaign.status.capitalize()])
@@ -261,19 +297,6 @@ static func analytics(app: Control) -> void:
 			app.campaign_id = id
 			app.navigate("Campaign Details")
 		)
-
-static func _fill_store_choices(state: Dictionary, store_id: int, creating: bool, include_product: int, product_ids: Array[int], product_names: Array[String], platform_ids: Array[int], platform_names: Array[String]) -> void:
-	var store := Stores.get_store(state, store_id)
-	if store.is_empty(): return
-	for product in Catalog.PRODUCTS.size():
-		var listing := Stores.listing(state, store_id, product)
-		if listing.get("listed", false) or (not creating and product == include_product):
-			product_ids.append(product)
-			product_names.append(Catalog.PRODUCTS[product].name + (" · unpublished" if not listing.get("listed", false) else ""))
-	for id in Ads.PLATFORMS.size():
-		if Ads.platform_available(state.country, id, store):
-			platform_ids.append(id)
-			platform_names.append(Ads.PLATFORMS[id].name)
 
 static func _lifetime(state: Dictionary, campaign_id: int) -> Dictionary:
 	var result := Ads.empty_metrics()
