@@ -7,47 +7,14 @@ const Style = preload("res://corporate_theme.gd")
 static func management(app: Control) -> void:
 	var intro: VBoxContainer = app.card("Stores under %s" % app.sim.state.company)
 	intro.add_child(app.label("Stores share company inventory. Listings, sales, operating costs, and campaigns are tracked by store.", 14, Style.MUTED))
-	app.action(intro, "Growth Overview", app.navigate.bind("Growth"))
-	var setup: VBoxContainer = app.card("Open a new store")
-	var name: LineEdit = app.field(setup, "Store name", "", 40)
-	var brand: LineEdit = app.field(setup, "Brand name", app.sim.state.brand, 40)
-	var kind: OptionButton = app.dropdown(setup, ["Marketplace", "Own Website"], 0)
-	var domain: LineEdit = app.field(setup, "Website domain (required for Own Website)", "", 64)
-	var platform: OptionButton = app.dropdown(setup, Stores.MARKETPLACES, 0)
-	var cost: Label = app.label("", 14, Style.GOLD)
-	setup.add_child(cost)
-	var update_cost := func(_index: int = 0):
-		platform.visible = kind.selected == 0
-		domain.editable = kind.selected == 1
-		cost.text = "Setup %s · Recurring %s per game day" % [
-			app.money(Stores.setup_cost(app.sim.state.country, kind.selected)),
-			app.money(Stores.daily_cost(app.sim.state.country, kind.selected))]
-	kind.item_selected.connect(update_cost)
-	update_cost.call()
-	var saved: Callable = app.watch_edits([name, brand, kind, domain, platform])
-	var create_store := func():
-		var result := Stores.create(app.sim.state, name.text, kind.selected, brand.text, domain.text, platform.selected)
-		if not result.is_empty():
-			app.set_notice(result, true)
-			return
-		saved.call()
-		app.persist("Store opened. Setup cost recorded in Finance.")
-		app.refresh_view()
-	app.action(setup, "Create store", func():
-		if kind.selected == 1:
-			app.confirm_action("Open website?", "One-time setup %s. Recurring %s per game day." % [
-				app.money(Stores.setup_cost(app.sim.state.country, 1)),
-				app.money(Stores.daily_cost(app.sim.state.country, 1))], "Open website", create_store)
-		else:
-			create_store.call()
-	, true)
+	app.action(intro, "Advertising", app.navigate.bind("Advertising"))
 	var stores: VBoxContainer = app.card("Owned stores · %d" % app.sim.state.stores.size())
 	for store in app.sim.state.stores:
 		var id: int = store.id
 		var card: VBoxContainer = app.stack(stores, 7)
 		app.divider(card)
 		var market: int = store.get("platform", -1)
-		var detail: String = Stores.MARKETPLACES[market] if store.type == 0 and market >= 0 else ("Marketplace" if store.type == 0 else "Own Website · " + store.domain)
+		var detail: String = Stores.MARKETPLACES[market] if store.type == 0 and market >= 0 else ("Marketplace" if store.type == 0 else _website_summary(store))
 		app.metric(card, str(store.name), detail + (" · Active" if store.active else " · Paused"))
 		app.metric(card, "Brand", store.brand)
 		app.metric(card, "Additional daily store cost", app.money(store.daily_cost))
@@ -69,6 +36,65 @@ static func management(app: Control) -> void:
 			app.persist("%s is now %s." % [store.name, "active" if enabled else "inactive"])
 			app.refresh_view()
 		)
+	var open_form: Button = app.action(intro, "Open New Store", func():
+		app.show_new_store_form = true
+		app.refresh_view()
+	, true)
+	open_form.visible = not app.show_new_store_form
+	if app.show_new_store_form:
+		var setup: VBoxContainer = app.card("Open a new store")
+		var name: LineEdit = app.field(setup, "Store name", "", 40)
+		var brand: LineEdit = app.field(setup, "Brand name", app.sim.state.brand, 40)
+		var kind: OptionButton = app.dropdown(setup, ["Marketplace", "Own Website"], 0)
+		var domain: LineEdit = app.field(setup, "Website domain (required for Own Website)", "", 64)
+		var platform: OptionButton = app.dropdown(setup, Stores.MARKETPLACES, 0)
+		var website_platform_names: Array[String] = []
+		for value in Stores.WEBSITE_PLATFORMS: website_platform_names.append(value.name)
+		var website_platform: OptionButton = app.dropdown(setup, website_platform_names, 0)
+		setup.add_child(app.label("Website platform values are simulated for gameplay and do not represent current real-world prices.", 13, Style.MUTED))
+		var cost: Label = app.label("", 14, Style.GOLD)
+		setup.add_child(cost)
+		var update_cost := func(_index: int = 0):
+			platform.visible = kind.selected == 0
+			website_platform.visible = kind.selected == 1
+			domain.editable = kind.selected == 1
+			var setup_platform := website_platform.selected if kind.selected == 1 else -1
+			cost.text = "Setup %s · Recurring %s per game day · Transaction fee %.1f%%" % [
+				app.money(Stores.setup_cost(app.sim.state.country, kind.selected, setup_platform)),
+				app.money(Stores.daily_cost(app.sim.state.country, kind.selected, setup_platform)),
+				float(Stores.WEBSITE_PLATFORMS[setup_platform].fee_bps) / 100.0 if setup_platform >= 0 else Stores.MARKET_FEES[platform.selected]]
+		kind.item_selected.connect(update_cost)
+		website_platform.item_selected.connect(update_cost)
+		platform.item_selected.connect(update_cost)
+		update_cost.call()
+		var saved: Callable = app.watch_edits([name, brand, kind, domain, platform, website_platform])
+		var create_store := func():
+			var result := Stores.create(app.sim.state, name.text, kind.selected, brand.text, domain.text, platform.selected, website_platform.selected if kind.selected == 1 else -1)
+			if not result.is_empty():
+				app.set_notice(result, true)
+				return
+			saved.call()
+			app.show_new_store_form = false
+			app.persist("Store opened. Setup cost recorded in Finance.")
+			app.refresh_view()
+		app.action(setup, "Create store", func():
+			if kind.selected == 1:
+				var selected_platform: Dictionary = Stores.WEBSITE_PLATFORMS[website_platform.selected]
+				app.confirm_action("Open %s website?" % selected_platform.name, "%s · One-time setup %s · Recurring %s per game day · Transaction fee %.1f%%." % [
+					selected_platform.feature, app.money(Stores.setup_cost(app.sim.state.country, 1, website_platform.selected)),
+					app.money(Stores.daily_cost(app.sim.state.country, 1, website_platform.selected)), float(selected_platform.fee_bps) / 100.0], "Open website", create_store)
+			else:
+				create_store.call()
+		, true)
+		app.action(setup, "Cancel", func():
+			app.show_new_store_form = false
+			app.refresh_view()
+		)
+
+static func _website_summary(store: Dictionary) -> String:
+	var platform_id := str(store.get("website_platform", "legacy"))
+	var index := Stores.website_platform_index(platform_id)
+	return (Stores.WEBSITE_PLATFORMS[index].name if index >= 0 else "Legacy website") + " · " + str(store.domain)
 
 static func listings(app: Control) -> void:
 	var store := Stores.get_store(app.sim.state, app.selected_store_id)
@@ -77,7 +103,9 @@ static func listings(app: Control) -> void:
 		app.navigate("Store Management")
 		return
 	var heading: VBoxContainer = app.card("%s · Product listings" % store.name)
-	var subtitle: String = "Shared company inventory · Marketplace" if store.type == 0 else "Shared company inventory · %s" % store.domain
+	var website_index := Stores.website_platform_index(str(store.get("website_platform", "legacy")))
+	var website_name: String = Stores.WEBSITE_PLATFORMS[website_index].name if website_index >= 0 else "Website"
+	var subtitle: String = "Shared company inventory · Marketplace" if store.type == 0 else "Shared company inventory · %s · %s" % [website_name, store.domain]
 	heading.add_child(app.label(subtitle, 14, Style.MUTED))
 	app.action(heading, "Store Management", app.navigate.bind("Store Management"))
 	var products := Catalog.PRODUCTS.map(func(item): return item.name)
@@ -106,7 +134,7 @@ static func listings(app: Control) -> void:
 		app.refresh_view()
 	, true)
 	var cost: Dictionary = app.sim.unit_cost(app.selected_product, item.supplier)
-	var contribution: int = listing.price - cost.landed - Catalog.fee(Stores.channel(store), listing.price) - Catalog.local_cents(app.sim.state.country, Catalog.SHIPPING[app.sim.state.shipping].cost)
+	var contribution: int = listing.price - cost.landed - Stores.store_fee(store, Stores.channel(store), listing.price) - Catalog.local_cents(app.sim.state.country, Catalog.SHIPPING[app.sim.state.shipping].cost)
 	app.metric(heading, "Landed cost per unit", app.money(cost.landed))
 	app.metric(heading, "Estimated contribution after channel fee and delivery", app.money(contribution), app.profit_color(contribution))
 	app.metric(heading, "Offer eligibility", "Listed products in this store can be advertised here.")

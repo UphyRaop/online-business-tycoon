@@ -19,14 +19,14 @@ func run() -> void:
 	app.sim.state.seed = 153
 	press("Market")
 	var choices := controls(app, "OptionButton")
-	select(choices[1], 2)
+	select(choices[1], 0)
 	press("Use forecast quantity")
 	inputs = controls(app, "LineEdit")
 	expect(inputs[0].text.to_int() > 0, "Forecast fills the quantity field")
 	inputs[0].text = "20"
 	inputs[0].text_changed.emit("20")
 	press("Negotiate quote")
-	expect(has_label("Negotiated quote received.") and has_label("MYR 36.48 per unit"), "Negotiation updates the selected quotation")
+	expect(has_label("Negotiated quote received.") and has_label("MYR 39.01 per unit"), "Negotiation updates the selected quotation")
 	press("Purchase stock")
 	expect(has_label("PO-0001") and has_label("0 available · 20 inbound"), "Purchase updates forecast and inbound tracking")
 	open_first_store_listing()
@@ -36,7 +36,7 @@ func run() -> void:
 	choices = controls(app, "OptionButton")
 	select(choices[0], 4)
 	choices = controls(app, "OptionButton")
-	select(choices[1], 2)
+	select(choices[1], 0)
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "20"
 	press("Purchase stock")

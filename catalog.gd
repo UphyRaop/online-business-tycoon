@@ -37,6 +37,18 @@ const SUPPLIERS := [
 	{"name": "IndiaMART", "factor": 0.63, "quality": 0.95, "minimum": 45, "lead": 22, "reliability": 0.86, "discount": 12, "level": 3, "direct": false, "freight": 3.1, "customs": 1.4, "production": 14, "private_label": true},
 	{"name": "Global Enterprise Network", "factor": 0.48, "quality": 0.97, "minimum": 100, "lead": 30, "reliability": 0.90, "discount": 16, "level": 4, "direct": false, "freight": 3.8, "customs": 1.8, "production": 22, "private_label": true}
 ]
+# Keep the original supplier rows and positions as an immutable legacy lookup:
+# historical purchase orders, quotations and fulfillment lines contain these indices.
+# Only SUPPLIER_SELECTION_INDICES are offered for new sourcing.
+const SUPPLIER_SELECTION_INDICES := [3, 4, 7, 8, 9, 12, 13, 14, 17]
+const SUPPLIER_ID_BY_LEGACY_INDEX := [
+	"legacy_value_supply", "legacy_reliable_direct", "legacy_premium_partners",
+	"aliexpress", "cjdropshipping", "legacy_eprolo", "legacy_dhgate",
+	"alibaba", "1688", "taobao", "legacy_banggood", "legacy_yiwugo",
+	"made_in_china", "global_sources", "hypersku", "legacy_chinagoods",
+	"legacy_indiamart", "global_enterprise_network",
+]
+const DEFAULT_SUPPLIER := 3
 const SHIPPING := [
 	{"name": "Economy", "cost": 3, "days": 4, "reliability": 0.76},
 	{"name": "Standard", "cost": 6, "days": 2, "reliability": 0.91},
@@ -47,6 +59,15 @@ const SUPPLIER_THRESHOLDS_USD := [0, 10000, 100000, 1000000]
 
 static func inbound_freight(country: int, supplier: int) -> int:
 	return local_cents(country, INBOUND_PER_UNIT[supplier]) if supplier < INBOUND_PER_UNIT.size() else local_cents(country, SUPPLIERS[supplier].freight + SUPPLIERS[supplier].customs)
+
+static func supplier_available_for_sourcing(supplier: int) -> bool:
+	return supplier in SUPPLIER_SELECTION_INDICES
+
+static func supplier_id(supplier: int) -> String:
+	return SUPPLIER_ID_BY_LEGACY_INDEX[supplier] if supplier in range(SUPPLIER_ID_BY_LEGACY_INDEX.size()) else ""
+
+static func supplier_index(stable_id: String) -> int:
+	return SUPPLIER_ID_BY_LEGACY_INDEX.find(stable_id)
 
 static func local_cents(country: int, amount: float) -> int:
 	return roundi(amount * SCALE[country] * 100)

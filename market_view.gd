@@ -32,7 +32,17 @@ static func show(app: Control) -> void:
 static func supplier_form(app: Control, product: int, item: Dictionary, stock_label: Label) -> void:
 	var state: Dictionary = app.sim.state
 	var supply: VBoxContainer = app.card("Supplier quotation")
-	var supplier: OptionButton = app.dropdown(supply, Catalog.SUPPLIERS.map(func(provider): return provider.name), item.supplier)
+	var supplier_indices: Array[int] = []
+	for supplier_id in Catalog.SUPPLIER_SELECTION_INDICES:
+		supplier_indices.append(int(supplier_id))
+	var supplier_names: Array[String] = []
+	for supplier_id in supplier_indices:
+		supplier_names.append(Catalog.SUPPLIERS[supplier_id].name)
+	var selected_supplier: int = supplier_indices.find(int(item.supplier))
+	if selected_supplier < 0: selected_supplier = 0
+	if item.has("legacy_supplier"):
+		supply.add_child(app.label("Historical supplier: %s · Choose a retained supplier to change future replenishment." % item.legacy_supplier.name, 13, Style.MUTED))
+	var supplier: OptionButton = app.dropdown(supply, supplier_names, selected_supplier)
 	var quote_label: Label = app.label("", 17, Style.GOLD)
 	var terms: Label = app.label("", 14, Style.MUTED)
 	supply.add_child(quote_label)
@@ -46,20 +56,21 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 	supply.add_child(total)
 	supply.add_child(forecast_label)
 	var forecast_button: Button = app.action(supply, "Use forecast quantity", func():
-		var forecast := Supply.forecast(app.sim, product, supplier.selected)
+		var forecast := Supply.forecast(app.sim, product, supplier_indices[supplier.selected])
 		quantity.text = str(forecast.suggested)
 		quantity.text_changed.emit(quantity.text)
 	)
 	var inbound: VBoxContainer = app.card("Inbound stock")
 	var shipments: VBoxContainer = app.stack(inbound)
 	var refresh := func():
-		var provider: Dictionary = Catalog.SUPPLIERS[supplier.selected]
-		var standard := Catalog.quote(state.country, product, supplier.selected)
-		var quote := Supply.quote(state, product, supplier.selected)
+		var supplier_index: int = supplier_indices[supplier.selected]
+		var provider: Dictionary = Catalog.SUPPLIERS[supplier_index]
+		var standard := Catalog.quote(state.country, product, supplier_index)
+		var quote := Supply.quote(state, product, supplier_index)
 		var qty := units_from(quantity.text)
 		var effective: int = quote.cost if qty >= quote.minimum else standard
-		var freight := Catalog.inbound_freight(state.country, supplier.selected)
-		var forecast := Supply.forecast(app.sim, product, supplier.selected)
+		var freight := Catalog.inbound_freight(state.country, supplier_index)
+		var forecast := Supply.forecast(app.sim, product, supplier_index)
 		stock_label.text = "%d available · %d inbound\n%s cash available" % [
 			app.sim.stock(product), Supply.incoming(state, product), app.money(state.cash)]
 		quote_label.text = "%s per unit" % app.money(standard)
@@ -67,8 +78,8 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			quote_label.text = "%s per unit at %d+ units · Through %s" % [
 				app.money(quote.cost), quote.minimum, Calendar.format(quote.expires)]
 		terms.text = "Minimum %d · %s quality · %d%% on-time · %d-day lead\nNegotiate from %d units" % [
-			provider.minimum, ["Standard", "High", "Premium"][supplier.selected],
-			roundi(provider.reliability * 100), provider.lead, Supply.negotiation_minimum(supplier.selected)]
+			provider.minimum, "High" if provider.quality >= 0.95 else "Standard",
+			roundi(provider.reliability * 100), provider.lead, Supply.negotiation_minimum(supplier_index)]
 		freight_label.text = "Inbound freight per unit  " + app.money(freight)
 		total.text = "Landed order total  " + (app.money((effective + freight) * qty) if qty > 0 else "—")
 		var demand_source := "catalog estimate" if forecast.days == 0 else "%d recent days" % forecast.days
@@ -77,12 +88,12 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		forecast_button.disabled = forecast.suggested == 0
 	quantity.text_changed.connect(func(_value: String): refresh.call())
 	supplier.item_selected.connect(func(index: int):
-		app.sim.select_supplier(product, index)
+		app.sim.select_supplier(product, supplier_indices[index])
 		app.persist("Supplier selected.")
 		refresh.call()
 	)
 	app.action(supply, "Negotiate quote", func():
-		var result := Supply.negotiate(state, product, supplier.selected, units_from(quantity.text))
+		var result := Supply.negotiate(state, product, supplier_indices[supplier.selected], units_from(quantity.text))
 		if not result.is_empty():
 			app.set_notice(result, true)
 			return
@@ -90,7 +101,7 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		refresh.call()
 	)
 	app.action(supply, "Purchase stock", func():
-		var result: String = app.sim.buy(product, supplier.selected, units_from(quantity.text))
+		var result: String = app.sim.buy(product, supplier_indices[supplier.selected], units_from(quantity.text))
 		if not result.is_empty():
 			app.set_notice(result, true)
 			return

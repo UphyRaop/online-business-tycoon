@@ -63,30 +63,32 @@ func test_calendar() -> void:
 func test_freight_and_statements() -> void:
 	var sim := game()
 	sim.state.auto_dispatch = false
-	var cost := sim.unit_cost(4, 1)
-	expect(cost.goods == 1200 and cost.freight == 200 and cost.landed == 1400, "Quote splits goods and inbound freight")
-	expect(sim.buy(4, 1, 3) == "", "Buy stock at landed cost")
+	var supplier := 3
+	var cost := sim.unit_cost(4, supplier)
+	expect(cost.goods == Catalog.quote(0, 4, supplier) and cost.freight == Catalog.inbound_freight(0, supplier)
+		and cost.landed == Catalog.quote(0, 4, supplier) + Catalog.inbound_freight(0, supplier), "Quote splits goods and inbound freight")
+	expect(sim.buy(4, supplier, 3) == "", "Buy stock at landed cost")
 	var purchased := sim.calendar_report(0, 1)
-	expect(purchased.purchases == 4200 and purchased.inbound_freight == 600 and purchased.inventory == 4200, "Inbound freight is capitalized once")
+	expect(purchased.purchases == cost.landed * 3 and purchased.inbound_freight == cost.freight * 3 and purchased.inventory == cost.landed * 3, "Inbound freight is capitalized once")
 	expect(purchased.cogs == 0 and purchased.shipping == 0 and Sim.net(purchased) == 0, "Inbound freight has no early expense")
-	expect(sim.unit_cost(4, 1).source == "Next inbound unit", "Inbound stock retains the actual booked cost")
-	sim.advance(7)
+	expect(sim.unit_cost(4, supplier).source == "Next inbound unit", "Inbound stock retains the actual booked cost")
+	sim.advance(sim.state.inbound[0].arrival - sim.state.day + 1)
 	Fulfillment.place(sim, 0, [4], 3300, "")
 	expect(Fulfillment.ship(sim.state, 1, 2) == "", "Dispatch a paid order")
 	var dispatch := sim.calendar_report(0, sim.state.day)
-	expect(dispatch.shipping == 1100 and dispatch.customer_deposits == 3300 and dispatch.inventory == 4200, "Outbound shipping and deposits remain separate")
+	expect(dispatch.shipping == 1100 and dispatch.customer_deposits == 3300 and dispatch.inventory == cost.landed * 3, "Outbound shipping and deposits remain separate")
 	sim.advance(5)
 	var delivered := sim.calendar_report(2, sim.state.day)
-	expect(delivered.sales == 3300 and delivered.cogs == 1400 and delivered.inventory == 2800, "Delivery expenses landed cost once")
+	expect(delivered.sales == 3300 and delivered.cogs == cost.landed and delivered.inventory == cost.landed * 2, "Delivery expenses landed cost once")
 	sim.state.orders[1].restockable = true
 	expect(Service.refund(sim, 1) == "", "Refund the delivered unit")
 	var refunded := sim.calendar_report(3, sim.state.day)
-	expect(refunded.sales == refunded.refunds and refunded.cogs == 0 and refunded.inventory == 4200 and refunded.shipping == 1100, "Return reverses landed COGS without reversing outbound freight")
+	expect(refunded.sales == refunded.refunds and refunded.cogs == 0 and refunded.inventory == cost.landed * 3 and refunded.shipping == 1100, "Return reverses landed COGS without reversing outbound freight")
 	expect(refunded.assets == refunded.overdraft + refunded.customer_deposits + refunded.equity_capital + refunded.retained, "Balance sheet reconciles")
 	expect(refunded.closing_cash == sim.state.cash and Saves.valid(sim.state), "Inventory, cash, and saved subledgers reconcile")
 	var old := game()
 	old.add_stock(4, {"units": 1, "cost": 1200, "quality": 1.0})
-	expect(old.unit_cost(4, 1).freight == 0 and old.unit_cost(4, 1).landed == 1200, "Legacy stock keeps its booked cost")
+	expect(old.unit_cost(4, supplier).freight == 0 and old.unit_cost(4, supplier).landed == 1200, "Legacy stock keeps its booked cost")
 
 func test_offer_compatibility() -> void:
 	var sim := game()
@@ -102,7 +104,7 @@ func test_offer_compatibility() -> void:
 	var offers := Storefront.offers_for(sim.state, 0)
 	expect(not offers[1].enabled and offers[1].quantity == 2 and offers[2].enabled and offers[2].items == [3], "Offer types and enabled state are independent")
 	for product in [0, 2, 3]:
-		sim.buy(product, 2, 35)
+		sim.buy(product, 3, 35)
 		sim.list_product(product, 7500 if product == 0 else 3500)
 	sim.advance(20)
 	var report := sim.report(20, 20)
@@ -113,7 +115,7 @@ func test_offer_compatibility() -> void:
 
 func stock(sim: Sim, product: int, units: int) -> void:
 	if units > 0:
-		var result := sim.buy(product, 2, units)
+		var result := sim.buy(product, Catalog.DEFAULT_SUPPLIER, units)
 		if result.is_empty():
 			for batch in sim.state.inbound:
 				if batch.product == product:

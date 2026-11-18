@@ -142,6 +142,7 @@ func register_company(name: String) -> void:
 		"New registration starts without marketplace or website destinations")
 	press("Business")
 	press("Store Management")
+	press("Open New Store")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = name + " Market"
 	inputs[1].text = name + " Brand"

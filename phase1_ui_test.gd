@@ -91,10 +91,10 @@ func run() -> void:
 	select(choices[0], 1)
 	choices = controls(app, "OptionButton")
 	select(choices[1], 0)
-	expect(has_label("Minimum 5 ·"), "Changing supplier exposes quotation terms")
+	expect(has_label("Minimum 1 ·"), "Changing supplier exposes quotation terms")
 	await settle("03-market")
 	inputs = controls(app, "LineEdit")
-	inputs[0].text = "1"
+	inputs[0].text = "0"
 	press("Purchase stock")
 	expect(has_label("Enter a quantity"), "Purchase validation displays")
 	inputs[0].text = "10"

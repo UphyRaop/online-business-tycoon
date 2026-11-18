@@ -12,7 +12,7 @@ const PERIODS := [1, 7, 30, 365]
 const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses"]
 const CHANNEL_FIELDS := ["orders", "sales", "cogs", "fees", "hosting", "shipping", "refunds",
 	"placed", "dispatched", "tracked_deliveries", "on_time", "checkouts", "abandoned", "stockouts", "bundles", "upsells", "refunded"]
-const VERSION := 3
+const VERSION := 4
 
 var state: Dictionary
 
@@ -48,7 +48,7 @@ static func upgrade(data: Dictionary) -> void:
 	if not data.has("website_active") or not data.get("website_active") is bool:
 		data.website_active = int(data.get("channel", 0)) != 0
 	var old_version: int = int(data.get("version", 0))
-	if old_version not in [1, 2, VERSION]:
+	if old_version not in [1, 2, 3, VERSION]:
 		return
 	if not data.get("ledger") is Array:
 		return
@@ -82,10 +82,20 @@ static func upgrade(data: Dictionary) -> void:
 			data.stores.append(legacy_site)
 	if not data.get("next_store") is int or data.next_store < 2:
 		data.next_store = 2
+	for store in data.get("stores", []):
+		if not store is Dictionary: continue
+		if int(store.get("type", -1)) == 1:
+			if not store.has("website_platform"): store.website_platform = "legacy"
+			if not store.has("website_fee_bps"): store.website_fee_bps = Stores.LEGACY_WEBSITE_FEE_BPS
+		else:
+			if not store.has("platform"): store.platform = -1 if store.get("legacy", false) else 0
+			if not store.has("website_platform"): store.website_platform = ""
+			if not store.has("website_fee_bps"): store.website_fee_bps = 0
 	for product in data.get("offers", {}):
 		data.offers[product] = Storefront.offers_for(data, product)
 	Advertising.ensure_state(data)
 	Supply.ensure_progress(data)
+	Supply.migrate_references(data)
 	data.version = VERSION
 
 static func _domain_for(name: String) -> String:
@@ -113,7 +123,8 @@ static func entry() -> Dictionary:
 
 func product_state(product: int) -> Dictionary:
 	return state.products.get(product, {
-		"supplier": 1, "price": Catalog.local_cents(state.country, Catalog.PRODUCTS[product].cost * 2.7),
+		"supplier": Catalog.DEFAULT_SUPPLIER, "supplier_id": Catalog.supplier_id(Catalog.DEFAULT_SUPPLIER),
+		"price": Catalog.local_cents(state.country, Catalog.PRODUCTS[product].cost * 2.7),
 		"listed": false, "lots": [], "channel_mask": 3,
 	})
 
@@ -181,8 +192,10 @@ static func cost_breakdown(lot: Dictionary, source: String) -> Dictionary:
 	return {"goods": lot.cost - freight, "freight": freight, "landed": lot.cost, "source": source}
 
 func select_supplier(product: int, supplier: int) -> void:
+	if not Catalog.supplier_available_for_sourcing(supplier): return
 	var item := product_state(product)
 	item.supplier = supplier
+	item.supplier_id = Catalog.supplier_id(supplier)
 	state.products[product] = item
 
 func buy(product: int, supplier: int, units: int) -> String:

@@ -11,7 +11,7 @@ const Menu = preload("res://menu_view.gd")
 const Calendar = preload("res://game_calendar.gd")
 const AdsView = preload("res://advertising_view.gd")
 const StoresView = preload("res://stores_view.gd")
-const NAV := ["Dashboard", "Market", "Orders", "Business", "Finance", "Growth"]
+const NAV := ["Dashboard", "Market", "Orders", "Business", "Finance"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
 const PREFERENCES := "user://display.cfg"
@@ -45,6 +45,7 @@ var ad_product_filter := -1
 var ad_status_filter := -1
 var ads_tab := "Overview"
 var stores_tab := "Stores"
+var show_new_store_form := false
 
 func _ready() -> void:
 	theme = Style.build()
@@ -339,6 +340,10 @@ func apply_text_setting(enabled: bool) -> void:
 	render()
 
 func navigate(target: String) -> void:
+	# Older in-session or serialized navigation targets are redirected to the
+	# consolidated Business > Advertising destination.
+	if target == "Growth": target = "Advertising"
+	if target != "Store Management": show_new_store_form = false
 	discard_form_then(func():
 		page = target
 		set_notice("")
@@ -425,7 +430,7 @@ func render() -> void:
 		"Orders": Operations.show(self)
 		"Business": business()
 		"Finance": finance()
-		"Growth": AdsView.overview(self)
+		"Advertising": AdsView.overview(self)
 		"Campaign Manager": AdsView.manager(self)
 		"Campaign Details": AdsView.details(self)
 		"Advertising Analytics": AdsView.analytics(self)
@@ -567,7 +572,7 @@ func business() -> void:
 	)
 	action(card("Stores and listings"), "Store Management", navigate.bind("Store Management"), true)
 	action(card("Inventory and listings"), "My Products", navigate.bind("My Products"))
-	action(card("Growth and expansion"), "Advertising", navigate.bind("Growth"))
+	action(card("Business advertising"), "Advertising", navigate.bind("Advertising"))
 	var saves := card("Local progress")
 	saves.add_child(label("Progress saves automatically when you make changes or advance time.", 14, Style.MUTED))
 	var controls := row(saves)
