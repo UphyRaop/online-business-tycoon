@@ -20,7 +20,7 @@ func _init(data: Dictionary) -> void:
 	state = data
 
 static func register(owner: String, company: String, store: String, country: int,
-		difficulty: int, channel: int, seed_value: int) -> Dictionary:
+		difficulty: int, channel: int, seed_value: int, legacy_channels: bool = false) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var opening := entry()
@@ -32,10 +32,17 @@ static func register(owner: String, company: String, store: String, country: int
 		"day": 1, "cash": opening.capital, "seed": rng.state,
 		"products": {}, "ledger": [opening],
 	}
+	if legacy_channels:
+		data.stores = Stores.migration_defaults(data)
+	else:
+		data.stores = []
+		data.website_active = false
 	upgrade(data)
 	return data
 
 static func upgrade(data: Dictionary) -> void:
+	if not data.get("owner") is String:
+		data.owner = ""
 	if not data.has("brand") or not data.get("brand") is String or str(data.brand).strip_edges().is_empty():
 		data.brand = str(data.get("company", "My Online Business"))
 	if not data.has("website_domain") or not data.get("website_domain") is String or str(data.website_domain).strip_edges().is_empty():
@@ -67,11 +74,26 @@ static func upgrade(data: Dictionary) -> void:
 					channel[field] = 0
 	if not data.get("stores") is Array:
 		data.stores = Stores.migration_defaults(data)
+		if old_version < VERSION:
+			data.stores = data.stores.filter(func(store):
+				if store.active:
+					return true
+				for row in data.ledger:
+					var channel: Dictionary = row.channels[store.type]
+					if channel.get("sales", 0) > 0 or channel.get("placed", 0) > 0 or channel.get("orders", 0) > 0:
+						return true
+				for order in data.get("orders", {}).values():
+					if order is Dictionary and order.get("channel") == store.type:
+						return true
+				return false
+			)
 	if not data.get("next_store") is int or data.next_store < 2:
 		data.next_store = 2
 	for product in data.get("offers", {}):
 		data.offers[product] = Storefront.offers_for(data, product)
 	Advertising.ensure_state(data)
+	if not data.has("supplier_level"):
+		Supply.update_progress(data)
 	data.version = VERSION
 
 static func _domain_for(name: String) -> String:
@@ -104,17 +126,10 @@ func product_state(product: int) -> Dictionary:
 	})
 
 func channel_enabled(channel: int) -> bool:
-	var has_store_type := false
-	for store in state.get("stores", []):
-		if int(store.get("type", -1)) == channel:
-			has_store_type = true
-			if store.get("active", false):
-				return true
-	if has_store_type:
-		return false
-	if channel == 0:
-		return state.channel == 0 or state.channel == 2
-	return state.get("website_active", state.channel != 0)
+	for store in state.stores:
+		if store.type == channel and store.active:
+			return true
+	return false
 
 func product_on_channel(item: Dictionary, channel: int) -> bool:
 	return item.listed and channel_enabled(channel) and (int(item.get("channel_mask", 3)) & (1 << channel)) != 0
@@ -128,7 +143,7 @@ func product_on_store(store_id: int, product: int) -> bool:
 func active_product_count() -> int:
 	var count := 0
 	for product in Catalog.PRODUCTS.size():
-		if stock(product) <= 0:
+		if stock(product) <= 0 and Supply.direct_unit(state, product, product_state(product).supplier).is_empty():
 			continue
 		for store in state.stores:
 			if product_on_store(int(store.id), product):
@@ -201,6 +216,7 @@ func advance(days: int) -> void:
 		var row: Dictionary = state.ledger.back()
 		Supply.receive(self)
 		Fulfillment.deliver(state, rng)
+		Supply.update_progress(state)
 		Service.tick(state)
 		row.overhead = Catalog.local_cents(state.country, Catalog.OVERHEAD[state.difficulty])
 		var has_legacy_website := false

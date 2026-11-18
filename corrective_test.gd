@@ -33,7 +33,7 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func game() -> Sim:
-	return Sim.new(Sim.register("Mira", "Aster Labs", "Aster", 0, 1, 2, 153))
+	return Sim.new(Sim.register("Mira", "Aster Labs", "Aster", 0, 1, 2, 153, true))
 
 func test_calendar() -> void:
 	var sim := game()

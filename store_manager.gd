@@ -1,7 +1,9 @@
 extends RefCounted
 
 const Catalog = preload("res://catalog.gd")
-const MARKET_SETUP := 120.0
+const MARKET_SETUP := 0.0
+const PLATFORMS := ["Shopee", "TikTok Shop", "Lazada", "SHEIN"]
+const PLATFORM_FEES := [12.0, 13.0, 11.0, 14.0]
 const WEBSITE_SETUP := 45.0
 const MARKET_DAILY := 2.0
 const WEBSITE_DAILY := 4.0
@@ -26,7 +28,17 @@ static func setup_cost(country: int, kind: int) -> int:
 static func daily_cost(country: int, kind: int) -> int:
 	return Catalog.local_cents(country, MARKET_DAILY if kind == 0 else WEBSITE_DAILY)
 
-static func create(state: Dictionary, name: String, kind: int, brand: String, domain: String = "") -> String:
+static func identity_conflict(state: Dictionary, name: String, domain: String, except_id: int = -1) -> String:
+	for existing in state.stores:
+		if existing.id == except_id:
+			continue
+		if not name.is_empty() and existing.name.nocasecmp_to(name) == 0:
+			return "Choose a unique store name."
+		if not domain.is_empty() and existing.type == 1 and existing.domain.nocasecmp_to(domain) == 0:
+			return "This website domain is already in use."
+	return ""
+
+static func create(state: Dictionary, name: String, kind: int, brand: String, domain: String = "", platform: int = 0) -> String:
 	name = name.strip_edges()
 	brand = brand.strip_edges()
 	domain = domain.strip_edges().to_lower()
@@ -34,14 +46,19 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 		return "Enter a store name and brand, then choose Marketplace or Own Website."
 	if kind == 1 and domain.is_empty():
 		return "Enter a simulated website domain."
+	if kind == 0 and platform not in range(PLATFORMS.size()):
+		return "Choose a marketplace platform."
+	var conflict := identity_conflict(state, name, domain if kind == 1 else "")
+	if not conflict.is_empty():
+		return conflict
 	var cost := setup_cost(state.country, kind)
-	if state.cash < cost:
+	if cost > 0 and state.cash < cost:
 		return "Insufficient company cash for this store's setup cost."
 	var id: int = state.next_store
 	state.next_store += 1
 	var store := {
 		"id": id, "name": name, "type": kind, "brand": brand,
-		"domain": domain if kind == 1 else "", "active": true, "legacy": false,
+		"domain": domain if kind == 1 else "", "platform": platform if kind == 0 else -1, "active": true, "legacy": false,
 		"created": state.day, "setup_cost": cost, "daily_cost": daily_cost(state.country, kind),
 		"listings": {},
 	}
@@ -53,6 +70,12 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 	activity.setup += cost
 	row.store_activity[id] = activity
 	return ""
+
+static func fee(store: Dictionary, channel_id: int, total: int) -> int:
+	var platform: int = store.get("platform", -1)
+	if channel_id == 0 and platform in range(PLATFORM_FEES.size()):
+		return roundi(total * PLATFORM_FEES[platform] / 100.0)
+	return Catalog.fee(channel_id, total)
 
 static func set_active(state: Dictionary, store_id: int, enabled: bool) -> String:
 	var index := index_of(state, store_id)
@@ -197,7 +220,7 @@ static func store_activity(row: Dictionary, store_id: int) -> Dictionary:
 	return records[store_id]
 
 static func report(state: Dictionary, store_id: int, end_day: int = 0) -> Dictionary:
-	var last := clampi(end_day if end_day > 0 else state.day - 1, 1, state.day)
+	var last := clampi(end_day if end_day > 0 else state.day, 1, state.day)
 	var totals := {}
 	for field in ACTIVITY_FIELDS:
 		totals[field] = 0

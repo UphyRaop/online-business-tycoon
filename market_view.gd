@@ -17,6 +17,7 @@ static func show(app: Control) -> void:
 	)
 	var links: HBoxContainer = app.row(catalog)
 	app.action(links, "My Products", app.navigate.bind("My Products"))
+	app.action(catalog, "Store Management", app.navigate.bind("Store Management"))
 	var stock_label: Label = app.label("", 15, Style.MUTED)
 	catalog.add_child(stock_label)
 	supplier_form(app, product, item, stock_label)
@@ -31,6 +32,29 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 	var state: Dictionary = app.sim.state
 	var supply: VBoxContainer = app.card("Supplier quotation")
 	var supplier: OptionButton = app.dropdown(supply, Catalog.SUPPLIERS.map(func(provider): return provider.name), item.supplier)
+	var tabs: HBoxContainer = app.row(supply)
+	var directory: VBoxContainer = app.stack(supply)
+	directory.hide()
+	app.action(tabs, "Quotation", func(): directory.hide())
+	app.action(tabs, "Platforms", func(): directory.visible = not directory.visible)
+	var levels: OptionButton = app.dropdown(directory, ["All levels", "Level 1", "Level 2", "Level 3", "Level 4"], 0)
+	var entries: VBoxContainer = app.stack(directory)
+	var refresh_directory := func(level: int):
+		for child in entries.get_children():
+			entries.remove_child(child)
+			child.queue_free()
+		for provider in Catalog.SUPPLIERS:
+			if not provider.has("level") or (level > 0 and provider.level != level):
+				continue
+			var availability: String = "Unlocked" if state.supplier_level >= provider.level else "Unlocks at USD " + app.amount_text(Supply.SALES_THRESHOLDS_USD[provider.level - 1] * 100)
+			entries.add_child(app.label("%s · %s · %s" % [provider.name, provider.model, availability], 14, Style.MUTED))
+	levels.item_selected.connect(refresh_directory)
+	refresh_directory.call(0)
+	for index in Catalog.SUPPLIERS.size():
+		var restriction := Supply.eligibility(state, product, index)
+		if not restriction.is_empty():
+			supplier.set_item_text(index, Catalog.SUPPLIERS[index].name + " · " + restriction)
+	supply.add_child(app.label("Supplier Marketplace · Level %d · %s lifetime sales" % [state.supplier_level, app.money(roundi(Supply.sales_usd(state) * Catalog.local_cents(state.country, 1.0 / Catalog.SCALE[1])))], 14, Style.MUTED))
 	var quote_label: Label = app.label("", 17, Style.GOLD)
 	var terms: Label = app.label("", 14, Style.MUTED)
 	supply.add_child(quote_label)
@@ -65,9 +89,18 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			quote_label.text = "%s per unit at %d+ units · Through %s" % [
 				app.money(quote.cost), quote.minimum, Calendar.format(quote.expires)]
 		terms.text = "Minimum %d · %s quality · %d%% on-time · %d-day lead\nNegotiate from %d units" % [
-			provider.minimum, ["Standard", "High", "Premium"][supplier.selected],
+			provider.minimum, "%d%%" % roundi(provider.quality * 100),
 			roundi(provider.reliability * 100), provider.lead, Supply.negotiation_minimum(supplier.selected)]
-		freight_label.text = "Inbound freight per unit  " + app.money(freight)
+		if provider.has("model"):
+			terms.text += "\n%s · %s · %d production days" % [provider.model, provider.country, provider.production]
+			if provider.direct:
+				terms.text += "\nDirect fulfillment covers orders when warehouse stock runs out."
+			if provider.private_label:
+				terms.text += "\nPrivate-label sourcing available."
+		var restriction := Supply.eligibility(state, product, supplier.selected)
+		if not restriction.is_empty():
+			terms.text += "\n" + restriction
+		freight_label.text = "Freight and import per unit  " + app.money(freight)
 		total.text = "Landed order total  " + (app.money((effective + freight) * qty) if qty > 0 else "—")
 		var demand_source := "catalog estimate" if forecast.days == 0 else "%d recent days" % forecast.days
 		forecast_label.text = "Demand %.1f units/day (%s)\nTarget %d units · Restock %d" % [
@@ -75,6 +108,11 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		forecast_button.disabled = forecast.suggested == 0
 	quantity.text_changed.connect(func(_value: String): refresh.call())
 	supplier.item_selected.connect(func(index: int):
+		var restriction := Supply.eligibility(state, product, index)
+		if not restriction.is_empty():
+			refresh.call()
+			app.set_notice(restriction, true)
+			return
 		app.sim.select_supplier(product, index)
 		app.persist("Supplier selected.")
 		refresh.call()

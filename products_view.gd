@@ -3,6 +3,7 @@ extends RefCounted
 const Catalog = preload("res://catalog.gd")
 const Supply = preload("res://supply.gd")
 const Summary = preload("res://product_summary.gd")
+const Stores = preload("res://store_manager.gd")
 const Style = preload("res://corporate_theme.gd")
 
 static func show(app: Control) -> void:
@@ -15,7 +16,8 @@ static func show(app: Control) -> void:
 	var activity := Summary.collect(state)
 	var count := 0
 	for id in Catalog.PRODUCTS.size():
-		if not state.products.has(id) and not state.quotes.has(id) and not state.offers.has(id):
+		var has_listing: bool = state.stores.any(func(store): return store.listings.has(id))
+		if not has_listing and not state.products.has(id) and not state.quotes.has(id) and not state.offers.has(id):
 			continue
 		count += 1
 		var item: Dictionary = sim.product_state(id)
@@ -23,10 +25,11 @@ static func show(app: Control) -> void:
 		var available: int = sim.stock(id)
 		var inbound := Supply.incoming(state, id)
 		var channels := PackedStringArray()
-		for channel in Catalog.FEES.size():
-			if sim.product_on_channel(item, channel):
-				channels.append(Catalog.CHANNELS[channel])
-		var status := "Draft" if channels.is_empty() else ("Out of Stock" if available == 0 else "Active")
+		for store in state.stores:
+			if sim.product_on_store(store.id, id):
+				channels.append(store.name)
+		var source_available: bool = available > 0 or not Supply.direct_unit(state, id, item.supplier).is_empty()
+		var status := "Draft" if channels.is_empty() else ("Active" if source_available else "Out of Stock")
 		var status_color := Style.GREEN if status == "Active" else (Style.MUTED if status == "Draft" else Style.GOLD)
 		view.add_child(app.label(status, 15, status_color))
 		app.metric(view, "Supplier", Catalog.SUPPLIERS[item.supplier].name)
@@ -45,7 +48,7 @@ static func show(app: Control) -> void:
 		else:
 			app.metric(view, "Live channels", ", ".join(channels))
 		if channels.is_empty() and item.listed:
-			view.add_child(app.label("Enable a selected sales channel in Business to publish.", 13, Style.MUTED))
+			view.add_child(app.label("Publish this product in Store Management to start selling.", 13, Style.MUTED))
 		app.divider(view)
 		var totals: Dictionary = activity.get(id, {"units": 0, "revenue": 0, "profit": 0})
 		app.metric(view, "Units sold (net)", str(totals.units))

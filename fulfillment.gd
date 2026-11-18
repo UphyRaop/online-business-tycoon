@@ -6,7 +6,7 @@ const Stores = preload("res://store_manager.gd")
 const Advertising = preload("res://advertising.gd")
 
 static func place(sim: RefCounted, channel: int, items: Array, total: int, offer_kind: String,
-		prices: Array = [], store_id: int = -1, campaign_id: int = 0) -> int:
+		prices: Array = [], store_id: int = -1, campaign_id: int = 0, direct: Dictionary = {}) -> int:
 	var state: Dictionary = sim.state
 	if store_id < 0:
 		store_id = channel
@@ -14,23 +14,33 @@ static func place(sim: RefCounted, channel: int, items: Array, total: int, offer
 	state.next_order += 1
 	var method: int = state.shipping
 	var lines: Array = []
+	var row: Dictionary = state.ledger.back()
+	var supplier_lead := 0
 	for i in items.size():
-		var line: Dictionary = sim.reserve_unit(items[i])
+		var line: Dictionary
+		if direct.has(i):
+			line = direct[i]
+			supplier_lead = maxi(supplier_lead, Catalog.SUPPLIERS[line.direct_supplier].lead)
+			state.cash -= line.cost
+			row.purchases += line.cost
+			row.inbound_freight += line.freight
+		else:
+			line = sim.reserve_unit(items[i])
 		if prices.size() == items.size():
 			line.revenue = prices[i]
 		lines.append(line)
 	state.orders[id] = {
 		"id": id, "items": lines, "total": total, "channel": channel, "store_id": store_id,
 		"campaign_id": campaign_id, "status": "queued",
+		"quoted_fee": Stores.fee(Stores.get_store(state, store_id), channel, total),
 		"placed": state.day, "method": method,
-		"promise": state.day + 1 + Catalog.SHIPPING[method].days,
+		"promise": state.day + 1 + maxi(supplier_lead, Catalog.SHIPPING[method].days),
 		"shipped": 0, "eta": 0, "arrival": 0, "delayed": false, "delivered": 0,
 		"case_status": "", "case_day": 0, "reason": "", "return_requested": false,
 		"restockable": true, "escalated": false, "refunded": false,
 	}
 	state.active_orders.append(id)
 	state.cash += total
-	var row: Dictionary = state.ledger.back()
 	row.deposits += total
 	var totals: Dictionary = row.channels[channel]
 	totals.placed += 1
@@ -52,12 +62,26 @@ static func ship(state: Dictionary, id: int, method: int) -> String:
 
 static func dispatch(state: Dictionary, order: Dictionary, method: int, delay: int) -> void:
 	var shipping: Dictionary = Catalog.SHIPPING[method]
-	var cost := Catalog.local_cents(state.country, shipping.cost)
+	var warehouse := false
+	var lead := 0
+	var rng := RandomNumberGenerator.new()
+	rng.state = state.seed
+	for line in order.items:
+		if line.has("direct_supplier"):
+			var supplier: Dictionary = Catalog.SUPPLIERS[line.direct_supplier]
+			lead = maxi(lead, supplier.lead + (rng.randi_range(1, 3) if rng.randf() >= supplier.reliability else 0))
+		else:
+			warehouse = true
+	if lead > 0:
+		state.seed = rng.state
+	var cost := Catalog.local_cents(state.country, shipping.cost) if warehouse else 0
 	order.status = "shipped"
 	order.method = method
 	order.shipped = state.day
-	order.eta = state.day + shipping.days
-	order.arrival = order.eta + delay
+	order.eta = state.day + (shipping.days if warehouse else 0)
+	order.arrival = maxi(order.eta + (delay if warehouse else 0), state.day + lead)
+	if not warehouse:
+		order.eta = order.arrival
 	order.shipping_cost = cost
 	state.cash -= cost
 	var row: Dictionary = state.ledger.back()
@@ -93,7 +117,7 @@ static func deliver(state: Dictionary, rng: RandomNumberGenerator) -> void:
 static func complete(state: Dictionary, order: Dictionary, rng: RandomNumberGenerator) -> void:
 	var row: Dictionary = state.ledger.back()
 	var channel: Dictionary = row.channels[order.channel]
-	var fee := Catalog.fee(order.channel, order.total)
+	var fee: int = order.get("quoted_fee", Catalog.fee(order.channel, order.total))
 	order.channel_fee = fee
 	row.deposits -= order.total
 	row.sales += order.total

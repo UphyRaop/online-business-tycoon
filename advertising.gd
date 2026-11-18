@@ -10,6 +10,8 @@ const PLATFORMS := [
 	{"name": "Google Ads", "cpm": 12.0, "ctr": 4.1, "cart": 0.33, "checkout": 0.57, "purchase": 0.31, "competition": 1.2, "reach": 0.72},
 	{"name": "TikTok Ads", "cpm": 5.5, "ctr": 1.9, "cart": 0.21, "checkout": 0.41, "purchase": 0.2, "competition": 0.95, "reach": 1.25},
 	{"name": "Marketplace Sponsored Ads", "cpm": 10.0, "ctr": 3.4, "cart": 0.38, "checkout": 0.65, "purchase": 0.4, "competition": 1.28, "reach": 0.62},
+	{"name": "Shopee Sponsored Ads", "cpm": 9.0, "ctr": 3.6, "cart": 0.38, "checkout": 0.65, "purchase": 0.4, "competition": 1.16, "reach": 0.7},
+	{"name": "Lazada Sponsored Ads", "cpm": 8.8, "ctr": 3.1, "cart": 0.36, "checkout": 0.61, "purchase": 0.38, "competition": 1.10, "reach": 0.64},
 ]
 const AUDIENCES := ["Broad", "Interest", "Demographic", "Retargeting", "Lookalike"]
 const AUDIENCE_COST := [1.0, 1.12, 1.2, 1.42, 1.27]
@@ -41,7 +43,8 @@ static func ensure_state(state: Dictionary) -> void:
 
 static func platform_available(country: int, platform: int, store: Dictionary) -> bool:
 	if platform not in range(PLATFORMS.size()) or store.is_empty(): return false
-	if platform == 3: return int(store.type) == 0
+	if platform >= 3:
+		return store.type == 0 and (platform == 3 or store.get("platform", -1) == (0 if platform == 4 else 2))
 	# Mainland China blocks Meta and TikTok ad inventory in this simulation.
 	if country == 5 and platform in [0, 2]: return false
 	return true
@@ -73,7 +76,7 @@ static func create(state: Dictionary, config: Dictionary) -> String:
 	var bid := int(config.get("bid", 0))
 	if name.is_empty() or store.is_empty() or not store.active: return "Choose a name and an active store."
 	if not listing.get("listed", false): return "This product is not listed in the selected store. Publish it before advertising."
-	if not platform_available(state.country, platform, store): return "That platform is unavailable in this country or for this store type."
+	if (platform == 3 and store.has("platform")) or not platform_available(state.country, platform, store): return "That platform is unavailable in this country or for this store type."
 	if budget < 1 or budget > Catalog.local_cents(state.country, 10000.0): return "Daily budget must be positive and no more than 10,000 in local currency."
 	if audience not in range(AUDIENCES.size()) or objective not in range(OBJECTIVES.size()) or bid_strategy not in range(BIDS.size()) or creative not in range(CREATIVES.size()):
 		return "Choose a valid objective, audience, bidding strategy, and creative."
@@ -89,7 +92,7 @@ static func create(state: Dictionary, config: Dictionary) -> String:
 		"channel": Stores.channel(store), "product": product, "objective": objective,
 		"daily_budget": budget, "start_day": start, "end_day": end,
 		"audience": audience, "bid_strategy": bid_strategy, "bid": bid,
-		"creative": creative, "status": "active", "learning": 1.0,
+		"creative": creative, "status": "draft" if config.get("draft", false) else "active", "learning": 1.0,
 		"created": state.day,
 	}
 	return ""
@@ -97,6 +100,12 @@ static func create(state: Dictionary, config: Dictionary) -> String:
 static func edit(state: Dictionary, id: int, changes: Dictionary) -> String:
 	var campaign: Dictionary = state.advertising.campaigns.get(id, {}).duplicate(true)
 	if campaign.is_empty() or campaign.status == "stopped": return "This campaign cannot be edited."
+	if campaign.status == "draft" and changes.has("start_day"):
+		campaign.start_day = maxi(state.day, int(changes.start_day))
+	if campaign.status != "draft":
+		for key in ["store_id", "platform", "product"]:
+			if changes.has(key) and changes[key] != campaign[key]:
+				return "Duplicate a stopped campaign to change its destination, platform, or product."
 	for key in changes:
 		if key in ["name", "platform", "store_id", "product", "objective", "daily_budget", "end_day", "audience", "bid_strategy", "bid", "creative"]:
 			campaign[key] = changes[key]
@@ -109,16 +118,43 @@ static func edit(state: Dictionary, id: int, changes: Dictionary) -> String:
 	if campaign.objective not in range(OBJECTIVES.size()) or campaign.bid_strategy not in range(BIDS.size()) or campaign.creative not in range(CREATIVES.size()): return "Choose valid campaign settings."
 	if campaign.daily_budget < 1 or campaign.daily_budget > Catalog.local_cents(state.country, 10000.0): return "Daily budget must be positive and no more than 10,000 in local currency."
 	if campaign.bid_strategy != 0 and campaign.bid < 1: return "Enter a positive bid limit for Cost cap or Bid cap."
-	if campaign.end_day > 0 and campaign.end_day < state.day: campaign.status = "stopped"
+	if campaign.end_day > 0 and campaign.end_day < maxi(state.day, campaign.start_day): return "End date must follow the campaign start."
 	state.advertising.campaigns[id] = campaign
 	return ""
 
 static func set_status(state: Dictionary, id: int, status: String) -> String:
-	if status not in ["active", "paused", "stopped"]: return "Choose a valid campaign status."
 	var campaign: Dictionary = state.advertising.campaigns.get(id, {})
-	if campaign.is_empty() or campaign.status == "stopped": return "This campaign cannot be resumed."
+	var transitions := {"draft": ["active", "stopped"], "active": ["paused", "stopped"], "paused": ["active", "stopped"]}
+	if status not in transitions.get(campaign.get("status", ""), []):
+		return "That campaign status change is unavailable."
+	if status == "active":
+		var store := Stores.get_store(state, campaign.store_id)
+		if not store.get("active", false) or not Stores.listing(state, campaign.store_id, campaign.product).get("listed", false):
+			return "Launch or resume requires an active destination and listed product."
+		if not platform_available(state.country, campaign.platform, store) or not audience_ready(state, campaign.store_id, campaign.audience):
+			return "The platform or audience is unavailable for this destination."
+		if campaign.end_day > 0 and state.day > campaign.end_day:
+			return "The campaign end date has passed."
+		if campaign.status == "draft":
+			campaign.start_day = maxi(state.day, campaign.start_day)
 	campaign.status = status
 	state.advertising.campaigns[id] = campaign
+	return ""
+
+static func duplicate_stopped(state: Dictionary, id: int) -> String:
+	var campaign: Dictionary = state.advertising.campaigns.get(id, {})
+	if campaign.get("status") != "stopped":
+		return "Only stopped campaigns can be duplicated."
+	var copy := campaign.duplicate(true)
+	copy.id = state.advertising.next_campaign
+	copy.name += " (copy)"
+	copy.start_day = state.day
+	copy.end_day = 0
+	copy.status = "draft"
+	copy.learning = 1.0
+	copy.created = state.day
+	state.advertising.campaigns[copy.id] = copy
+	state.advertising.next_campaign += 1
 	return ""
 
 static func simulate_day(sim: RefCounted, rng: RandomNumberGenerator) -> void:
@@ -170,8 +206,9 @@ static func simulate_day(sim: RefCounted, rng: RandomNumberGenerator) -> void:
 				metrics.purchases += 1
 				metrics.attributed_revenue += order.total
 				for line in order.items: metrics.estimated_costs += line.cost
-				metrics.estimated_costs += roundi(order.total * Catalog.FEES[campaign.channel] / 100.0)
-				metrics.estimated_costs += Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)
+				metrics.estimated_costs += int(order.quoted_fee)
+				if order.items.any(func(line): return not line.has("direct_supplier")):
+					metrics.estimated_costs += Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)
 		metrics.estimated_profit = metrics.attributed_revenue - metrics.estimated_costs - spend
 		state.advertising.history.append(metrics)
 		state.advertising.visitors[campaign.store_id] = int(state.advertising.visitors.get(campaign.store_id, 0)) + metrics.clicks

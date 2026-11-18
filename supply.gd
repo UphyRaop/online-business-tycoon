@@ -4,6 +4,44 @@ const Catalog = preload("res://catalog.gd")
 const Calendar = preload("res://game_calendar.gd")
 const QUOTE_DAYS := 7
 
+const SALES_THRESHOLDS_USD := [0, 10000, 100000, 1000000]
+
+static func sales_usd(state: Dictionary) -> float:
+	var sales := 0
+	for row in state.ledger:
+		sales += row.sales
+	return float(sales) / Catalog.local_cents(state.country, 1.0 / Catalog.SCALE[1])
+
+static func update_progress(state: Dictionary) -> void:
+	var level: int = state.get("supplier_level", 1)
+	var sales := sales_usd(state)
+	for i in range(level, SALES_THRESHOLDS_USD.size()):
+		if sales < SALES_THRESHOLDS_USD[i]:
+			break
+		level = i + 1
+	state.supplier_level = level
+
+static func eligibility(state: Dictionary, product: int, supplier: int) -> String:
+	if supplier not in range(Catalog.SUPPLIERS.size()) or product not in range(Catalog.PRODUCTS.size()):
+		return "Choose a valid supplier and product."
+	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+	var level: int = provider.get("level", 1)
+	if level > state.get("supplier_level", 1):
+		return "Locked until lifetime sales reach USD %d." % SALES_THRESHOLDS_USD[level - 1]
+	if not product in provider.get("products", range(Catalog.PRODUCTS.size())):
+		return "This supplier does not source this product."
+	return ""
+
+static func direct_unit(state: Dictionary, product: int, supplier: int) -> Dictionary:
+	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+	if not provider.get("direct", false) or not eligibility(state, product, supplier).is_empty():
+		return {}
+	var shipping := Catalog.inbound_freight(state.country, supplier)
+	return {
+		"product": product, "cost": Catalog.quote(state.country, product, supplier) + shipping,
+		"quality": provider.quality, "freight": shipping, "direct_supplier": supplier,
+	}
+
 static func quote(state: Dictionary, product: int, supplier: int) -> Dictionary:
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 	var base := Catalog.quote(state.country, product, supplier)
@@ -13,6 +51,9 @@ static func quote(state: Dictionary, product: int, supplier: int) -> Dictionary:
 	return {"cost": base, "minimum": provider.minimum, "expires": 0, "discount": 0}
 
 static func negotiate(state: Dictionary, product: int, supplier: int, units: int) -> String:
+	var restriction := eligibility(state, product, supplier)
+	if not restriction.is_empty():
+		return restriction
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 	var threshold: int = negotiation_minimum(supplier)
 	if units < threshold or units > 999:
@@ -34,6 +75,9 @@ static func negotiation_minimum(supplier: int) -> int:
 	return maxi(10, Catalog.SUPPLIERS[supplier].minimum * 4)
 
 static func purchase(state: Dictionary, product: int, supplier: int, units: int) -> String:
+	var restriction := eligibility(state, product, supplier)
+	if not restriction.is_empty():
+		return restriction
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 	var offer := quote(state, product, supplier)
 	if units < provider.minimum or units > 999:
