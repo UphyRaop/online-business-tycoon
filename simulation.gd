@@ -12,7 +12,7 @@ const PERIODS := [1, 7, 30, 365]
 const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses"]
 const CHANNEL_FIELDS := ["orders", "sales", "cogs", "fees", "hosting", "shipping", "refunds",
 	"placed", "dispatched", "tracked_deliveries", "on_time", "checkouts", "abandoned", "stockouts", "bundles", "upsells", "refunded"]
-const VERSION := 4
+const VERSION := 5
 
 var state: Dictionary
 
@@ -48,7 +48,7 @@ static func upgrade(data: Dictionary) -> void:
 	if not data.has("website_active") or not data.get("website_active") is bool:
 		data.website_active = int(data.get("channel", 0)) != 0
 	var old_version: int = int(data.get("version", 0))
-	if old_version not in [1, 2, 3, VERSION]:
+	if old_version not in [1, 2, 3, 4, VERSION]:
 		return
 	if not data.get("ledger") is Array:
 		return
@@ -84,6 +84,14 @@ static func upgrade(data: Dictionary) -> void:
 		data.next_store = 2
 	for store in data.get("stores", []):
 		if not store is Dictionary: continue
+		if not store.get("listings") is Dictionary: store.listings = {}
+		for product in store.listings:
+			var listing: Dictionary = store.listings[product]
+			if int(product) in range(Catalog.PRODUCTS.size()):
+				listing.product_id = Catalog.product_id(int(product))
+			if not listing.get("allow_preorders") is bool:
+				listing.allow_preorders = false
+			store.listings[product] = listing
 		if int(store.get("type", -1)) == 1:
 			if not store.has("website_platform"): store.website_platform = "legacy"
 			if not store.has("website_fee_bps"): store.website_fee_bps = Stores.LEGACY_WEBSITE_FEE_BPS
@@ -93,10 +101,16 @@ static func upgrade(data: Dictionary) -> void:
 			if not store.has("website_fee_bps"): store.website_fee_bps = 0
 	for product in data.get("offers", {}):
 		data.offers[product] = Storefront.offers_for(data, product)
+	for order in data.get("orders", {}).values():
+		if not order.get("preorder") is bool:
+			order.preorder = false
+		if not order.get("preorder"):
+			order.erase("preorder_status")
 	Advertising.ensure_state(data)
 	Supply.ensure_progress(data)
 	Supply.migrate_references(data)
 	data.version = VERSION
+	data.catalog_schema_version = 1
 
 static func _domain_for(name: String) -> String:
 	var slug := name.to_lower().strip_edges().replace(" ", "-")
@@ -122,11 +136,15 @@ static func entry() -> Dictionary:
 	return row
 
 func product_state(product: int) -> Dictionary:
-	return state.products.get(product, {
+	var fallback: Dictionary = {
+		"product_id": Catalog.product_id(product),
 		"supplier": Catalog.DEFAULT_SUPPLIER, "supplier_id": Catalog.supplier_id(Catalog.DEFAULT_SUPPLIER),
 		"price": Catalog.local_cents(state.country, Catalog.PRODUCTS[product].cost * 2.7),
 		"listed": false, "lots": [], "channel_mask": 3,
-	})
+	}
+	var result: Dictionary = state.products.get(product, fallback).duplicate(true)
+	result.product_id = Catalog.product_id(product)
+	return result
 
 func channel_enabled(channel: int) -> bool:
 	# A present stores array is authoritative. New registrations deliberately have
@@ -194,6 +212,7 @@ static func cost_breakdown(lot: Dictionary, source: String) -> Dictionary:
 func select_supplier(product: int, supplier: int) -> void:
 	if not Catalog.supplier_available_for_sourcing(supplier): return
 	var item := product_state(product)
+	item.product_id = Catalog.product_id(product)
 	item.supplier = supplier
 	item.supplier_id = Catalog.supplier_id(supplier)
 	state.products[product] = item
@@ -206,13 +225,15 @@ func buy(product: int, supplier: int, units: int) -> String:
 
 func add_stock(product: int, lot: Dictionary) -> void:
 	var item := product_state(product)
+	lot.product_id = Catalog.product_id(product)
 	item.lots.append(lot)
+	item.product_id = Catalog.product_id(product)
 	state.products[product] = item
 
 func reserve_unit(product: int) -> Dictionary:
 	var lots: Array = state.products[product].lots
 	var lot: Dictionary = lots.front()
-	var unit := {"product": product, "cost": lot.cost, "quality": lot.quality, "freight": lot.get("freight", 0)}
+	var unit := {"product": product, "product_id": Catalog.product_id(product), "cost": lot.cost, "quality": lot.quality, "freight": lot.get("freight", 0)}
 	lot.units -= 1
 	if lot.units == 0:
 		lots.pop_front()
@@ -220,6 +241,7 @@ func reserve_unit(product: int) -> Dictionary:
 
 func list_product(product: int, price: int, channel_mask: int = 3, listed: bool = true) -> void:
 	var item := product_state(product)
+	item.product_id = Catalog.product_id(product)
 	item.price = price
 	item.listed = listed
 	item.channel_mask = channel_mask
@@ -234,6 +256,7 @@ func advance(days: int) -> void:
 	for day_index in range(days):
 		var row: Dictionary = state.ledger.back()
 		Supply.receive(self)
+		Fulfillment.allocate_preorders(self)
 		Fulfillment.deliver(state, rng)
 		Supply.ensure_progress(state)
 		Service.tick(state)

@@ -117,6 +117,8 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 			if int(store.type) == channel and store.legacy:
 				store_id = int(store.id)
 				break
+	var main_listing: Dictionary = Stores.listing(sim.state, store_id, product) if store_id >= 0 else {}
+	var allow_preorders: bool = main_listing.get("allow_preorders", false) == true
 	var basket: Array = [product]
 	var reference_prices: Array = [price]
 	var total := price
@@ -160,7 +162,7 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 		for sku in needed:
 			var missing := maxi(0, int(needed[sku]) - sim.stock(sku))
 			var supplier: int = int(sim.product_state(int(sku)).get("supplier", Catalog.DEFAULT_SUPPLIER))
-			if missing > 0 and (not Supply.supplier_unlocked(sim.state, supplier) or not Catalog.SUPPLIERS[supplier].direct):
+			if missing > 0 and not allow_preorders and (not Supply.supplier_unlocked(sim.state, supplier) or not Catalog.SUPPLIERS[supplier].direct):
 				available = false
 				break
 		if not available:
@@ -183,17 +185,22 @@ static func complete_checkout(sim: RefCounted, product: int, price: int, channel
 	var final_counts := {}
 	for sku in basket:
 		final_counts[sku] = int(final_counts.get(sku, 0)) + 1
+	var allow_preorders_for_basket := true
 	for sku in final_counts:
 		var missing := maxi(0, int(final_counts[sku]) - sim.stock(sku))
+		var sku_listing: Dictionary = {}
+		if missing > 0:
+			sku_listing = Stores.listing(sim.state, store_id, int(sku)) if store_id >= 0 else {}
+			allow_preorders_for_basket = allow_preorders_for_basket and sku_listing.get("allow_preorders", false) == true
 		var supplier: int = int(sim.product_state(int(sku)).get("supplier", Catalog.DEFAULT_SUPPLIER))
-		if missing > 0 and (not Supply.supplier_unlocked(sim.state, supplier) or not Catalog.SUPPLIERS[supplier].direct):
+		if missing > 0 and not sku_listing.get("allow_preorders", false) and (not Supply.supplier_unlocked(sim.state, supplier) or not Catalog.SUPPLIERS[supplier].direct):
 			totals.stockouts += 1
 			return 0
 	for i in range(1, basket.size()):
 		var sku: int = basket[i]
 		row.demand[sku] = row.demand.get(sku, 0) + 1
 	var prices := allocate(total, reference_prices)
-	return Fulfillment.place(sim, channel, basket, total, kind, prices, store_id, campaign_id)
+	return Fulfillment.place(sim, channel, basket, total, kind, prices, store_id, campaign_id, allow_preorders_for_basket)
 
 static func offer_uptake(mode: int, discount: int) -> float:
 	return (0.45 if mode == 1 else 0.22) + float(discount) / 200.0

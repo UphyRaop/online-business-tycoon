@@ -43,10 +43,12 @@ static func migrate_references(state: Dictionary) -> void:
 		var original: int = int(item.get("supplier", Catalog.DEFAULT_SUPPLIER))
 		if original not in range(Catalog.SUPPLIERS.size()):
 			original = Catalog.DEFAULT_SUPPLIER
+		item.product_id = Catalog.product_id(int(product))
 		item.supplier_id = Catalog.supplier_id(original)
 		if not Catalog.supplier_available_for_sourcing(original):
 			item.legacy_supplier = {"id": Catalog.supplier_id(original), "name": Catalog.SUPPLIERS[original].name}
 		for lot in item.get("lots", []):
+			lot.product_id = Catalog.product_id(int(product))
 			if not lot.has("supplier"):
 				lot.supplier = original
 			lot.supplier_id = Catalog.supplier_id(int(lot.supplier))
@@ -55,6 +57,7 @@ static func migrate_references(state: Dictionary) -> void:
 	for batch in state.get("inbound", []):
 		var supplier: int = int(batch.get("supplier", Catalog.DEFAULT_SUPPLIER))
 		if supplier in range(Catalog.SUPPLIERS.size()):
+			batch.product_id = Catalog.product_id(int(batch.product))
 			batch.supplier_id = Catalog.supplier_id(supplier)
 			batch.supplier_name = Catalog.SUPPLIERS[supplier].name
 	for product in state.get("quotes", {}):
@@ -66,6 +69,8 @@ static func migrate_references(state: Dictionary) -> void:
 	for order_id in state.get("orders", {}):
 		var order: Dictionary = state.orders[order_id]
 		for item in order.get("items", []):
+			if item.has("product") and int(item.product) in range(Catalog.PRODUCTS.size()):
+				item.product_id = Catalog.product_id(int(item.product))
 			if item.has("direct_supplier"):
 				var supplier: int = int(item.direct_supplier)
 				if supplier in range(Catalog.SUPPLIERS.size()):
@@ -95,8 +100,8 @@ static func negotiate(state: Dictionary, product: int, supplier: int, units: int
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 	if not supplier_unlocked(state, supplier): return "Supplier platform is locked."
 	var threshold: int = negotiation_minimum(supplier)
-	if units < threshold or units > 999:
-		return "This supplier negotiates orders of %d to 999 units." % threshold
+	if units < threshold or units > maximum_order_quantity(supplier):
+		return "This supplier negotiates orders of %s to %s units." % [_quantity(threshold), _quantity(maximum_order_quantity(supplier))]
 	var deals: Dictionary = state.quotes.get(product, {})
 	var existing := quote(state, product, supplier)
 	if existing.discount > 0:
@@ -114,13 +119,17 @@ static func negotiate(state: Dictionary, product: int, supplier: int, units: int
 static func negotiation_minimum(supplier: int) -> int:
 	return maxi(10, Catalog.SUPPLIERS[supplier].minimum * 4)
 
+static func maximum_order_quantity(supplier: int) -> int:
+	return int(Catalog.SUPPLIER_MAX_ORDER[supplier]) if supplier in range(Catalog.SUPPLIER_MAX_ORDER.size()) else 0
+
 static func purchase(state: Dictionary, product: int, supplier: int, units: int) -> String:
 	if supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.supplier_available_for_sourcing(supplier): return "This supplier is retained for historical records and is unavailable for new sourcing."
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
 	if not supplier_unlocked(state, supplier): return "Supplier platform is locked."
 	var offer := quote(state, product, supplier)
-	if units < provider.minimum or units > 999:
-		return "Enter a quantity from %d to 999." % provider.minimum
+	var maximum := maximum_order_quantity(supplier)
+	if units < provider.minimum or units > maximum:
+		return "Enter a quantity from %s to %s." % [_quantity(provider.minimum), _quantity(maximum)]
 	var goods: int = offer.cost if units >= offer.minimum else Catalog.quote(state.country, product, supplier)
 	var freight := Catalog.inbound_freight(state.country, supplier)
 	var cost := goods + freight
@@ -133,7 +142,7 @@ static func purchase(state: Dictionary, product: int, supplier: int, units: int)
 	var id: int = state.next_purchase
 	state.next_purchase += 1
 	state.inbound.append({
-		"id": id, "product": product, "supplier": supplier, "supplier_id": Catalog.supplier_id(supplier),
+		"id": id, "product": product, "product_id": Catalog.product_id(product), "supplier": supplier, "supplier_id": Catalog.supplier_id(supplier),
 		"supplier_name": provider.name, "units": units, "cost": cost,
 		"freight": freight,
 		"quality": provider.quality, "lead_time": provider.lead, "eta": state.day + provider.lead, "arrival": state.day + provider.lead + delay,
@@ -178,5 +187,13 @@ static func forecast(sim: RefCounted, product: int, supplier: int) -> Dictionary
 	var daily: float = float(observed) / days if days > 0 else 2.0 * Catalog.PRODUCTS[product].demand * (1.72 if state.channel == 2 else Catalog.TRAFFIC[state.channel])
 	var target := ceili(daily * (lead + 3))
 	var gap := maxi(0, target - sim.stock(product) - incoming(state, product, lead + 3))
-	var suggested := clampi(gap, Catalog.SUPPLIERS[supplier].minimum, 999) if gap > 0 else 0
+	var suggested := clampi(gap, Catalog.SUPPLIERS[supplier].minimum, maximum_order_quantity(supplier)) if gap > 0 else 0
 	return {"daily": daily, "days": days, "target": target, "suggested": suggested, "lead": lead}
+
+static func _quantity(value: int) -> String:
+	var text := str(value)
+	var result := ""
+	for i in text.length():
+		if i > 0 and (text.length() - i) % 3 == 0: result += ","
+		result += text[i]
+	return result

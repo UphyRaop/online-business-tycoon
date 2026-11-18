@@ -24,11 +24,12 @@ static func overview(app: Control) -> void:
 	app.metric(view, "Active campaigns", str(active), Style.GOLD)
 	app.metric(view, "Lifetime ad spend", app.money(totals.spend))
 	app.metric(view, "Attributed revenue · net of refunds", app.money(totals.attributed_revenue - totals.attributed_refunds))
-	var roas: float = float(totals.attributed_revenue) / totals.spend if totals.spend > 0 else 0.0
-	app.metric(view, "ROAS · CPA", "%.2f× · %s" % [roas, _average_cost(app, totals.spend, totals.purchases)])
+	var roas: String = "%.2f×" % (float(totals.attributed_revenue) / totals.spend) if totals.spend > 0 else "—"
+	var lifetime_conversions: int = maxi(0, totals.purchases + totals.preorders - totals.preorders_cancelled)
+	app.metric(view, "ROAS · CPA", "%s · %s" % [roas, _unit_cost(app, totals.spend, lifetime_conversions)])
 	view.add_child(app.label("ROAS uses gross attributed revenue divided by ad spend. Refunds are reported separately.", 13, Style.MUTED))
 	app.metric(view, "Estimated advertising profit", app.money(totals.attributed_revenue - totals.attributed_refunds - totals.estimated_costs + totals.estimated_costs_reversed - totals.spend), app.profit_color(totals.attributed_revenue - totals.attributed_refunds - totals.estimated_costs + totals.estimated_costs_reversed - totals.spend))
-	view.add_child(app.label("Attributed revenue is measured when an order is placed. Income Statement revenue is recognized on delivery. A refund adds an attribution adjustment to its campaign history.", 13, Style.MUTED))
+	view.add_child(app.label("Standard order attribution is recorded at checkout. Pre-order revenue attribution waits until delivery; the Income Statement recognizes all sales on delivery.", 13, Style.MUTED))
 	var platform_card: VBoxContainer = app.card("Platforms")
 	for platform in Ads.PLATFORMS:
 		platform_card.add_child(app.label("%s · $%.2f CPM · %.1f%% baseline CTR" % [platform.name, platform.cpm, platform.ctr], 14, Style.MUTED))
@@ -255,91 +256,130 @@ static func details(app: Control) -> void:
 		app.action(view, "Advertising Analytics", app.navigate.bind("Advertising Analytics"))
 
 static func analytics(app: Control) -> void:
+	var state: Dictionary = app.sim.state
 	var view: VBoxContainer = app.card("Advertising Analytics")
 	var nav: HBoxContainer = app.row(view)
 	app.action(nav, "Overview", app.navigate.bind("Advertising"))
 	app.action(nav, "Campaigns", app.navigate.bind("Campaign Manager"))
-	var periods: OptionButton = app.dropdown(view, Calendar.PERIODS, app.ad_period)
+	var period_choices := ["Today", "Last 7 Days", "Last 30 Days", "All Time"]
+	view.add_child(app.label("Reporting Period", 14, Style.MUTED))
+	var periods: OptionButton = app.dropdown(view, period_choices, clampi(app.ad_period, 0, 3))
 	periods.item_selected.connect(func(index: int):
 		app.ad_period = index
 		app.render()
 	)
-	var anchor: int = app.ad_period_end if app.ad_period_end > 0 else app.sim.state.day
-	var bounds := Calendar.bounds(app.ad_period, anchor)
-	view.add_child(app.label(Calendar.format_range(bounds.x, bounds.y), 14, Style.GOLD))
-	var navigate_period: HBoxContainer = app.row(view)
-	var previous: Button = app.action(navigate_period, "Previous", func():
-		app.ad_period_end = bounds.x - 1
-		app.render()
-	)
-	previous.disabled = bounds.x <= 1
-	var next: Button = app.action(navigate_period, "Next", func():
-		app.ad_period_end = bounds.y + 1
-		app.render()
-	)
-	next.disabled = bounds.y >= app.sim.state.day
-	var campaigns: Dictionary = app.sim.state.advertising.campaigns
+	var last_day: int = state.day
+	var first_day: int = state.day
+	match app.ad_period:
+		1: first_day = maxi(1, state.day - 6)
+		2: first_day = maxi(1, state.day - 29)
+		3: first_day = 1
+	view.add_child(app.label(Calendar.format_range(first_day, last_day), 14, Style.GOLD))
+	var campaigns: Dictionary = state.advertising.campaigns
 	var ids: Array = campaigns.keys()
 	ids.sort()
-	var filter_choices := ["All"]
-	for platform in Ads.PLATFORMS: filter_choices.append(platform.name)
-	var platform_filter: OptionButton = app.dropdown(view, filter_choices, app.ad_platform_filter + 1)
+	var platform_choices := ["All Platforms"]
+	for platform in Ads.PLATFORMS: platform_choices.append(platform.name)
+	view.add_child(app.label("Advertising Platform", 14, Style.MUTED))
+	var platform_filter: OptionButton = app.dropdown(view, platform_choices, app.ad_platform_filter + 1)
 	platform_filter.item_selected.connect(func(index: int): app.ad_platform_filter = index - 1; app.render())
-	var stores: Array[String] = ["All"]
-	for store in app.sim.state.stores: stores.append(store.name)
-	var store_filter: OptionButton = app.dropdown(view, stores, 0 if app.ad_store_filter < 0 else _store_index(app.sim.state, app.ad_store_filter) + 1)
-	store_filter.item_selected.connect(func(index: int):
-		app.ad_store_filter = -1 if index == 0 else app.sim.state.stores[index - 1].id
+	var status_choices := ["All Statuses", "Draft", "Active", "Paused", "Stopped"]
+	view.add_child(app.label("Campaign Status", 14, Style.MUTED))
+	var status_filter: OptionButton = app.dropdown(view, status_choices, app.ad_status_filter + 1)
+	status_filter.item_selected.connect(func(index: int): app.ad_status_filter = index - 1; app.render())
+	var destination_ids: Array[int] = [-1]
+	var destination_names: Array[String] = ["All Destinations"]
+	for store in state.stores:
+		destination_ids.append(int(store.id))
+		var kind: String = Stores.MARKETPLACES[int(store.platform)] if int(store.type) == 0 and int(store.get("platform", -1)) in range(Stores.MARKETPLACES.size()) else "Website"
+		var suffix: String = str(store.domain) if int(store.type) == 1 else kind
+		destination_names.append("%s · %s" % [store.name, suffix])
+	view.add_child(app.label("Destination", 14, Style.MUTED))
+	var destination_index: int = destination_ids.find(app.ad_store_filter)
+	var destination_filter: OptionButton = app.dropdown(view, destination_names, maxi(0, destination_index))
+	destination_filter.item_selected.connect(func(index: int):
+		app.ad_store_filter = destination_ids[index]
 		app.render()
 	)
-	var products: Array[String] = ["All"]
-	for item in Catalog.PRODUCTS: products.append(item.name)
-	var product_filter: OptionButton = app.dropdown(view, products, app.ad_product_filter + 1)
+	var product_choices: Array[String] = ["All Products"]
+	for item in Catalog.PRODUCTS: product_choices.append(item.name)
+	view.add_child(app.label("Product", 14, Style.MUTED))
+	var product_filter: OptionButton = app.dropdown(view, product_choices, app.ad_product_filter + 1)
 	product_filter.item_selected.connect(func(index: int): app.ad_product_filter = index - 1; app.render())
-	var statuses := ["All statuses", "Active", "Paused", "Stopped"]
-	var status_filter: OptionButton = app.dropdown(view, statuses, app.ad_status_filter + 1)
-	status_filter.item_selected.connect(func(index: int): app.ad_status_filter = index - 1; app.render())
-	var total := Ads.empty_metrics()
-	var count := 0
+	var matched: Array = []
+	var totals := Ads.empty_metrics()
 	for id in ids:
 		var campaign: Dictionary = campaigns[id]
-		if app.ad_platform_filter >= 0 and campaign.platform != app.ad_platform_filter: continue
-		if app.ad_store_filter >= 0 and campaign.store_id != app.ad_store_filter: continue
-		if app.ad_product_filter >= 0 and campaign.product != app.ad_product_filter: continue
-		if app.ad_status_filter >= 0 and campaign.status != ["active", "paused", "stopped"][app.ad_status_filter]: continue
-		var metric: Dictionary = Ads.aggregate(app.sim.state, id, app.ad_period, anchor)
-		count += 1
-		for field in Ads.METRIC_FIELDS + ["estimated_profit"]: total[field] += int(metric.get(field, 0))
-	var roas: float = float(total.attributed_revenue) / total.spend if total.spend > 0 else 0.0
-	app.metric(view, "Campaigns compared", str(count))
-	app.metric(view, "Ad spend · attributed net revenue", "%s · %s" % [app.money(total.spend), app.money(total.attributed_revenue - total.attributed_refunds)])
-	app.metric(view, "ROAS · CPA", "%.2f× · %s" % [roas, _average_cost(app, total.spend, total.purchases)])
-	view.add_child(app.label("ROAS uses gross attributed revenue divided by ad spend. Refunds are reported separately.", 13, Style.MUTED))
-	app.metric(view, "Estimated advertising profit", app.money(total.attributed_revenue - total.attributed_refunds - total.estimated_costs + total.estimated_costs_reversed - total.spend), app.profit_color(total.attributed_revenue - total.attributed_refunds - total.estimated_costs + total.estimated_costs_reversed - total.spend))
-	for id in ids:
+		if app.ad_platform_filter >= 0 and int(campaign.platform) != app.ad_platform_filter: continue
+		if app.ad_status_filter >= 0 and campaign.status != ["draft", "active", "paused", "stopped"][app.ad_status_filter]: continue
+		if app.ad_store_filter >= 0 and int(campaign.store_id) != app.ad_store_filter: continue
+		if app.ad_product_filter >= 0 and int(campaign.product) != app.ad_product_filter: continue
+		matched.append(id)
+		var metrics: Dictionary = Ads.aggregate_range(state, int(id), first_day, last_day)
+		for field in Ads.METRIC_FIELDS: totals[field] += int(metrics.get(field, 0))
+	var total_conversions: int = maxi(0, totals.purchases + totals.preorders - totals.preorders_cancelled)
+	var total_ctr := _ratio(totals.clicks, totals.impressions, 100.0)
+	var total_cpc := _unit_cost(app, totals.spend, totals.clicks)
+	var total_cpm := _unit_cost(app, totals.spend * 1000, totals.impressions)
+	var total_conversion_rate := _ratio(total_conversions, totals.clicks, 100.0)
+	var total_cpa := _unit_cost(app, totals.spend, total_conversions)
+	var total_roas: String = "%.2f×" % (float(totals.attributed_revenue) / totals.spend) if totals.spend > 0 else "—"
+	app.metric(view, "Campaigns matched", str(matched.size()))
+	app.metric(view, "Advertising Spend", app.money(totals.spend))
+	app.metric(view, "Impressions · Clicks", "%s · %s" % [_count(totals.impressions), _count(totals.clicks)])
+	app.metric(view, "CTR · CPC · CPM", "%s · %s · %s" % [total_ctr, total_cpc, total_cpm])
+	app.metric(view, "Conversions · Conversion Rate · CPA", "%d · %s · %s" % [total_conversions, total_conversion_rate, total_cpa])
+	app.metric(view, "Attributed Revenue · ROAS", "%s · %s" % [app.money(totals.attributed_revenue - totals.attributed_refunds), total_roas], Style.GOLD)
+	var outstanding := 0
+	for order in state.orders.values():
+		if not order.get("preorder", false) or order.status in ["delivered", "cancelled"]: continue
+		if int(order.get("campaign_id", 0)) <= 0: continue
+		var campaign: Dictionary = campaigns.get(int(order.campaign_id), {})
+		if campaign.is_empty(): continue
+		if app.ad_platform_filter >= 0 and int(campaign.platform) != app.ad_platform_filter: continue
+		if app.ad_status_filter >= 0 and campaign.status != ["draft", "active", "paused", "stopped"][app.ad_status_filter]: continue
+		if app.ad_store_filter >= 0 and int(order.store_id) != app.ad_store_filter: continue
+		if app.ad_product_filter >= 0 and int(campaign.product) != app.ad_product_filter: continue
+		outstanding += 1
+	app.metric(view, "Outstanding Pre-orders", str(outstanding))
+	view.add_child(app.label("Revenue is attributed to pre-order campaigns only when delivery recognizes the sale. Pre-order placements and cancellations are shown separately in campaign history.", 13, Style.MUTED))
+	if matched.is_empty():
+		view.add_child(app.label("No campaigns match these filters.", 14, Style.MUTED))
+		return
+	for id in matched:
 		var campaign: Dictionary = campaigns[id]
-		if app.ad_platform_filter >= 0 and campaign.platform != app.ad_platform_filter: continue
-		if app.ad_store_filter >= 0 and campaign.store_id != app.ad_store_filter: continue
-		if app.ad_product_filter >= 0 and campaign.product != app.ad_product_filter: continue
-		if app.ad_status_filter >= 0 and campaign.status != ["active", "paused", "stopped"][app.ad_status_filter]: continue
-		var metric: Dictionary = Ads.aggregate(app.sim.state, id, app.ad_period, anchor)
+		var metrics: Dictionary = Ads.aggregate_range(state, int(id), first_day, last_day)
 		var detail: VBoxContainer = app.card(campaign.name)
+		var store: Dictionary = Stores.get_store(state, int(campaign.store_id))
 		app.metric(detail, "Platform · Status", "%s · %s" % [Ads.PLATFORMS[campaign.platform].name, campaign.status.capitalize()])
-		app.metric(detail, "Store · Product", "%s · %s" % [Stores.get_store(app.sim.state, campaign.store_id).name, Catalog.PRODUCTS[campaign.product].name])
-		app.metric(detail, "Spend", app.money(metric.spend))
-		app.metric(detail, "CPM", app.money(roundi(metric.cpm)))
-		app.metric(detail, "Impressions · Reach", "%s · %s" % [_count(metric.impressions), _count(metric.reach)])
-		app.metric(detail, "Clicks · CTR · CPC", "%d · %.2f%% · %s" % [metric.clicks, metric.ctr, _average_cost(app, metric.spend, metric.clicks)])
-		app.metric(detail, "Add to cart · Checkouts", "%d · %d" % [metric.add_to_cart, metric.checkouts])
-		app.metric(detail, "Purchases · Conversion · CPA", "%d · %.2f%% · %s" % [metric.purchases, metric.conversion_rate, _average_cost(app, metric.spend, metric.purchases)])
-		app.metric(detail, "Attributed revenue · refunds · ROAS", "%s · %s · %.2f×" % [app.money(metric.attributed_revenue), app.money(metric.attributed_refunds), metric.roas], Style.GOLD)
-		var trend: Dictionary = _seven_day_trend(app.sim.state, int(id))
-		detail.add_child(app.label("7-day spend  %s" % _sparkline(trend.spend), 13, Style.MUTED))
-		detail.add_child(app.label("7-day net revenue  %s" % _sparkline(trend.revenue), 13, Style.MUTED))
-		app.action(detail, "Manage campaign", func():
+		app.metric(detail, "Destination · Product", "%s · %s" % [store.get("name", "Unknown store"), Catalog.PRODUCTS[campaign.product].name])
+		app.metric(detail, "Advertising Spend", app.money(metrics.spend))
+		app.metric(detail, "Impressions", _count(metrics.impressions))
+		app.metric(detail, "Clicks", _count(metrics.clicks))
+		app.metric(detail, "CTR", _ratio(metrics.clicks, metrics.impressions, 100.0))
+		app.metric(detail, "CPC", _unit_cost(app, metrics.spend, metrics.clicks))
+		app.metric(detail, "CPM", _unit_cost(app, metrics.spend * 1000, metrics.impressions))
+		var conversions: int = maxi(0, metrics.purchases + metrics.preorders - metrics.preorders_cancelled)
+		app.metric(detail, "Conversions", str(conversions))
+		app.metric(detail, "Conversion Rate", _ratio(conversions, metrics.clicks, 100.0))
+		app.metric(detail, "CPA", _unit_cost(app, metrics.spend, conversions))
+		app.metric(detail, "Attributed Revenue", app.money(metrics.attributed_revenue - metrics.attributed_refunds))
+		app.metric(detail, "ROAS", "%.2f×" % metrics.roas if metrics.spend > 0 else "—", Style.GOLD)
+		app.metric(detail, "Pre-orders Placed · Cancelled", "%d · %d" % [metrics.preorders, metrics.preorders_cancelled])
+		if metrics.spend == 0 and metrics.impressions == 0:
+			detail.add_child(app.label("No delivery data is available for this campaign in the selected period.", 13, Style.MUTED))
+		var profit: int = metrics.attributed_revenue - metrics.attributed_refunds - metrics.estimated_costs + metrics.estimated_costs_reversed - metrics.spend
+		app.metric(detail, "Estimated Advertising Profit", app.money(profit), app.profit_color(profit))
+		app.action(detail, "Manage Campaign", func():
 			app.campaign_id = id
 			app.navigate("Campaign Details")
 		)
+
+static func _ratio(numerator: int, denominator: int, scale: float) -> String:
+	return "%.2f%%" % (float(numerator) / denominator * scale) if denominator > 0 else "—"
+
+static func _unit_cost(app: Control, amount: int, denominator: int) -> String:
+	return app.money(roundi(float(amount) / denominator)) if denominator > 0 else "—"
 
 static func _fill_store_choices(state: Dictionary, store_id: int, product_ids: Array[int], product_names: Array[String], platform_ids: Array[int], platform_names: Array[String]) -> void:
 	var store := Stores.get_store(state, store_id)

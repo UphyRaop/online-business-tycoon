@@ -55,7 +55,7 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 	brand = brand.strip_edges()
 	domain = domain.strip_edges().to_lower()
 	if kind not in [0, 1] or name.is_empty() or brand.is_empty():
-		return "Enter a store name and brand, then choose Marketplace or Own Website."
+		return "Enter a store name and brand, then choose Marketplace or Website."
 	if kind == 1 and domain.is_empty():
 		return "Enter a simulated website domain."
 	if kind == 0 and platform not in range(MARKETPLACES.size()):
@@ -158,6 +158,7 @@ static func listing(state: Dictionary, store_id: int, product: int) -> Dictionar
 	if store.is_empty():
 		return {}
 	var base: Dictionary = state.products.get(product, {
+		"product_id": Catalog.product_id(product),
 		"price": Catalog.local_cents(state.country, Catalog.PRODUCTS[product].cost * 2.7),
 		"listed": false, "channel_mask": 3, "supplier": Catalog.DEFAULT_SUPPLIER, "supplier_id": Catalog.supplier_id(Catalog.DEFAULT_SUPPLIER), "lots": [],
 	})
@@ -166,17 +167,20 @@ static func listing(state: Dictionary, store_id: int, product: int) -> Dictionar
 		if overrides.has(product):
 			var override: Dictionary = overrides[product]
 			return {"price": int(override.price), "listed": override.listed == true,
-				"channel_mask": 1 << channel(store), "product": product}
+				"channel_mask": 1 << channel(store), "product": product,
+				"product_id": Catalog.product_id(product), "allow_preorders": override.get("allow_preorders", false) == true}
 		var channel_id := channel(store)
 		var channel_allowed: bool = (int(base.get("channel_mask", 3)) & (1 << channel_id)) != 0
 		return {"price": base.price, "listed": base.listed and channel_allowed,
-			"channel_mask": int(base.get("channel_mask", 3)), "product": product}
+			"channel_mask": int(base.get("channel_mask", 3)), "product": product,
+			"product_id": Catalog.product_id(product), "allow_preorders": false}
 	var listings: Dictionary = store.listings
 	var detail: Dictionary = listings.get(product, {})
 	return {"price": int(detail.get("price", base.price)), "listed": detail.get("listed", false) == true,
-		"channel_mask": 1 << channel(store), "product": product}
+		"channel_mask": 1 << channel(store), "product": product,
+		"product_id": Catalog.product_id(product), "allow_preorders": detail.get("allow_preorders", false) == true}
 
-static func set_listing(state: Dictionary, store_id: int, product: int, price: int, listed: bool) -> String:
+static func set_listing(state: Dictionary, store_id: int, product: int, price: int, listed: bool, allow_preorders: Variant = null) -> String:
 	if product not in range(Catalog.PRODUCTS.size()) or price < 1:
 		return "Choose a catalog product and a selling price above zero."
 	var index := index_of(state, store_id)
@@ -185,7 +189,10 @@ static func set_listing(state: Dictionary, store_id: int, product: int, price: i
 	var store: Dictionary = state.stores[index]
 	if store.legacy:
 		var legacy_listings: Dictionary = store.get("listings", {})
-		legacy_listings[product] = {"price": price, "listed": listed}
+		var previous: Dictionary = legacy_listings.get(product, {})
+		legacy_listings[product] = {"price": price, "listed": listed,
+			"product_id": Catalog.product_id(product),
+			"allow_preorders": previous.get("allow_preorders", false) if allow_preorders == null else allow_preorders == true}
 		store.listings = legacy_listings
 		state.stores[index] = store
 	else:
@@ -193,6 +200,11 @@ static func set_listing(state: Dictionary, store_id: int, product: int, price: i
 		var detail: Dictionary = listings.get(product, {"price": price, "listed": false})
 		detail.price = price
 		detail.listed = listed
+		detail.product_id = Catalog.product_id(product)
+		if allow_preorders != null:
+			detail.allow_preorders = allow_preorders == true
+		elif not detail.has("allow_preorders"):
+			detail.allow_preorders = false
 		listings[product] = detail
 		store.listings = listings
 		state.stores[index] = store

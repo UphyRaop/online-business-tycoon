@@ -47,7 +47,7 @@ static func show(app: Control) -> void:
 		app.metric(view, "Est. gross margin", "%.1f%%" % (100.0 * gross / item.price), app.profit_color(gross))
 		if listed_stores.is_empty():
 			app.metric(view, "Listed stores", "None")
-			view.add_child(app.label("Create a store and manage its listing under Business → Stores.", 13, Style.MUTED))
+			view.add_child(app.label("Create a store and manage its listing under Business / Stores.", 13, Style.MUTED))
 		else:
 			app.metric(view, "Listed stores", ", ".join(listed_stores))
 		app.divider(view)

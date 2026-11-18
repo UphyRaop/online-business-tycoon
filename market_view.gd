@@ -9,19 +9,57 @@ const Style = preload("res://corporate_theme.gd")
 static func show(app: Control) -> void:
 	var product: int = app.selected_product
 	var item: Dictionary = app.sim.product_state(product)
-	var catalog: VBoxContainer = app.card("Product catalog")
-	var picker: OptionButton = app.dropdown(catalog, Catalog.PRODUCTS.map(func(entry): return entry.name), product)
-	picker.item_selected.connect(func(id: int):
-		picker.select(product)
-		app.open_product(id)
+	var catalog: VBoxContainer = app.card("Product Catalogue")
+	var category_filter := MenuButton.new()
+	category_filter.text = Catalog.CATEGORIES[app.catalog_category] if app.catalog_category >= 0 else "All Categories"
+	category_filter.custom_minimum_size.y = app.TOUCH_HEIGHT
+	category_filter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	catalog.add_child(category_filter)
+	var category_menu: PopupMenu = category_filter.get_popup()
+	category_menu.add_item("All Categories", -1)
+	for category_id in Catalog.CATEGORIES.size(): category_menu.add_item(Catalog.CATEGORIES[category_id], category_id)
+	var search: LineEdit = app.field(catalog, "Search products", app.catalog_search, 64)
+	var picker: OptionButton = app.dropdown(catalog, [], 0)
+	var visible_products: Array[int] = []
+	var refresh_picker := func():
+		picker.clear()
+		visible_products.clear()
+		var needle := search.text.strip_edges().to_lower()
+		for id in Catalog.PRODUCTS.size():
+			var entry: Dictionary = Catalog.PRODUCTS[id]
+			if app.catalog_category >= 0 and entry.category != Catalog.CATEGORIES[app.catalog_category]: continue
+			if not needle.is_empty() and not entry.name.to_lower().contains(needle) and not entry.id.to_lower().contains(needle): continue
+			visible_products.append(id)
+			picker.add_item("%s · %s" % [entry.name, entry.category])
+		if visible_products.is_empty():
+			picker.add_item("No products match these filters")
+			picker.disabled = true
+			return
+		picker.disabled = false
+		var current := visible_products.find(app.selected_product)
+		picker.select(maxi(0, current))
+	category_menu.id_pressed.connect(func(category_id: int):
+		app.catalog_category = category_id
+		category_filter.text = Catalog.CATEGORIES[category_id] if category_id >= 0 else "All Categories"
+		refresh_picker.call()
 	)
+	search.text_changed.connect(func(value: String):
+		app.catalog_search = value
+		refresh_picker.call()
+	)
+	picker.item_selected.connect(func(index: int):
+		if index in range(visible_products.size()): app.open_product(visible_products[index])
+	)
+	refresh_picker.call()
 	var links: HBoxContainer = app.row(catalog)
 	app.action(links, "My Products", app.navigate.bind("My Products"))
 	var stock_label: Label = app.label("", 15, Style.MUTED)
 	catalog.add_child(stock_label)
+	app.metric(catalog, "Category · Estimated supplier cost", "%s · %s" % [Catalog.PRODUCTS[product].category, app.money(Catalog.quote(app.sim.state.country, product, int(item.supplier)))])
+	app.metric(catalog, "Demand · Competition", "%.2f · %.2f" % [Catalog.PRODUCTS[product].demand, Catalog.PRODUCTS[product].competition])
 	supplier_form(app, product, item, stock_label)
 	var listings: VBoxContainer = app.card("Store listings")
-	listings.add_child(app.label("Product listings belong to individual stores. Create a marketplace or website and manage its listings under Business → Stores.", 14, Style.MUTED))
+	listings.add_child(app.label("Product listings belong to individual stores. Create a marketplace or website and manage its listings under Market / Stores.", 14, Style.MUTED))
 	app.action(listings, "Manage stores", app.navigate.bind("Store Management"), true)
 	var offers := Offers.show(app, product)
 	app.action(links, "Offers", func():
@@ -49,7 +87,7 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 	supply.add_child(terms)
 	var freight_label: Label = app.label("", 14, Style.MUTED)
 	supply.add_child(freight_label)
-	var quantity: LineEdit = app.field(supply, "Order quantity", "10", 3)
+	var quantity: LineEdit = app.field(supply, "Order quantity", "10", 10)
 	quantity.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
 	var total: Label = app.label("", 16)
 	var forecast_label: Label = app.label("", 14, Style.MUTED)
@@ -77,9 +115,10 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		if quote.discount > 0:
 			quote_label.text = "%s per unit at %d+ units · Through %s" % [
 				app.money(quote.cost), quote.minimum, Calendar.format(quote.expires)]
-		terms.text = "Minimum %d · %s quality · %d%% on-time · %d-day lead\nNegotiate from %d units" % [
-			provider.minimum, "High" if provider.quality >= 0.95 else "Standard",
-			roundi(provider.reliability * 100), provider.lead, Supply.negotiation_minimum(supplier_index)]
+		terms.text = "Order quantity %s–%s · %s quality · %d%% on-time · %d-day lead\nNegotiate from %s units" % [
+			_format_quantity(provider.minimum), _format_quantity(Supply.maximum_order_quantity(supplier_index)),
+			"High" if provider.quality >= 0.95 else "Standard",
+			roundi(provider.reliability * 100), provider.lead, _format_quantity(Supply.negotiation_minimum(supplier_index))]
 		freight_label.text = "Inbound freight per unit  " + app.money(freight)
 		total.text = "Landed order total  " + (app.money((effective + freight) * qty) if qty > 0 else "—")
 		var demand_source := "catalog estimate" if forecast.days == 0 else "%d recent days" % forecast.days
@@ -128,3 +167,11 @@ static func refresh_inbound(app: Control, product: int, inbound: VBoxContainer, 
 static func units_from(value: String) -> int:
 	var text := value.strip_edges()
 	return text.to_int() if text.is_valid_int() else 0
+
+static func _format_quantity(value: int) -> String:
+	var text := str(value)
+	var result := ""
+	for i in text.length():
+		if i > 0 and (text.length() - i) % 3 == 0: result += ","
+		result += text[i]
+	return result

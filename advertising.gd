@@ -4,6 +4,7 @@ const Catalog = preload("res://catalog.gd")
 const Stores = preload("res://store_manager.gd")
 const Storefront = preload("res://storefront.gd")
 const Calendar = preload("res://game_calendar.gd")
+const Supply = preload("res://supply.gd")
 
 const PLATFORMS := [
 	{"name": "Meta Ads", "cpm": 8.0, "ctr": 2.3, "cart": 0.27, "checkout": 0.48, "purchase": 0.07, "competition": 1.08, "reach": 1.0},
@@ -24,7 +25,7 @@ const BIDS := ["Lowest cost", "Cost cap", "Bid cap"]
 const CREATIVES := ["Image", "Video", "Carousel", "Search text", "Product listing"]
 const CREATIVE_CLICK := [1.0, 1.12, 1.08, 0.95, 1.0]
 const CREATIVE_CONVERSION := [1.0, 0.88, 1.04, 1.1, 1.18]
-const METRIC_FIELDS := ["spend", "impressions", "reach", "clicks", "add_to_cart", "checkouts", "purchases", "attributed_revenue", "attributed_refunds", "estimated_costs", "estimated_costs_reversed"]
+const METRIC_FIELDS := ["spend", "impressions", "reach", "clicks", "add_to_cart", "checkouts", "purchases", "preorders", "preorders_cancelled", "attributed_revenue", "attributed_refunds", "estimated_costs", "estimated_costs_reversed"]
 
 static func initial_state() -> Dictionary:
 	return {"campaigns": {}, "next_campaign": 1, "history": [], "visitors": {}, "conversions": {}}
@@ -36,6 +37,11 @@ static func ensure_state(state: Dictionary) -> void:
 	ads.merge(initial_state())
 	if not ads.get("campaigns") is Dictionary: ads.campaigns = {}
 	if not ads.get("history") is Array: ads.history = []
+	for record in ads.history:
+		if not record is Dictionary: continue
+		for field in METRIC_FIELDS:
+			if not record.has(field): record[field] = 0
+		if not record.has("estimated_profit"): record.estimated_profit = 0
 	if not ads.get("visitors") is Dictionary: ads.visitors = {}
 	if not ads.get("conversions") is Dictionary: ads.conversions = {}
 	if not ads.get("next_campaign") is int or ads.next_campaign < 1: ads.next_campaign = 1
@@ -49,6 +55,44 @@ static func platform_available(country: int, platform: int, store: Dictionary) -
 	# Mainland China blocks Meta and TikTok ad inventory in this simulation.
 	if country == 5 and platform in [0, 2]: return false
 	return true
+
+static func effective_cpm(state: Dictionary, product_id: int, platform_id: int, audience_id: int) -> int:
+	if product_id not in range(Catalog.PRODUCTS.size()) or platform_id not in range(PLATFORMS.size()) or audience_id not in range(AUDIENCES.size()): return 0
+	var product: Dictionary = Catalog.PRODUCTS[product_id]
+	var season: float = Catalog.product_seasonality(product_id, int(state.day))
+	var difficulty: float = [0.90, 1.0, 1.16][int(state.difficulty)]
+	var competitive_market := sqrt(float(product.competition) * season)
+	var platform: Dictionary = PLATFORMS[platform_id]
+	return Catalog.local_cents(int(state.country), float(platform.cpm) * AUDIENCE_COST[audience_id] * float(platform.competition) * competitive_market * difficulty)
+
+static func purchase_probability(sim: RefCounted, campaign: Dictionary, listing: Dictionary) -> float:
+	var state: Dictionary = sim.state
+	var product_id := int(campaign.product)
+	var product: Dictionary = Catalog.PRODUCTS[product_id]
+	var platform: Dictionary = PLATFORMS[int(campaign.platform)]
+	var audience_id := int(campaign.audience)
+	var objective_id := int(campaign.objective)
+	var creative_id := int(campaign.creative)
+	var conversion: float = float(platform.purchase) * AUDIENCE_CONVERSION[audience_id] * OBJECTIVE_CONVERSION[objective_id] * float(campaign.learning)
+	conversion *= CREATIVE_CONVERSION[creative_id] * (0.88 + float(state.reputation) / 500.0)
+	var reference_price := Catalog.local_cents(int(state.country), float(product.cost) * 2.7)
+	var price_factor := clampf(float(reference_price) / maxf(1.0, float(listing.price)), 0.25, 1.25)
+	var seasonal_market: float = Catalog.product_seasonality(product_id, int(state.day))
+	var difficulty: float = [1.18, 1.0, 0.78][int(state.difficulty)]
+	conversion *= clampf(float(product.demand) * seasonal_market, 0.4, 1.5) * price_factor * difficulty
+	if sim.stock(product_id) <= 0:
+		var source: int = int(sim.product_state(product_id).get("supplier", Catalog.DEFAULT_SUPPLIER))
+		var direct_ready: bool = Supply.supplier_unlocked(state, source) and Catalog.SUPPLIERS[source].direct
+		if listing.get("allow_preorders", false):
+			var wait_days := int(Catalog.SUPPLIERS[source].lead)
+			for batch in state.inbound:
+				if int(batch.product) == product_id:
+					wait_days = maxi(0, int(batch.eta) - int(state.day))
+					break
+			conversion *= clampf(1.0 - float(wait_days) * 0.035, 0.25, 1.0)
+		elif not direct_ready:
+			conversion = 0.0
+	return clampf(conversion, 0.0, 0.94)
 
 static func available_platforms(country: int, store: Dictionary) -> Array[String]:
 	var names: Array[String] = []
@@ -170,7 +214,7 @@ static func simulate_day(sim: RefCounted, rng: RandomNumberGenerator) -> void:
 		if not platform_available(state.country, campaign.platform, store) or not audience_ready(state, campaign.store_id, campaign.audience): continue
 		var platform: Dictionary = PLATFORMS[campaign.platform]
 		var audience_id: int = campaign.audience
-		var cpm := Catalog.local_cents(state.country, platform.cpm * AUDIENCE_COST[audience_id] * platform.competition)
+		var cpm: int = effective_cpm(state, int(campaign.product), int(campaign.platform), audience_id)
 		var ctr: float = clampf(platform.ctr * OBJECTIVE_CLICK[campaign.objective] * CREATIVE_CLICK[campaign.creative], 0.15, 12.0)
 		var expected_cpc := maxi(1, roundi(cpm / (ctr * 10.0)))
 		var delivery := 1.0
@@ -194,31 +238,53 @@ static func simulate_day(sim: RefCounted, rng: RandomNumberGenerator) -> void:
 			metrics.clicks = stochastic_count(metrics.impressions * adjusted_ctr, rng)
 			metrics.add_to_cart = stochastic_count(metrics.clicks * platform.cart * AUDIENCE_CONVERSION[audience_id], rng)
 			metrics.checkouts = stochastic_count(metrics.add_to_cart * platform.checkout, rng)
-			var conversion: float = platform.purchase * AUDIENCE_CONVERSION[audience_id] * OBJECTIVE_CONVERSION[campaign.objective] * float(campaign.learning)
-			conversion *= CREATIVE_CONVERSION[campaign.creative] * (0.88 + float(state.reputation) / 500.0)
-			var purchase_attempts := stochastic_count(metrics.checkouts * clampf(conversion, 0.02, 0.94), rng)
+			var conversion := purchase_probability(sim, campaign, listing)
+			var purchase_attempts := stochastic_count(metrics.checkouts * conversion, rng)
 			var offers := Storefront.offers_for(state, campaign.product)
 			for _attempt in purchase_attempts:
 				var order_id: int = Storefront.complete_checkout(sim, campaign.product, int(listing.price), int(campaign.channel), offers, rng, int(campaign.store_id), int(id))
 				if order_id <= 0: continue
 				var order: Dictionary = state.orders[order_id]
-				metrics.purchases += 1
-				metrics.attributed_revenue += order.total
-				for line in order.items: metrics.estimated_costs += line.cost
-				metrics.estimated_costs += Stores.store_fee(Stores.get_store(state, int(order.store_id)), int(order.channel), int(order.total))
-				for line in order.items:
-					if not line.has("direct_supplier"):
-						metrics.estimated_costs += Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)
-						break
+				if order.get("preorder", false):
+					metrics.preorders += 1
+				else:
+					metrics.purchases += 1
+					metrics.attributed_revenue += order.total
+					for line in order.items: metrics.estimated_costs += line.cost
+					metrics.estimated_costs += Stores.store_fee(Stores.get_store(state, int(order.store_id)), int(order.channel), int(order.total))
+					for line in order.items:
+						if not line.has("direct_supplier"):
+							metrics.estimated_costs += Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)
+							break
 		metrics.estimated_profit = metrics.attributed_revenue - metrics.estimated_costs - spend
 		state.advertising.history.append(metrics)
 		state.advertising.visitors[campaign.store_id] = int(state.advertising.visitors.get(campaign.store_id, 0)) + metrics.clicks
 		var updated: Dictionary = campaign.duplicate(true)
-		updated.learning = clampf(float(campaign.learning) + (0.008 if metrics.purchases > 0 else -0.002), 0.85, 1.2)
+		updated.learning = clampf(float(campaign.learning) + (0.008 if metrics.purchases + metrics.preorders > 0 else -0.002), 0.85, 1.2)
 		state.advertising.campaigns[id] = updated
 
-static func note_delivery(state: Dictionary, store_id: int) -> void:
+static func note_delivery(state: Dictionary, order: Dictionary) -> void:
+	var store_id: int = int(order.get("store_id", order.get("channel", 0)))
 	state.advertising.conversions[store_id] = int(state.advertising.conversions.get(store_id, 0)) + 1
+	if not order.get("preorder", false): return
+	var campaign_id := int(order.get("campaign_id", 0))
+	if campaign_id <= 0 or not state.advertising.campaigns.has(campaign_id): return
+	var adjustment := empty_metrics()
+	adjustment.day = state.day
+	adjustment.campaign_id = campaign_id
+	adjustment.attributed_revenue = int(order.total)
+	for line in order.items: adjustment.estimated_costs += int(line.cost)
+	adjustment.estimated_costs += int(order.get("channel_fee", 0)) + int(order.get("shipping_cost", 0))
+	state.advertising.history.append(adjustment)
+
+static func note_preorder_cancel(state: Dictionary, order: Dictionary) -> void:
+	var campaign_id := int(order.get("campaign_id", 0))
+	if campaign_id <= 0 or not state.advertising.campaigns.has(campaign_id): return
+	var adjustment := empty_metrics()
+	adjustment.day = state.day
+	adjustment.campaign_id = campaign_id
+	adjustment.preorders_cancelled = 1
+	state.advertising.history.append(adjustment)
 
 static func note_refund(state: Dictionary, campaign_id: int, _store_id: int, amount: int, costs_reversed: int) -> void:
 	if campaign_id <= 0 or not state.advertising.campaigns.has(campaign_id): return
@@ -242,20 +308,24 @@ static func stochastic_count(expected: float, rng: RandomNumberGenerator) -> int
 
 static func aggregate(state: Dictionary, campaign_id: int, period: int, anchor: int) -> Dictionary:
 	var range_days := Calendar.bounds(period, maxi(1, anchor))
-	var last_day := mini(range_days.y, state.day)
+	return aggregate_range(state, campaign_id, maxi(1, range_days.x), mini(range_days.y, state.day))
+
+static func aggregate_range(state: Dictionary, campaign_id: int, first_day: int, last_day: int) -> Dictionary:
 	var result := empty_metrics()
 	result.campaign_id = campaign_id
 	result.day = last_day
-	result.start_day = maxi(1, range_days.x)
-	result.end_day = last_day
+	result.start_day = maxi(1, first_day)
+	result.end_day = maxi(0, last_day)
 	for record in state.advertising.history:
-		if int(record.campaign_id) != campaign_id or int(record.day) < result.start_day or int(record.day) > last_day: continue
+		if int(record.campaign_id) != campaign_id or int(record.day) < result.start_day or int(record.day) > result.end_day: continue
 		for field in METRIC_FIELDS: result[field] += int(record.get(field, 0))
 	result.ctr = 100.0 * result.clicks / result.impressions if result.impressions > 0 else 0.0
 	result.cpc = float(result.spend) / result.clicks if result.clicks > 0 else 0.0
 	result.cpm = float(result.spend) / result.impressions * 1000.0 if result.impressions > 0 else 0.0
-	result.conversion_rate = 100.0 * result.purchases / result.clicks if result.clicks > 0 else 0.0
-	result.cpa = float(result.spend) / result.purchases if result.purchases > 0 else 0.0
+	var conversions: int = result.purchases + result.preorders - result.preorders_cancelled
+	result.conversions = maxi(0, conversions)
+	result.conversion_rate = 100.0 * float(result.conversions) / result.clicks if result.clicks > 0 else 0.0
+	result.cpa = float(result.spend) / result.conversions if result.conversions > 0 else 0.0
 	result.roas = float(result.attributed_revenue) / result.spend if result.spend > 0 else 0.0
 	result.net_attributed_revenue = result.attributed_revenue - result.attributed_refunds
 	result.estimated_profit = result.net_attributed_revenue - result.estimated_costs + result.estimated_costs_reversed - result.spend

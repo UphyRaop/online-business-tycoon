@@ -11,7 +11,7 @@ const Menu = preload("res://menu_view.gd")
 const Calendar = preload("res://game_calendar.gd")
 const AdsView = preload("res://advertising_view.gd")
 const StoresView = preload("res://stores_view.gd")
-const NAV := ["Dashboard", "Market", "Orders", "Business", "Finance"]
+const NAV := ["Dashboard", "Market", "Order", "Business", "Finance"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
 const PREFERENCES := "user://display.cfg"
@@ -28,6 +28,9 @@ var status: Label
 var notice := ""
 var error_notice := false
 var selected_product := 0
+var catalog_category := -1
+var catalog_search := ""
+var category_last_page := {"Dashboard": "Dashboard", "Market": "Market", "Order": "Orders", "Business": "Business", "Finance": "Finance"}
 var period := 0
 var statement := 0
 var report_end := 0
@@ -83,14 +86,33 @@ func action(parent: Node, title: String, callback: Callable, accent: bool = fals
 	var node := Button.new()
 	if OS.has_feature("web"):
 		node.mouse_filter = Control.MOUSE_FILTER_PASS
-	node.text = title
+	node.text = action_title(title)
 	node.custom_minimum_size.y = TOUCH_HEIGHT
 	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	node.pressed.connect(callback)
-	if accent:
+	var action_name := title.strip_edges().to_lower()
+	if accent or action_name.begins_with("create") or action_name.begins_with("save") or action_name.begins_with("register") or action_name.begins_with("continue") or action_name.begins_with("apply") or action_name.begins_with("launch") or action_name.begins_with("open "):
 		Style.primary(node)
+	elif action_name.contains("delete") or action_name.contains("permanently remove") or action_name == "stop" or action_name == "deactivate":
+		Style.danger(node)
+	elif action_name.contains("confirm") or action_name.contains("complete") or action_name.contains("approve") or action_name.contains("refund"):
+		Style.success(node)
+	elif action_name == "cancel" or action_name == "back" or action_name == "close" or action_name.begins_with("discard") or action_name == "previous" or action_name == "next":
+		Style.secondary(node)
 	parent.add_child(node)
 	return node
+
+func action_title(value: String) -> String:
+	var parts := value.split(" ", false)
+	for index in parts.size():
+		var word: String = parts[index]
+		if word.is_empty(): continue
+		var acronym := word.to_upper() in ["CPM", "CPC", "CTR", "CPA", "ROAS", "SKU", "ROI", "CEO", "ID", "UI"]
+		if acronym:
+			parts[index] = word.to_upper()
+		else:
+			parts[index] = word.substr(0, 1).to_upper() + word.substr(1)
+	return " ".join(parts)
 
 func dropdown(parent: Node, choices: Array, selected: int) -> OptionButton:
 	var node := OptionButton.new()
@@ -343,12 +365,65 @@ func navigate(target: String) -> void:
 	# Older in-session or serialized navigation targets are redirected to the
 	# consolidated Business > Advertising destination.
 	if target == "Growth": target = "Advertising"
+	if target == "Order": target = "Orders"
+	if target in NAV:
+		if target == primary_category(page):
+			target = "Orders" if target == "Order" else target
+		else:
+			target = str(category_last_page.get(target, target))
 	if target != "Store Management": show_new_store_form = false
 	discard_form_then(func():
 		page = target
+		category_last_page[primary_category(target)] = target
 		set_notice("")
 		render()
 	)
+
+func primary_category(target: String) -> String:
+	if target in ["Market", "My Products", "Store Management", "Store Listings"]: return "Market"
+	if target in ["Orders", "Pre-orders"]: return "Order"
+	if target in ["Business", "Advertising", "Campaign Manager", "Campaign Details", "Advertising Analytics"]: return "Business"
+	if target in ["Finance", "Store Profitability"]: return "Finance"
+	return "Dashboard"
+
+func route_secondary(target: String) -> void:
+	if target == "Pre-orders":
+		discard_form_then(func():
+			page = target
+			category_last_page["Order"] = target
+			set_notice("")
+			render()
+		)
+		return
+	if target == "Returns & Service":
+		orders_tab = 1
+		target = "Orders"
+	navigate(target)
+
+func secondary_navigation(parent: Node) -> void:
+	var category := primary_category(page)
+	var routes: Array = []
+	match category:
+		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Stores and Websites", "Store Management"], ["Product Listings", "Store Listings"]]
+		"Order": routes = [["Customer Orders", "Orders"], ["Pre-orders", "Pre-orders"], ["Returns and Service", "Returns & Service"]]
+		"Business": routes = [["Company Profile", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Advertising Analytics", "Advertising Analytics"]]
+		"Finance": routes = [["Statements", "Finance"], ["Store Profitability", "Store Profitability"]]
+		_: return
+	var strip := FlowContainer.new()
+	strip.add_theme_constant_override("h_separation", 8)
+	strip.add_theme_constant_override("v_separation", 6)
+	parent.add_child(strip)
+	for route in routes:
+		var title: String = route[0]
+		var target: String = route[1]
+		var selected := false
+		if target == "Returns & Service": selected = page == "Orders" and orders_tab == 1
+		elif target == "Pre-orders": selected = page == "Pre-orders"
+		elif target == "Customer Orders": selected = page == "Orders" and orders_tab != 1
+		elif target == "Store Profitability": selected = page == "Store Profitability"
+		else: selected = page == target
+		var tab: Button = action(strip, title, route_secondary.bind(target), selected)
+		tab.custom_minimum_size.x = 150
 
 func render() -> void:
 	edit_checks.clear()
@@ -414,7 +489,7 @@ func render() -> void:
 	divider(shell)
 	var nav := row(shell)
 	for target in NAV:
-		var tab := action(nav, target, navigate.bind(target), target == page)
+		var tab := action(nav, target, navigate.bind(target), target == primary_category(page))
 		tab.add_theme_font_size_override("font_size", 13)
 		tab.clip_text = true
 		tab.size_flags_stretch_ratio = 1.3 if target == "Dashboard" else 1.0
@@ -423,11 +498,13 @@ func render() -> void:
 			style.content_margin_left = 4
 			style.content_margin_right = 4
 			tab.add_theme_stylebox_override(button_state, style)
+	secondary_navigation(shell)
 	match page:
 		"Dashboard": dashboard()
 		"Market": Market.show(self)
 		"My Products": Products.show(self)
 		"Orders": Operations.show(self)
+		"Pre-orders": Operations.preorders(self)
 		"Business": business()
 		"Finance": finance()
 		"Advertising": AdsView.overview(self)
@@ -435,11 +512,12 @@ func render() -> void:
 		"Campaign Details": AdsView.details(self)
 		"Advertising Analytics": AdsView.analytics(self)
 		"Store Management": StoresView.management(self)
+		"Store Profitability": StoresView.profitability(self)
 		"Store Listings": StoresView.listings(self)
 
 func setup() -> void:
 	var details := card("Company registration")
-	details.add_child(label("Register your company and entrepreneur profile. Create stores later in Business → Stores.", 15, Style.MUTED))
+	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Stores.", 15, Style.MUTED))
 	var owner := field(details, "Entrepreneur name", "")
 	var company := field(details, "Company name", "")
 	details.add_child(label("Starting country", 14, Style.MUTED))
@@ -472,15 +550,49 @@ func dashboard() -> void:
 	var totals := sim.report(sim.state.day)
 	var overview := card(sim.state.company)
 	overview.add_child(label(sim.state.owner + ", CEO", 16, Style.MUTED))
-	overview.add_child(label("CASH BALANCE", 13, Style.MUTED))
-	overview.add_child(label(money(sim.state.cash), 32, Style.GOLD))
+	overview.add_child(label("Bank Balance", 13, Style.MUTED))
+	overview.add_child(label(money(totals.closing_cash), 32, Style.GOLD))
 	divider(overview)
 	metric(overview, "Lifetime net sales", money(totals.sales - totals.refunds))
 	metric(overview, "Lifetime net profit", money(Sim.net(totals)), profit_color(Sim.net(totals)))
 	metric(overview, "Orders fulfilled", str(totals.channels[0].orders + totals.channels[1].orders + totals.channels[2].orders))
 	metric(overview, "Open orders", str(sim.state.active_orders.size()))
 	metric(overview, "Store reputation", "%d / 100" % sim.state.reputation)
+	var active_marketplaces := 0
+	var active_websites := 0
+	for store in sim.state.stores:
+		if not store.active: continue
+		if int(store.type) == 0: active_marketplaces += 1
+		else: active_websites += 1
+	metric(overview, "Active Marketplace Stores", str(active_marketplaces))
+	metric(overview, "Active Websites", str(active_websites))
+	var active_campaigns := 0
+	for campaign in sim.state.advertising.campaigns.values():
+		if campaign.status == "active": active_campaigns += 1
+	metric(overview, "Active Advertising Campaigns · Lifetime Spend", "%d · %s" % [active_campaigns, money(totals.advertising)])
 	action(overview, "My Products", navigate.bind("My Products"))
+	var alerts: VBoxContainer = card("Business Alerts")
+	if active_marketplaces == 0 and active_websites == 0:
+		alerts.add_child(label("Create a marketplace store or website to start selling.", 14, Style.GOLD))
+	if active_campaigns == 0:
+		alerts.add_child(label("No advertising campaigns are currently active.", 14, Style.MUTED))
+	var outstanding_preorders := 0
+	var overdue_preorders := 0
+	for order in sim.state.orders.values():
+		if order.get("preorder", false) and order.status not in ["delivered", "cancelled"]:
+			outstanding_preorders += 1
+			if int(order.get("expected_restock", 0)) > 0 and sim.state.day > int(order.expected_restock): overdue_preorders += 1
+	if outstanding_preorders > 0:
+		alerts.add_child(label("%d customer pre-orders are waiting for stock or fulfillment." % outstanding_preorders, 14, Style.GOLD))
+	if overdue_preorders > 0:
+		alerts.add_child(label("%d pre-orders are past their estimated replenishment date." % overdue_preorders, 14, Style.RED))
+	var delayed_shipments := 0
+	for batch in sim.state.inbound:
+		if batch.get("delayed", false): delayed_shipments += 1
+	if delayed_shipments > 0:
+		alerts.add_child(label("%d supplier shipments are delayed." % delayed_shipments, 14, Style.GOLD))
+	if alerts.get_child_count() == 1:
+		alerts.add_child(label("No business alerts.", 14, Style.MUTED))
 	var time := card("Advance time")
 	time.add_child(label("Each simulated day generates orders and charges operating expenses.", 14, Style.MUTED))
 	var controls := row(time)
@@ -639,7 +751,7 @@ func income_statement(report: Dictionary) -> void:
 func balance_sheet(report: Dictionary) -> void:
 	var view := card(STATEMENTS[1])
 	view.add_child(label("As of %s" % Calendar.format(report.end), 14, Style.MUTED))
-	metric(view, "Cash", money(maxi(0, report.closing_cash)))
+	metric(view, "Bank Balance", money(report.closing_cash))
 	metric(view, "Inventory at cost", money(report.inventory))
 	metric(view, "Supplier goods in transit", money(report.goods_in_transit))
 	view.add_child(label("Inventory is on hand or reserved for warehouse fulfillment.", 13, Style.MUTED))

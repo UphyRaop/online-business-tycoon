@@ -210,6 +210,8 @@ static func valid_operations(state: Dictionary, committed_cost: int, goods_in_tr
 			var listing: Variant = store.listings[product]
 			if not valid_product(product) or not listing is Dictionary or not listing.get("price") is int or listing.price < 1 or not listing.get("listed") is bool:
 				return false
+			if listing.get("allow_preorders", false) is not bool:
+				return false
 	if state.next_store <= 0 or (not store_ids.is_empty() and state.next_store <= store_ids.keys().max()):
 		return false
 	if not valid_advertising(state):
@@ -244,7 +246,7 @@ static func valid_operations(state: Dictionary, committed_cost: int, goods_in_tr
 			return false
 		if order.case_status == "open":
 			cases[id] = true
-		if order.status == "delivered":
+		if order.status in ["delivered", "cancelled"]:
 			continue
 		active[id] = true
 		deposits -= order.total
@@ -352,12 +354,20 @@ static func valid_order(order: Variant, id: int) -> bool:
 			return false
 	if order.total < 1 or order.channel not in [0, 1] or order.method not in range(Catalog.SHIPPING.size()):
 		return false
-	if order.get("status") not in ["queued", "shipped", "delivered"] or order.get("case_status") not in ["", "open", "resolved", "declined", "refunded"] or not order.get("reason") is String:
+	if order.get("status") not in ["queued", "shipped", "delivered", "cancelled"] or order.get("case_status") not in ["", "open", "resolved", "declined", "refunded"] or not order.get("reason") is String:
+		return false
+	if not order.get("preorder", false) is bool:
+		return false
+	if order.get("preorder", false) and (order.get("preorder_status") not in ["awaiting_stock", "stock_allocated", "ready_for_fulfillment", "shipped", "delivered", "cancelled"] or not order.get("expected_restock") is int or not order.get("fulfillment_delay") is int or order.expected_restock < 0 or order.fulfillment_delay < 0):
 		return false
 	var priced_lines := 0
 	var order_revenue := 0
 	for item in order.items:
-		if not valid_lot(item) or not valid_product(item.get("product")):
+		var waiting_stock: bool = bool(order.get("preorder", false)) and bool(item.get("awaiting_stock", false))
+		if waiting_stock:
+			if item.get("cost") != 0 or not valid_product(item.get("product")):
+				return false
+		elif not valid_lot(item) or not valid_product(item.get("product")):
 			return false
 		if item.has("direct_supplier"):
 			var direct_supplier: Variant = item.direct_supplier
