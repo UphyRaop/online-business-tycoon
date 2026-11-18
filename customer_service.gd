@@ -54,6 +54,27 @@ static func can_refund(state: Dictionary, order: Dictionary) -> bool:
 	return order.get("status") == "delivered" and not order.refunded and (
 		order.case_status == "open" or state.day - order.delivered <= RETURN_WINDOW)
 
+static func cancel_preorder(sim: RefCounted, id: int) -> String:
+	var state: Dictionary = sim.state
+	var order: Dictionary = state.orders.get(id, {})
+	if order.is_empty() or not order.get("preorder", false) or order.status in ["delivered", "cancelled"]:
+		return "This pre-order can no longer be cancelled."
+	var row: Dictionary = state.ledger.back()
+	state.cash -= int(order.total)
+	row.deposits -= int(order.total)
+	for line in order.items:
+		if line.get("awaiting_stock", false) or line.has("direct_supplier"): continue
+		sim.add_stock(int(line.product), {"units": 1, "cost": int(line.cost), "quality": float(line.quality),
+			"freight": int(line.get("freight", 0)), "supplier": int(line.get("supplier", 0)),
+			"supplier_id": str(line.get("supplier_id", "")), "supplier_name": str(line.get("supplier_name", ""))})
+	order.status = "cancelled"
+	order.preorder_status = "cancelled"
+	order.refunded = true
+	order.case_status = "refunded"
+	state.active_orders.erase(id)
+	Advertising.note_preorder_cancel(state, order)
+	return ""
+
 static func refund(sim: RefCounted, id: int) -> String:
 	var state: Dictionary = sim.state
 	var order: Dictionary = state.orders.get(id, {})

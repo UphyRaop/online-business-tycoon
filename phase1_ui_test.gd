@@ -25,7 +25,7 @@ func controls(node: Node, type: String) -> Array:
 
 func press(title: String) -> void:
 	for button in controls(app, "Button"):
-		if button.text == title and not button.disabled and button.is_visible_in_tree():
+		if button.text.to_lower() == title.to_lower() and not button.disabled and button.is_visible_in_tree():
 			button.pressed.emit()
 			return
 	expect(false, "Missing enabled button " + title)
@@ -55,7 +55,7 @@ func option_after_label(prefix: String) -> OptionButton:
 
 func open_first_store_listing() -> void:
 	press("Manage stores")
-	var listings := controls(app, "Button").filter(func(button): return button.text == "Manage listings")
+	var listings := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
 	if listings.is_empty():
 		expect(false, "Store Management exposes per-store listings")
 		return
@@ -114,22 +114,22 @@ func run() -> void:
 	select(choices[0], 1)
 	choices = controls(app, "OptionButton")
 	select(choices[1], 0)
-	expect(has_label("Minimum 1 ·"), "Changing supplier exposes quotation terms")
+	expect(has_label("Order quantity 1–500"), "Changing supplier exposes its minimum and maximum quantity terms")
 	await settle("03-market")
-	inputs = controls(app, "LineEdit")
-	inputs[0].text = "0"
+	var quantity: LineEdit = field_for_label("Order quantity")
+	quantity.text = "0"
 	press("Purchase stock")
-	expect(has_label("Enter a quantity"), "Purchase validation displays")
-	inputs[0].text = "10"
+	expect(has_label("Enter a quantity from"), "Purchase validation displays supplier-specific quantity limits")
+	quantity.text = "10"
 	press("Purchase stock")
 	expect(app.sim.stock(1) == 0 and app.sim.state.inbound[0].units == 10, "Purchase button schedules inbound stock")
 	press("Manage stores")
-	var listings_buttons := controls(app, "Button").filter(func(button): return button.text == "Manage listings")
+	var listings_buttons := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
 	if not listings_buttons.is_empty():
 		listings_buttons[0].pressed.emit()
 	else:
 		expect(false, "Store Management exposes per-store listings")
-	select(controls(app, "OptionButton").back(), 1)
+	select(controls(app, "OptionButton")[1], 1)
 	press("Save store listing")
 	expect(Stores.listing(app.sim.state, 0, 1).listed, "Store listing is published through Store Management")
 	inputs = controls(app, "LineEdit")
@@ -179,12 +179,12 @@ func run() -> void:
 	press("My Products")
 	press("Manage Wireless Earbuds")
 	press("Manage stores")
-	var store_listing_buttons := controls(app, "Button").filter(func(button): return button.text == "Manage listings")
+	var store_listing_buttons := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
 	if not store_listing_buttons.is_empty():
 		store_listing_buttons[0].pressed.emit()
 	else:
 		expect(false, "Store listing can be paused through Store Management")
-	select(controls(app, "OptionButton").back(), 0)
+	select(controls(app, "OptionButton")[1], 0)
 	press("Save store listing")
 	expect(not Stores.listing(app.sim.state, 0, 1).listed, "Store listing pause action")
 	var saved := Slots.read(Slots.AUTOSAVE)

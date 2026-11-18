@@ -4,6 +4,7 @@ const Catalog = preload("res://catalog.gd")
 const Calendar = preload("res://game_calendar.gd")
 const Fulfillment = preload("res://fulfillment.gd")
 const Service = preload("res://customer_service.gd")
+const Stores = preload("res://store_manager.gd")
 const Style = preload("res://corporate_theme.gd")
 const PAGE_SIZE := 5
 const FILTERS := ["Active orders", "Queued", "In transit", "Delivered", "All orders"]
@@ -24,6 +25,74 @@ static func show(app: Control) -> void:
 		1: service(app)
 		2: analytics(app)
 		3: shipping_settings(app)
+
+static func preorders(app: Control) -> void:
+	var state: Dictionary = app.sim.state
+	var view: VBoxContainer = app.card("Pre-orders")
+	var ids: Array = []
+	for id in state.orders:
+		if state.orders[id].get("preorder", false): ids.append(id)
+	ids.sort_custom(func(a: int, b: int):
+		var first: Dictionary = state.orders[a]
+		var second: Dictionary = state.orders[b]
+		return first.placed < second.placed if first.placed != second.placed else a < b
+	)
+	var pending := ids.filter(func(id): return state.orders[id].status not in ["delivered", "cancelled"])
+	app.metric(view, "Outstanding pre-orders", str(pending.size()))
+	var overdue := 0
+	for id in pending:
+		var order: Dictionary = state.orders[id]
+		if int(order.get("expected_restock", 0)) > 0 and state.day > int(order.expected_restock): overdue += 1
+	if overdue > 0:
+		view.add_child(app.label("%d pre-orders are past their estimated replenishment date. Review supplier shipments." % overdue, 14, Style.GOLD))
+	if ids.is_empty():
+		view.add_child(app.label("No customer pre-orders yet. Enable pre-orders on a product listing in Store Management.", 14, Style.MUTED))
+		return
+	for id in ids:
+		var order: Dictionary = state.orders[id]
+		var store: Dictionary = Stores.get_store(state, int(order.store_id))
+		var card: VBoxContainer = app.card("Pre-order #%04d" % int(id))
+		var product_names := PackedStringArray()
+		for line in order.items:
+			product_names.append(Catalog.PRODUCTS[int(line.product)].name)
+		app.metric(card, "Product", " + ".join(product_names))
+		app.metric(card, "Store / Website", str(store.get("name", "Unknown store")))
+		app.metric(card, "Quantity", str(order.items.size()))
+		app.metric(card, "Order date", Calendar.format(int(order.placed)))
+		app.metric(card, "Payment", "Collected · held as customer deposit" if order.status != "delivered" else "Captured · revenue recognized on delivery")
+		app.metric(card, "Pre-order status", _preorder_status(str(order.get("preorder_status", "awaiting_stock"))))
+		app.metric(card, "Customer wait", "%d days estimated" % int(order.get("fulfillment_delay", 0)))
+		if int(order.get("expected_restock", 0)) > 0 and order.status not in ["delivered", "cancelled"]:
+			var confirmed := false
+			for batch in state.inbound:
+				if int(batch.product) in order.items.map(func(line): return int(line.product)):
+					confirmed = true
+			app.metric(card, "Estimated replenishment", "%s%s" % [Calendar.format(int(order.expected_restock)), " · shipment confirmed" if confirmed else " · estimate only"])
+		else:
+			app.metric(card, "Estimated replenishment", "Uncertain" if order.status not in ["delivered", "cancelled"] else "Completed")
+		app.metric(card, "Payment amount", app.money(int(order.total)))
+		if order.status not in ["delivered", "cancelled"]:
+			app.action(card, "Cancel and refund pre-order", func():
+				var error := Service.cancel_preorder(app.sim, int(id))
+				if not error.is_empty():
+					app.set_notice(error, true)
+					return
+				Fulfillment.allocate_preorders(app.sim)
+				app.persist("Pre-order cancelled. Customer deposit refunded.")
+				app.refresh_view()
+			)
+		elif order.status == "delivered" and Service.can_refund(state, order):
+			app.action(card, "Issue refund", refund.bind(app, int(id)))
+
+static func _preorder_status(value: String) -> String:
+	match value:
+		"awaiting_stock": return "Pre-order placed · Awaiting stock"
+		"stock_allocated": return "Stock allocated · Awaiting remaining items"
+		"ready_for_fulfillment": return "Ready for fulfillment"
+		"shipped": return "Shipped"
+		"delivered": return "Delivered"
+		"cancelled": return "Cancelled / refunded"
+		_: return value.capitalize()
 
 static func shipping_settings(app: Control) -> void:
 	var state: Dictionary = app.sim.state
@@ -152,6 +221,8 @@ static func tracking(app: Control, view: VBoxContainer, order: Dictionary) -> vo
 	var state: Dictionary = app.sim.state
 	app.metric(view, "Placed", Calendar.format(order.placed))
 	app.metric(view, "Promised", Calendar.format(order.promise))
+	if order.get("preorder", false):
+		view.add_child(app.label("Pre-order · %s" % _preorder_status(str(order.get("preorder_status", "awaiting_stock"))), 14, Style.GOLD))
 	match order.status:
 		"queued":
 			view.add_child(app.label("Awaiting dispatch", 15, Style.GOLD))

@@ -10,6 +10,8 @@ const GOLD := Color("#e8c58b")
 const INK := Color("#22190f")
 const GREEN := Color("#7cdbb1")
 const RED := Color("#ff9d9c")
+const SUCCESS_INK := Color("#10251d")
+const DANGER_INK := Color("#341514")
 
 static func box(fill: Color, border: Color, radius: int, padding: int) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
@@ -56,8 +58,22 @@ static func build() -> Theme:
 	return theme
 
 static func primary(control: Button) -> void:
-	control.add_theme_stylebox_override("normal", box(GOLD, GOLD, 9, 10))
-	control.add_theme_stylebox_override("hover", box(GOLD.lightened(0.18), GOLD, 9, 10))
-	control.add_theme_stylebox_override("pressed", box(GOLD.darkened(0.14), GOLD, 9, 10))
+	role(control, GOLD, INK)
+
+static func secondary(control: Button) -> void:
+	role(control, SURFACE, TEXT)
+
+static func success(control: Button) -> void:
+	role(control, GREEN, SUCCESS_INK)
+
+static func danger(control: Button) -> void:
+	role(control, RED, DANGER_INK)
+
+static func role(control: Button, fill: Color, ink: Color) -> void:
+	control.add_theme_stylebox_override("normal", box(fill, fill, 9, 10))
+	control.add_theme_stylebox_override("hover", box(fill.lightened(0.15), fill.lightened(0.18), 9, 10))
+	control.add_theme_stylebox_override("pressed", box(fill.darkened(0.13), fill.darkened(0.1), 9, 10))
+	var focus := box(fill, GOLD, 9, 10)
+	control.add_theme_stylebox_override("focus", focus)
 	for color in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-		control.add_theme_color_override(color, INK)
+		control.add_theme_color_override(color, ink)

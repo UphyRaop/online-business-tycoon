@@ -81,12 +81,12 @@ func run() -> void:
 	app.sim.advance(8)
 	press("Advertising Analytics")
 	expect(has_label("Advertising Analytics"), "Campaign details opens advertising analytics")
-	press("Previous")
-	press("Next")
-	expect(has_label("Campaigns compared") and has_label("Portrait launch") and has_label("CPM"), "Analytics renders campaign comparisons and complete cost metrics")
-	select(controls(app, "OptionButton").back(), 2)
+	expect(has_label("Campaigns matched") and has_label("Portrait launch") and has_label("CPM")
+		and has_label("Advertising Platform") and has_label("Reporting Period") and has_label("Destination"),
+		"Analytics labels its filters and renders complete cost metrics")
+	select(controls(app, "OptionButton")[2], 3)
 	expect(not has_label("Portrait launch"), "Campaign status filter removes active campaigns when Paused is selected")
-	select(controls(app, "OptionButton").back(), 0)
+	select(controls(app, "OptionButton")[2], 0)
 	expect(has_label("Portrait launch"), "Campaign status filter restores the all-status comparison")
 	await settle("phase3-analytics")
 	press("Business")
@@ -119,7 +119,7 @@ func run() -> void:
 		and app.sim.state.ledger.back().store_setup == store_setup_before + website_setup_cost,
 		"Website activates only after its required setup cost is charged and recorded")
 	await settle("phase3-stores")
-	var manage_buttons := controls(app, "Button").filter(func(button): return button.text == "Manage listings")
+	var manage_buttons := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
 	if not manage_buttons.is_empty():
 		manage_buttons.back().pressed.emit()
 	else:

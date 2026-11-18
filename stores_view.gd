@@ -2,6 +2,9 @@ extends RefCounted
 
 const Catalog = preload("res://catalog.gd")
 const Stores = preload("res://store_manager.gd")
+const Supply = preload("res://supply.gd")
+const Fulfillment = preload("res://fulfillment.gd")
+const Calendar = preload("res://game_calendar.gd")
 const Style = preload("res://corporate_theme.gd")
 
 static func management(app: Control) -> void:
@@ -45,8 +48,8 @@ static func management(app: Control) -> void:
 		var setup: VBoxContainer = app.card("Open a new store")
 		var name: LineEdit = app.field(setup, "Store name", "", 40)
 		var brand: LineEdit = app.field(setup, "Brand name", app.sim.state.brand, 40)
-		var kind: OptionButton = app.dropdown(setup, ["Marketplace", "Own Website"], 0)
-		var domain: LineEdit = app.field(setup, "Website domain (required for Own Website)", "", 64)
+		var kind: OptionButton = app.dropdown(setup, ["Marketplace", "Website"], 0)
+		var domain: LineEdit = app.field(setup, "Website domain (required for Website)", "", 64)
 		var platform: OptionButton = app.dropdown(setup, Stores.MARKETPLACES, 0)
 		var website_platform_names: Array[String] = []
 		website_platform_names.append("Select Website Platform")
@@ -109,6 +112,24 @@ static func _website_summary(store: Dictionary) -> String:
 	var index := Stores.website_platform_index(platform_id)
 	return (Stores.WEBSITE_PLATFORMS[index].name if index >= 0 else "Legacy website") + " · " + str(store.domain)
 
+static func profitability(app: Control) -> void:
+	var summary: VBoxContainer = app.card("Store Profitability")
+	summary.add_child(app.label("Lifetime results by marketplace store and website. Shared company inventory costs are assigned to the order that consumes each unit.", 14, Style.MUTED))
+	if app.sim.state.stores.is_empty():
+		summary.add_child(app.label("No stores or websites have been created yet.", 14, Style.MUTED))
+		app.action(summary, "Open Store Management", app.navigate.bind("Store Management"))
+		return
+	for store in app.sim.state.stores:
+		var result: Dictionary = Stores.report(app.sim.state, int(store.id))
+		var profit := int(result.sales) - int(result.refunds) - int(result.cogs) - int(result.fees) - int(result.shipping) - int(result.advertising) - int(result.setup) - int(result.operating)
+		var card: VBoxContainer = app.card(str(store.name))
+		var kind: String = Stores.MARKETPLACES[int(store.platform)] if int(store.type) == 0 and int(store.get("platform", -1)) in range(Stores.MARKETPLACES.size()) else _website_summary(store)
+		app.metric(card, "Destination · Status", "%s · %s" % [kind, "Active" if store.active else "Inactive"])
+		app.metric(card, "Net sales", app.money(int(result.sales) - int(result.refunds)))
+		app.metric(card, "Product and fulfillment costs", app.money(int(result.cogs) + int(result.fees) + int(result.shipping)))
+		app.metric(card, "Advertising · Setup · Operations", "%s · %s · %s" % [app.money(result.advertising), app.money(result.setup), app.money(result.operating)])
+		app.metric(card, "Net store profit", app.money(profit), app.profit_color(profit))
+
 static func listings(app: Control) -> void:
 	var store := Stores.get_store(app.sim.state, app.selected_store_id)
 	if store.is_empty():
@@ -125,11 +146,24 @@ static func listings(app: Control) -> void:
 	var picker: OptionButton = app.dropdown(heading, products, app.selected_product)
 	var item: Dictionary = app.sim.product_state(app.selected_product)
 	var listing := Stores.listing(app.sim.state, int(store.id), app.selected_product)
-	app.metric(heading, "Company inventory", "%d available · %d reserved / inbound" % [app.sim.stock(app.selected_product), Stores.incoming(app.sim.state, app.selected_product)])
+	var outstanding := Fulfillment.outstanding_preorders(app.sim.state, app.selected_product, int(store.id))
+	app.metric(heading, "Company inventory", "%d available · %d inbound" % [app.sim.stock(app.selected_product), Stores.incoming(app.sim.state, app.selected_product)])
+	app.metric(heading, "Outstanding pre-order quantity", str(outstanding))
+	var product_supplier: int = int(item.get("supplier", Catalog.DEFAULT_SUPPLIER))
+	var expected_restock := 0
+	for batch in app.sim.state.inbound:
+		if int(batch.product) == app.selected_product and (expected_restock == 0 or int(batch.eta) < expected_restock): expected_restock = int(batch.arrival if batch.get("delayed", false) else batch.eta)
+	if expected_restock > 0:
+		app.metric(heading, "Estimated replenishment", Calendar.format(expected_restock) + " · shipment confirmed")
+	else:
+		app.metric(heading, "Estimated replenishment", Calendar.format(app.sim.state.day + int(Catalog.SUPPLIERS[product_supplier].lead)) + " · estimate only")
 	var price: LineEdit = app.field(heading, "Store selling price (%s)" % Catalog.CURRENCIES[app.sim.state.country], app.amount_text(listing.price, true).replace(",", ""), 16)
 	price.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
 	var status: OptionButton = app.dropdown(heading, ["Draft", "Listed"], 1 if listing.listed else 0)
-	var mark_saved: Callable = app.watch_edits([picker, price, status])
+	heading.add_child(app.label("Allow Pre-orders", 14, Style.MUTED))
+	var preorders: OptionButton = app.dropdown(heading, ["Off", "On"], 1 if listing.get("allow_preorders", false) else 0)
+	preorders.tooltip_text = "Accept new orders while this listing is out of stock. Existing pre-orders remain accepted if switched off."
+	var mark_saved: Callable = app.watch_edits([picker, price, status, preorders])
 	picker.item_selected.connect(func(index: int):
 		app.discard_form_then(func():
 			app.selected_product = index
@@ -138,7 +172,7 @@ static func listings(app: Control) -> void:
 	)
 	app.action(heading, "Save store listing", func():
 		var cents: int = app.price_cents(price.text)
-		var error := Stores.set_listing(app.sim.state, int(store.id), app.selected_product, cents, status.selected == 1)
+		var error := Stores.set_listing(app.sim.state, int(store.id), app.selected_product, cents, status.selected == 1, preorders.selected == 1)
 		if not error.is_empty():
 			app.set_notice(error, true)
 			return
