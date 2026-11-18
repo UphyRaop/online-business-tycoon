@@ -64,8 +64,9 @@ static func management(app: Control) -> void:
 		)
 		var status: String = "Deactivate" if store.active else "Activate"
 		app.action(actions, status, func():
-			Stores.set_active(app.sim.state, id, not store.active)
-			app.persist("%s is now %s." % [store.name, "active" if not store.active else "inactive"])
+			var enabled: bool = not store.active
+			Stores.set_active(app.sim.state, id, enabled)
+			app.persist("%s is now %s." % [store.name, "active" if enabled else "inactive"])
 			app.refresh_view()
 		)
 
