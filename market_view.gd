@@ -20,7 +20,9 @@ static func show(app: Control) -> void:
 	var stock_label: Label = app.label("", 15, Style.MUTED)
 	catalog.add_child(stock_label)
 	supplier_form(app, product, item, stock_label)
-	listing_form(app, product, item)
+	var listings: VBoxContainer = app.card("Store listings")
+	listings.add_child(app.label("Product listings belong to individual stores. Create a marketplace or website and manage its listings under Business → Stores.", 14, Style.MUTED))
+	app.action(listings, "Manage stores", app.navigate.bind("Store Management"), true)
 	var offers := Offers.show(app, product)
 	app.action(links, "Offers", func():
 		var scroll: ScrollContainer = app.body.get_parent()
@@ -78,8 +80,6 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		app.sim.select_supplier(product, index)
 		app.persist("Supplier selected.")
 		refresh.call()
-		# The listing estimate uses the active supplier quote when stock is empty.
-		update_listing_cost(app)
 	)
 	app.action(supply, "Negotiate quote", func():
 		var result := Supply.negotiate(state, product, supplier.selected, units_from(quantity.text))
@@ -88,7 +88,6 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			return
 		app.persist("Negotiated quote received.")
 		refresh.call()
-		update_listing_cost(app)
 	)
 	app.action(supply, "Purchase stock", func():
 		var result: String = app.sim.buy(product, supplier.selected, units_from(quantity.text))
@@ -98,7 +97,6 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		app.persist("Purchase order placed. Track it below.")
 		refresh.call()
 		refresh_inbound(app, product, inbound, shipments)
-		update_listing_cost(app)
 	, true)
 	refresh.call()
 	refresh_inbound(app, product, inbound, shipments)
@@ -119,64 +117,3 @@ static func refresh_inbound(app: Control, product: int, inbound: VBoxContainer, 
 static func units_from(value: String) -> int:
 	var text := value.strip_edges()
 	return text.to_int() if text.is_valid_int() else 0
-
-static func update_listing_cost(app: Control) -> void:
-	var listing: Node = app.body.find_child("ListingPrice", true, false)
-	if listing != null:
-		listing.text_changed.emit(listing.text)
-
-static func listing_form(app: Control, product: int, item: Dictionary) -> void:
-	var state: Dictionary = app.sim.state
-	var listing: VBoxContainer = app.card("Store listing")
-	listing.add_child(app.label("%s · Marketplace: %s · Brand: %s\nWebsite: %s · %s" % [
-		"Published" if item.listed else "Unpublished", state.store, state.brand, state.website_domain,
-		"Active" if state.website_active else "Inactive"], 15, Style.MUTED))
-	var currency: String = Catalog.CURRENCIES[state.country]
-	var price: LineEdit = app.field(listing, "Selling price per unit (%s)" % currency,
-		app.amount_text(item.price, true).replace(",", ""), 16)
-	price.name = "ListingPrice"
-	price.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
-	listing.add_child(app.label("Sales channels for this listing", 14, Style.MUTED))
-	var channels: OptionButton = app.dropdown(listing, Catalog.CHANNELS, int(item.get("channel_mask", 3)) - 1)
-	var listing_saved: Callable = app.watch_edits([price, channels])
-	var cost_label: Label = app.label("", 14, Style.MUTED)
-	listing.add_child(cost_label)
-	var estimates: Array[Label] = []
-	for channel in Catalog.FEES.size():
-		var estimate: Label = app.label("", 14)
-		listing.add_child(estimate)
-		estimates.append(estimate)
-	listing.add_child(app.label("Estimated contribution includes the channel fee and default outbound customer delivery.", 13, Style.MUTED))
-	var refresh := func(_value: String):
-		var supplier: int = app.sim.product_state(product).supplier
-		var unit: Dictionary = app.sim.unit_cost(product, supplier)
-		var cost: int = unit.landed
-		cost_label.text = "%s · Landed unit cost %s" % [unit.source, app.money(cost)]
-		var cents: int = app.price_cents(price.text)
-		var freight := Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)
-		for channel in estimates.size():
-			estimates[channel].visible = app.sim.channel_enabled(channel) and ((channels.selected + 1) & (1 << channel)) != 0
-			var profit := cents - cost - Catalog.fee(channel, cents) - freight
-			estimates[channel].text = "%s unit profit  %s" % [Catalog.CHANNELS[channel], app.money(profit) if cents > 0 else "—"]
-			estimates[channel].add_theme_color_override("font_color", app.profit_color(profit) if cents > 0 else Style.MUTED)
-	price.text_changed.connect(refresh)
-	channels.item_selected.connect(func(_index: int): refresh.call(price.text))
-	refresh.call(price.text)
-	var save_listing := func(publish: bool):
-		var cents: int = app.price_cents(price.text)
-		if cents < 1:
-			app.set_notice("Enter a selling price from 0.01 to 100,000,000.", true)
-			return
-		app.sim.list_product(product, cents, channels.selected + 1, publish)
-		listing_saved.call()
-		app.persist("Listing saved at %s." % app.money(cents) if publish else "Product draft saved.")
-		app.refresh_view()
-	app.action(listing, "Update listing" if item.listed else "Publish listing", save_listing.bind(true), true)
-	if item.listed:
-		var pause := func():
-			app.sim.unlist(product)
-			app.persist("Listing paused. Stock remains available.")
-			app.refresh_view()
-		app.action(listing, "Pause listing", app.discard_form_then.bind(pause))
-	else:
-		app.action(listing, "Save draft", save_listing.bind(false))

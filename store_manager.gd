@@ -12,8 +12,11 @@ const ACTIVITY_FIELDS := ["sales", "refunds", "cogs", "fees", "shipping", "adver
 static func migration_defaults(state: Dictionary) -> Array:
 	var brand: String = str(state.get("brand", state.get("company", "My Brand")))
 	var website_name := brand + " Website"
+	var marketplace_name := str(state.get("store", "")).strip_edges()
+	if marketplace_name.is_empty():
+		marketplace_name = str(state.get("company", "Marketplace Store")) + " Marketplace"
 	return [
-		{"id": 0, "name": str(state.get("store", "Marketplace Store")), "type": 0,
+		{"id": 0, "name": marketplace_name, "type": 0,
 			"brand": brand, "domain": "", "active": int(state.get("channel", 0)) in [0, 2],
 			"legacy": true, "created": 1, "setup_cost": 0, "daily_cost": 0, "listings": {}},
 		{"id": 1, "name": website_name, "type": 1, "brand": brand,

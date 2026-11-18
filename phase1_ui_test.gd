@@ -30,6 +30,14 @@ func press(title: String) -> void:
 			return
 	expect(false, "Missing enabled button " + title)
 
+func open_first_store_listing() -> void:
+	press("Manage stores")
+	var listings := controls(app, "Button").filter(func(button): return button.text == "Manage listings")
+	if listings.is_empty():
+		expect(false, "Store Management exposes per-store listings")
+		return
+	listings[0].pressed.emit()
+
 func select(option: OptionButton, index: int) -> void:
 	option.select(index)
 	option.item_selected.emit(index)
@@ -68,11 +76,9 @@ func run() -> void:
 	var inputs := controls(app, "LineEdit")
 	inputs[0].text = "Mira Founder"
 	inputs[1].text = "Aster Labs"
-	inputs[2].text = "Aster Shop"
 	var choices := controls(app, "OptionButton")
 	select(choices[0], 4)
 	select(choices[1], 2)
-	select(choices[2], 2)
 	press("Register company")
 	expect(app.sim.state.country == 4 and app.sim.state.difficulty == 2, "Registration saves choices")
 	# Legacy Phase 1 sales-flow fixture explicitly creates its two channel stores.
@@ -94,12 +100,19 @@ func run() -> void:
 	inputs[0].text = "10"
 	press("Purchase stock")
 	expect(app.sim.stock(1) == 0 and app.sim.state.inbound[0].units == 10, "Purchase button schedules inbound stock")
-	press("Publish listing")
-	expect(app.sim.product_state(1).listed, "Publish button activates listing")
+	press("Manage stores")
+	var listings_buttons := controls(app, "Button").filter(func(button): return button.text == "Manage listings")
+	if not listings_buttons.is_empty():
+		listings_buttons[0].pressed.emit()
+	else:
+		expect(false, "Store Management exposes per-store listings")
+	select(controls(app, "OptionButton").back(), 1)
+	press("Save store listing")
+	expect(Stores.listing(app.sim.state, 0, 1).listed, "Store listing is published through Store Management")
 	inputs = controls(app, "LineEdit")
-	inputs[1].text = "250000"
-	press("Update listing")
-	expect(app.sim.product_state(1).price == 25000000, "Price updates")
+	inputs[0].text = "250000"
+	press("Save store listing")
+	expect(Stores.listing(app.sim.state, 0, 1).price == 25000000, "Store-specific listing price updates")
 	press("Dashboard")
 	press("+1")
 	expect(app.sim.state.day == 2 and app.sim.state.inbound.size() == 1, "Dashboard time advances with pending supply")
@@ -123,38 +136,41 @@ func run() -> void:
 	select(controls(app, "OptionButton")[1], 1)
 	await settle("05-balance")
 	press("Business")
-	expect(has_label("Marketplace charges 12%"), "Channel terms render")
 	inputs = controls(app, "LineEdit")
-	inputs[0].text = "Aster Holdings"
-	inputs[1].text = "Aster Brand"
-	inputs[2].text = "Aster Store"
-	inputs[3].text = "aster.example"
-	press("Save names")
-	select(controls(app, "OptionButton")[1], 0)
-	press("Save channels")
-	expect(app.sim.state.channel == 0, "Business channel choice saves")
-	select(controls(app, "OptionButton")[0], 1)
-	press("Save names")
-	expect(app.sim.state.website_active and app.sim.state.channel == 0 and app.sim.channel_enabled(1), "Website channel can be enabled independently")
+	inputs[0].text = "Mira Founder Updated"
+	inputs[1].text = "Aster Holdings"
+	press("Save company profile")
+	expect(app.sim.state.owner == "Mira Founder Updated" and app.sim.state.company == "Aster Holdings"
+		and not has_label("Website domain"), "Company Profile saves identity without exposing website controls")
 	press("Save Game")
 	press("Save to slot 1")
 	press("Back")
 	press("Load Game")
 	press("Load slot 1")
-	expect(app.sim.state.company == "Aster Holdings" and app.sim.state.brand == "Aster Brand" and app.sim.state.store == "Aster Store" and app.sim.state.website_domain == "aster.example", "Local load restores business identities")
+	expect(app.sim.state.company == "Aster Holdings" and app.sim.state.brand == "Aster Labs"
+		and app.sim.state.store.is_empty() and app.sim.state.owner == "Mira Founder Updated"
+		and app.sim.state.stores.size() == 2 and app.sim.state.stores[1].domain == app.sim.state.website_domain,
+		"Local load restores company identity and existing legacy website without profile-side website edits")
 	press("Business")
 	await settle("06-business")
 	press("My Products")
 	press("Manage Wireless Earbuds")
-	press("Pause listing")
-	expect(not app.sim.product_state(1).listed, "Pause listing button")
+	press("Manage stores")
+	var store_listing_buttons := controls(app, "Button").filter(func(button): return button.text == "Manage listings")
+	if not store_listing_buttons.is_empty():
+		store_listing_buttons[0].pressed.emit()
+	else:
+		expect(false, "Store listing can be paused through Store Management")
+	select(controls(app, "OptionButton").back(), 0)
+	press("Save store listing")
+	expect(not Stores.listing(app.sim.state, 0, 1).listed, "Store listing pause action")
 	var saved := Slots.read(Slots.AUTOSAVE)
-	expect(saved.state.day == 41 and not saved.state.products[1].listed, "Mutations autosave")
+	expect(saved.state.day == 41 and not Stores.listing(saved.state, 0, 1).listed, "Mutations autosave")
 	app.queue_free()
 	await process_frame
 	app = Main.instantiate()
 	root.add_child(app)
 	press("Continue Game")
-	expect(app.sim.state.day == 41 and app.sim.state.store == "Aster Store", "The game resumes on launch")
+	expect(app.sim.state.day == 41 and app.sim.state.store.is_empty(), "The game resumes on launch")
 	print("Phase 1 UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)

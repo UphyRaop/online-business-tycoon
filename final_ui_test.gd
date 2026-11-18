@@ -1,5 +1,8 @@
 extends "res://phase1_ui_test.gd"
 
+func first_store_id() -> int:
+	return int(app.sim.state.stores.front().id)
+
 func run() -> void:
 	if OS.get_environment("OBT_ISOLATED_TEST_PROFILE") != "1" or not Slots.latest().is_empty():
 		push_error("Run with a fresh isolated profile.")
@@ -21,25 +24,36 @@ func run() -> void:
 	press("My Products")
 	expect(has_label("Active products") and has_label("Prepare a listing"), "Empty product portfolio is usable")
 	press("Browse catalog")
+	open_first_store_listing()
 	var inputs := controls(app, "LineEdit")
-	inputs[1].text = "83"
-	select(controls(app, "OptionButton")[2], 0)
-	press("Save draft")
-	expect(app.sim.state.products[0].price == 8300 and not app.sim.state.products[0].listed, "Save draft keeps price and channel")
+	inputs[0].text = "83"
+	select(controls(app, "OptionButton").back(), 0)
+	press("Save store listing")
+	expect(Stores.listing(app.sim.state, first_store_id(), 0).price == 8300 and not Stores.listing(app.sim.state, first_store_id(), 0).listed,
+		"Store-specific draft keeps its own price and unpublished status")
+	press("Dashboard")
 	press("My Products")
 	expect(has_label("Draft"), "Prepared products show as Draft")
 	press("Manage Portable Blender")
-	press("Publish listing")
+	open_first_store_listing()
+	select(controls(app, "OptionButton").back(), 1)
+	press("Save store listing")
+	press("Dashboard")
 	press("My Products")
 	expect(has_label("Out of Stock") and app.sim.active_product_count() == 0, "Out-of-stock products are separate from the active total")
 	press("Manage Portable Blender")
 	press("Purchase stock")
-	press("Pause listing")
+	open_first_store_listing()
+	select(controls(app, "OptionButton").back(), 0)
+	press("Save store listing")
 	press("Dashboard")
 	press("+7")
 	press("My Products")
 	press("Manage Portable Blender")
-	press("Publish listing")
+	open_first_store_listing()
+	select(controls(app, "OptionButton").back(), 1)
+	press("Save store listing")
+	press("Dashboard")
 	press("My Products")
 	expect(app.sim.active_product_count() == 1 and has_label("Active"), "A published product with stock shows as Active")
 	press("Dashboard")
@@ -49,8 +63,11 @@ func run() -> void:
 	await settle("final-products")
 	press("Browse catalog")
 	select(controls(app, "OptionButton")[0], 4)
-	press("Save draft")
-	expect(app.sim.state.products.size() == 2 and app.sim.state.products[0].listed and not app.sim.state.products[4].listed, "Two product listings can be managed independently")
+	open_first_store_listing()
+	select(controls(app, "OptionButton").back(), 0)
+	press("Save store listing")
+	expect(Stores.listing(app.sim.state, first_store_id(), 0).listed and not Stores.listing(app.sim.state, first_store_id(), 4).listed,
+		"Two products have independent store-specific listing states")
 	press("Business")
 	press("Save Game")
 	press("Save to slot 1")
@@ -89,7 +106,8 @@ func run() -> void:
 	press("Load Game")
 	press("Load slot 1")
 	resolve_dialog(true)
-	expect(app.sim.state.company == "Aster Holdings" and app.sim.state.products[0].price == 8300, "Load restores a specific company and product state")
+	expect(app.sim.state.company == "Aster Holdings" and Stores.listing(app.sim.state, first_store_id(), 0).price == 8300,
+		"Load restores a specific company and its store-specific product listing")
 	expect(Slots.read(0).state.company == "Second Company", "Loading alone does not overwrite autosave")
 	press("Save Game")
 	press("Save to slot 2")
@@ -118,10 +136,19 @@ func register_company(name: String) -> void:
 	var inputs := controls(app, "LineEdit")
 	inputs[0].text = "Mira"
 	inputs[1].text = name
-	select(controls(app, "OptionButton")[2], 2)
+	select(controls(app, "OptionButton")[1], 2)
 	press("Register company")
-	app.sim.state.stores = Stores.migration_defaults(app.sim.state)
-	app.sim.state.website_active = true
+	expect(app.sim.state.stores.is_empty() and not app.sim.channel_enabled(0) and not app.sim.channel_enabled(1),
+		"New registration starts without marketplace or website destinations")
+	press("Business")
+	press("Store Management")
+	inputs = controls(app, "LineEdit")
+	inputs[0].text = name + " Market"
+	inputs[1].text = name + " Brand"
+	press("Create store")
+	expect(app.sim.state.stores.size() == 1 and app.sim.channel_enabled(0),
+		"A marketplace becomes available only after manual Store Management creation")
+	press("Dashboard")
 
 func resolve_dialog(confirm: bool) -> void:
 	for dialog in controls(app, "ConfirmationDialog"):

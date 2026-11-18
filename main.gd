@@ -11,7 +11,6 @@ const Menu = preload("res://menu_view.gd")
 const Calendar = preload("res://game_calendar.gd")
 const AdsView = preload("res://advertising_view.gd")
 const StoresView = preload("res://stores_view.gd")
-const StoreManager = preload("res://store_manager.gd")
 const NAV := ["Dashboard", "Market", "Orders", "Business", "Finance", "Growth"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
@@ -435,11 +434,9 @@ func render() -> void:
 
 func setup() -> void:
 	var details := card("Company registration")
-	details.add_child(label("Registration is free and opens your first sales channel.", 15, Style.MUTED))
+	details.add_child(label("Register your company and entrepreneur profile. Create stores later in Business → Stores.", 15, Style.MUTED))
 	var owner := field(details, "Entrepreneur name", "")
 	var company := field(details, "Company name", "")
-	var store := field(details, "Store name", "")
-	store.placeholder_text = "Defaults to your company name"
 	details.add_child(label("Starting country", 14, Style.MUTED))
 	var country := dropdown(details, Catalog.COUNTRIES, 0)
 	details.add_child(label("Difficulty", 14, Style.MUTED))
@@ -452,22 +449,15 @@ func setup() -> void:
 	country.item_selected.connect(update_capital)
 	difficulty.item_selected.connect(update_capital)
 	update_capital.call(0)
-	details.add_child(label("Sales channels", 14, Style.MUTED))
-	var channel := dropdown(details, Catalog.CHANNELS, 0)
-	watch_edits([owner, company, store, country, difficulty, channel])
+	watch_edits([owner, company, country, difficulty])
 	action(details, "Register company", func():
 		var owner_name := owner.text.strip_edges()
 		var company_name := company.text.strip_edges()
-		var store_name := store.text.strip_edges()
 		if owner_name.is_empty() or company_name.is_empty():
 			set_notice("Enter an entrepreneur name and a company name.", true)
 			return
-		if store_name.is_empty():
-			store_name = company_name
-		var new_state := Sim.register(owner_name, company_name, store_name,
-			country.selected, difficulty.selected, channel.selected, randi())
-		new_state.stores = []
-		new_state.website_active = false
+		var new_state := Sim.register(owner_name, company_name, "",
+			country.selected, difficulty.selected, 0, randi())
 		enter_game(new_state)
 		persist("Company registered.")
 	, true)
@@ -517,8 +507,6 @@ func channel_cards(report: Dictionary, scope: String) -> void:
 		if channel > 0:
 			divider(channels)
 		var channel_title: String = Catalog.CHANNELS[channel]
-		if channel == 1:
-			channel_title += " · " + sim.state.website_domain
 		channels.add_child(label(channel_title, 17, Style.GOLD))
 		var totals: Dictionary = report.channels[channel]
 		if not sim.channel_enabled(channel) and totals.orders == 0 and totals.hosting == 0 and totals.shipping == 0 and totals.refunds == 0:
@@ -560,66 +548,31 @@ func price_cents(value: String) -> int:
 
 func business() -> void:
 	var profile := card("Company profile")
-	metric(profile, "Entrepreneur", sim.state.owner)
+	metric(profile, "Owned stores", str(sim.state.stores.size()))
 	metric(profile, "Registration", "Active")
 	metric(profile, "Difficulty", Catalog.DIFFICULTIES[sim.state.difficulty])
+	var owner := field(profile, "Entrepreneur / CEO", sim.state.owner)
 	var company := field(profile, "Company name", sim.state.company)
-	var brand := field(profile, "Brand name", sim.state.brand)
-	var store := field(profile, "Store name", sim.state.store)
-	var domain := field(profile, "Website domain", sim.state.website_domain)
-	var website := dropdown(profile, ["Website inactive", "Website active"], 1 if sim.state.website_active else 0)
-	var names_saved := watch_edits([company, brand, store, domain, website])
-	action(profile, "Save names", func():
+	var names_saved := watch_edits([owner, company])
+	action(profile, "Save company profile", func():
+		var owner_name := owner.text.strip_edges()
 		var company_name := company.text.strip_edges()
-		var brand_name := brand.text.strip_edges()
-		var store_name := store.text.strip_edges()
-		var website_domain := domain.text.strip_edges().to_lower()
-		if company_name.is_empty() or brand_name.is_empty() or store_name.is_empty() or website_domain.is_empty():
-			set_notice("Enter a company name, brand, store, and website domain.", true)
+		if owner_name.is_empty() or company_name.is_empty():
+			set_notice("Enter an entrepreneur name and company name.", true)
 			return
+		sim.state.owner = owner_name
 		sim.state.company = company_name
-		sim.state.brand = brand_name
-		sim.state.store = store_name
-		sim.state.website_domain = website_domain
-		sim.state.website_active = website.selected == 1
-		if not sim.state.website_active and sim.state.channel == 1:
-			sim.state.channel = 0
-		StoreManager.sync_legacy(sim.state)
-		StoreManager.sync_legacy_channels(sim.state)
 		names_saved.call()
-		persist("Company identities and website settings saved.")
+		persist("Company profile saved.")
 	)
+	action(card("Stores and listings"), "Store Management", navigate.bind("Store Management"), true)
 	action(card("Inventory and listings"), "My Products", navigate.bind("My Products"))
-	action(card("Growth and expansion"), "Advertising and Stores", navigate.bind("Growth"), true)
-	var channels := card("Sales channels")
-	channels.add_child(label("Marketplace charges %d%% per sale. Your website charges %d%% per sale plus %s per simulated day.\nMarketplace store: %s · Brand: %s\nWebsite: %s · %s" % [
-		Catalog.FEES[0], Catalog.FEES[1], money(Catalog.local_cents(sim.state.country, Catalog.HOSTING)),
-		sim.state.store, sim.state.brand, sim.state.website_domain, "Active" if sim.state.website_active else "Inactive"], 14, Style.MUTED))
-	var selection := dropdown(channels, Catalog.CHANNELS, sim.state.channel)
-	var channels_saved := watch_edits([selection])
-	action(channels, "Save channels", func():
-		sim.state.channel = selection.selected
-		sim.state.website_active = selection.selected != 0
-		StoreManager.sync_legacy(sim.state)
-		StoreManager.sync_legacy_channels(sim.state)
-		channels_saved.call()
-		persist("Sales channels updated.")
-	)
+	action(card("Growth and expansion"), "Advertising", navigate.bind("Growth"))
 	var saves := card("Local progress")
 	saves.add_child(label("Progress saves automatically when you make changes or advance time.", 14, Style.MUTED))
 	var controls := row(saves)
 	action(controls, "Manage Saves", open_screen.bind("Save"))
 	action(controls, "Load Game", open_screen.bind("Load"))
-	var identity_name := field(saves, "Entrepreneur name", sim.state.owner)
-	action(saves, "Save entrepreneur name", func():
-		var value := identity_name.text.strip_edges()
-		if value.is_empty():
-			set_notice("Enter your entrepreneur name.", true)
-			return
-		sim.state.owner = value
-		persist("Entrepreneur name saved.")
-		refresh_view()
-	)
 
 func finance() -> void:
 	var controls := card("Financial statements")

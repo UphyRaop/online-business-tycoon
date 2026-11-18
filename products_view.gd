@@ -15,18 +15,23 @@ static func show(app: Control) -> void:
 	var activity := Summary.collect(state)
 	var count := 0
 	for id in Catalog.PRODUCTS.size():
-		if not state.products.has(id) and not state.quotes.has(id) and not state.offers.has(id):
+		var has_store_listing := false
+		for store in state.stores:
+			if store.get("listings", {}).has(id):
+				has_store_listing = true
+				break
+		if not state.products.has(id) and not state.quotes.has(id) and not state.offers.has(id) and not has_store_listing:
 			continue
 		count += 1
 		var item: Dictionary = sim.product_state(id)
 		var view: VBoxContainer = app.card(Catalog.PRODUCTS[id].name)
 		var available: int = sim.stock(id)
 		var inbound := Supply.incoming(state, id)
-		var channels := PackedStringArray()
-		for channel in Catalog.FEES.size():
-			if sim.product_on_channel(item, channel):
-				channels.append(Catalog.CHANNELS[channel])
-		var status := "Draft" if channels.is_empty() else ("Out of Stock" if available == 0 else "Active")
+		var listed_stores := PackedStringArray()
+		for store in state.stores:
+			if sim.product_on_store(int(store.id), id):
+				listed_stores.append(str(store.name))
+		var status := "Draft" if listed_stores.is_empty() else ("Out of Stock" if available == 0 else "Active")
 		var status_color := Style.GREEN if status == "Active" else (Style.MUTED if status == "Draft" else Style.GOLD)
 		view.add_child(app.label(status, 15, status_color))
 		app.metric(view, "Supplier", Catalog.SUPPLIERS[item.supplier].name)
@@ -40,12 +45,11 @@ static func show(app: Control) -> void:
 		app.metric(view, "Selling price", app.money(item.price))
 		app.metric(view, "Est. unit gross profit", app.money(gross), app.profit_color(gross))
 		app.metric(view, "Est. gross margin", "%.1f%%" % (100.0 * gross / item.price), app.profit_color(gross))
-		if channels.is_empty():
-			app.metric(view, "Prepared channels", Catalog.CHANNELS[int(item.get("channel_mask", 3)) - 1])
+		if listed_stores.is_empty():
+			app.metric(view, "Listed stores", "None")
+			view.add_child(app.label("Create a store and manage its listing under Business → Stores.", 13, Style.MUTED))
 		else:
-			app.metric(view, "Live channels", ", ".join(channels))
-		if channels.is_empty() and item.listed:
-			view.add_child(app.label("Enable a selected sales channel in Business to publish.", 13, Style.MUTED))
+			app.metric(view, "Listed stores", ", ".join(listed_stores))
 		app.divider(view)
 		var totals: Dictionary = activity.get(id, {"units": 0, "revenue": 0, "profit": 0})
 		app.metric(view, "Units sold (net)", str(totals.units))
