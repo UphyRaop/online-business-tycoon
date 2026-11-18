@@ -30,7 +30,10 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func game(country: int = 0, seed_value: int = 153) -> Sim:
-	return Sim.new(Sim.register("Mira", "Aster Labs", "Aster Market", country, 0, 2, seed_value))
+	var data := Sim.register("Mira", "Aster Labs", "Aster Market", country, 0, 2, seed_value)
+	data.website_active = true
+	data.stores = Stores.migration_defaults(data) # These are legacy simulation fixtures, not new-company registration.
+	return Sim.new(data)
 
 func add_delivered_stock(sim: Sim, product: int, units: int) -> void:
 	var result := sim.buy(product, 2, units)
@@ -53,6 +56,8 @@ func reconcile(sim: Sim, context: String) -> void:
 	expect(Saves.valid(sim.state), context + " remains save-valid")
 
 func test_stores() -> void:
+	var fresh := Sim.register("Mira", "New Venture", "New Venture", 0, 0, 2, 12)
+	expect(fresh.stores.is_empty(), "Simulation-level new-company registration starts with zero stores")
 	var sim := game()
 	var state := sim.state
 	expect(Stores.setup_cost(0, 0) == 0 and Stores.setup_cost(1, 0) == 0 and Stores.setup_cost(0, 1) != Stores.setup_cost(1, 1) and Stores.daily_cost(0, 1) != Stores.daily_cost(1, 1),
@@ -63,6 +68,10 @@ func test_stores() -> void:
 	var extra_id: int = state.next_store - 1
 	expect(state.cash == before - marketplace_cost and state.ledger[0].store_setup == marketplace_cost,
 		"Store setup charge is recorded exactly once")
+	var same_platform_id: int = state.next_store
+	expect(Stores.create(state, "Second Shopee", 0, "Aster", "", 0).is_empty(), "Create another store on the same marketplace")
+	var lazada_id: int = state.next_store
+	expect(Stores.create(state, "Aster Lazada", 0, "Aster", "", 2).is_empty(), "Create a store on a second marketplace")
 	expect(Stores.create(state, "Aster Direct", 1, "Aster", "direct.aster.shop") == "", "Create a website store")
 	var site_id: int = state.next_store - 1
 	var website := Stores.get_store(state, site_id)
@@ -70,27 +79,46 @@ func test_stores() -> void:
 	expect(Stores.create(state, "", 0, "Aster") != "", "Reject invalid store setup")
 	var cash_before_day: int = state.cash
 	sim.advance(1)
-	expect(state.ledger[0].store_expenses == Stores.daily_cost(state.country, 0) + Stores.daily_cost(state.country, 1),
+	expect(state.ledger[0].store_expenses == 3 * Stores.daily_cost(state.country, 0) + Stores.daily_cost(state.country, 1),
 		"New active stores incur their type-specific daily recurring costs once")
 	expect(state.cash < cash_before_day, "Recurring store costs reduce company cash")
 	expect(Stores.set_active(state, site_id, false) == "", "Deactivate a website store")
 	var second_day_cost: int = state.ledger[1].store_expenses
 	sim.advance(1)
-	expect(state.ledger[1].store_expenses == Stores.daily_cost(state.country, 0) and second_day_cost == 0,
+	expect(state.ledger[1].store_expenses == 3 * Stores.daily_cost(state.country, 0) and second_day_cost == 0,
 		"Inactive stores stop accruing recurring costs")
 
 	add_delivered_stock(sim, 0, 12)
 	expect(Stores.set_listing(state, 0, 0, 8100, true) == "", "Publish product in the legacy marketplace")
 	expect(Stores.set_listing(state, extra_id, 0, 8600, true) == "", "Publish an independent listing in the second marketplace")
+	Stores.set_listing(state, same_platform_id, 0, 7200, true)
+	Stores.set_listing(state, lazada_id, 0, 9100, true)
 	expect(Stores.listing(state, 0, 0).price != Stores.listing(state, extra_id, 0).price,
 		"Same product has independent store-specific pricing")
 	var order_id := Fulfillment.place(sim, 0, [0], 8600, "", [], extra_id)
-	expect(order_id > 0 and state.orders[order_id].store_id == extra_id and sim.stock(0) == 11,
+	var same_platform_order := Fulfillment.place(sim, 0, [0], 7200, "", [], same_platform_id)
+	var lazada_order := Fulfillment.place(sim, 0, [0], 9100, "", [], lazada_id)
+	expect(order_id > 0 and same_platform_order > 0 and lazada_order > 0 and state.orders[order_id].store_id == extra_id and sim.stock(0) == 9,
 		"Store order reserves one shared inventory unit and records its store")
+	for id in [0, extra_id, same_platform_id, lazada_id]:
+		Stores.set_active(state, id, false)
 	sim.advance(12)
 	var store_report := Stores.report(state, extra_id)
+	var same_report := Stores.report(state, same_platform_id)
+	var lazada_report := Stores.report(state, lazada_id)
 	expect(state.orders[order_id].status == "delivered" and store_report.sales >= 8600 and store_report.orders >= 1 and store_report.advertising == 0,
 		"Store-specific performance reflects the delivered order and organic sales")
+	expect(store_report.fees == roundi(8600 * 0.12)
+		and same_report.fees == roundi(7200 * 0.12)
+		and lazada_report.fees == roundi(9100 * 0.11),
+		"Same-platform stores receive separate commissions and Lazada uses its configured rate")
+	var first_profit: int = store_report.sales - store_report.refunds - store_report.cogs - store_report.fees - store_report.shipping - store_report.advertising - store_report.operating - store_report.setup
+	var second_profit: int = same_report.sales - same_report.refunds - same_report.cogs - same_report.fees - same_report.shipping - same_report.advertising - same_report.operating - same_report.setup
+	var third_profit: int = lazada_report.sales - lazada_report.refunds - lazada_report.cogs - lazada_report.fees - lazada_report.shipping - lazada_report.advertising - lazada_report.operating - lazada_report.setup
+	expect(store_report.sales != same_report.sales and same_report.sales != lazada_report.sales
+		and store_report.cogs == same_report.cogs and same_report.cogs == lazada_report.cogs
+		and first_profit != second_profit and second_profit != third_profit,
+		"Store prices and profitability remain independent while inventory is shared")
 	expect(state.ledger[0].store_activity[extra_id].setup == marketplace_cost,
 		"Store management attributes setup spending to the correct store")
 	reconcile(sim, "Multiple stores")
@@ -113,15 +141,31 @@ func test_campaign_controls_and_simulation() -> void:
 	var shopee_campaign := campaign_config(shopee, 0, 4)
 	shopee_campaign.draft = true
 	expect(Ads.create(state, shopee_campaign).is_empty(), "Shopee Sponsored Ads can target a Shopee listing")
+	var edit_id: int = state.advertising.next_campaign - 1
 	var lazada := int(state.next_store)
 	expect(Stores.create(state, "Lazada Campaign Store", 0, "Aster", "", 2).is_empty(), "Create Lazada destination")
 	Stores.set_listing(state, lazada, 0, 9500, true)
 	var lazada_campaign := campaign_config(lazada, 0, 5)
 	lazada_campaign.draft = true
 	expect(Ads.create(state, lazada_campaign).is_empty(), "Lazada Sponsored Ads can target a Lazada listing")
+	expect(Ads.edit(state, edit_id, {"platform": 0}) == "", "Campaign edit can change only the advertising platform")
+	expect(Ads.edit(state, edit_id, {"store_id": lazada}) == "", "Campaign edit can change only the destination store")
+	expect(Ads.edit(state, edit_id, {"product": 1}) != "", "Campaign edit rejects an unlisted replacement product")
+	Stores.set_listing(state, lazada, 1, 8800, true)
+	expect(Ads.edit(state, edit_id, {"product": 1}) == "", "Campaign edit can change only the listed product")
+	expect(Ads.edit(state, edit_id, {"platform": 5}) == "", "Campaign edit preserves the Lazada native platform compatibility")
 	var incompatible := campaign_config(shopee, 0, 5)
 	incompatible.draft = true
 	expect(Ads.create(state, incompatible) != "", "Lazada Sponsored Ads reject an incompatible Shopee destination")
+	expect(Ads.edit(state, edit_id, {"store_id": lazada, "platform": 5, "product": 1}) == "",
+		"Campaign edit can change platform, destination, and promoted product together")
+	expect(state.advertising.campaigns[edit_id].store_id == lazada and state.advertising.campaigns[edit_id].product == 1
+		and state.advertising.campaigns[edit_id].platform == 5 and state.advertising.campaigns[edit_id].channel == 0,
+		"Accepted campaign edits update destination, product, platform, and channel coherently")
+	var previous_campaign: Dictionary = state.advertising.campaigns[edit_id].duplicate(true)
+	expect(Ads.edit(state, edit_id, {"store_id": 1, "platform": 4}) != ""
+		and state.advertising.campaigns[edit_id] == previous_campaign,
+		"Incompatible campaign edits fail atomically without changing the saved campaign")
 	var zero_budget := campaign_config(0, 0, 0, 0)
 	expect(Ads.create(state, zero_budget) != "", "Campaign rejects a zero daily budget")
 	var excess_budget := campaign_config(0, 0, 0, Catalog.local_cents(state.country, 10001.0))
@@ -276,21 +320,41 @@ func test_save_migration() -> void:
 		"Oversized bundle normalizes without changing historical ledger entries")
 	expect(Saves.valid(state), "Migrated Phase 2 data passes save validation")
 	var legacy_identity := game().state
-	legacy_identity.owner = ""
+	legacy_identity.erase("owner")
 	Stores.set_listing(legacy_identity, 0, 0, 9000, true)
+	var added_market_id: int = legacy_identity.next_store
+	expect(Stores.create(legacy_identity, "Legacy Second Market", 0, "Aster", "", 0).is_empty(),
+		"Legacy save fixture has another marketplace store")
+	var added_website_id: int = legacy_identity.next_store
+	expect(Stores.create(legacy_identity, "Legacy Website", 1, "Aster", "legacy-site.aster.shop").is_empty(),
+		"Legacy save fixture has a manually-created website")
+	Stores.set_listing(legacy_identity, added_market_id, 0, 9500, true)
+	Stores.set_listing(legacy_identity, added_website_id, 1, 8700, true)
+	var legacy_sim := Sim.new(legacy_identity)
+	expect(legacy_sim.buy(0, 2, 3).is_empty(), "Legacy supplier purchase is preserved")
 	legacy_identity.quotes[0] = {1: {"cost": 2400, "minimum": 3, "expires": 7, "discount": 8}}
 	expect(Ads.create(legacy_identity, campaign_config(0, 0)).is_empty(), "Legacy campaign fixture is valid")
 	var legacy_campaign_id: int = legacy_identity.advertising.next_campaign - 1
 	Ads.set_status(legacy_identity, legacy_campaign_id, "paused")
 	var stores_before: Array = legacy_identity.stores.duplicate(true)
+	var products_before: Dictionary = legacy_identity.products.duplicate(true)
+	var inbound_before: Array = legacy_identity.inbound.duplicate(true)
 	var contracts_before: Dictionary = legacy_identity.quotes.duplicate(true)
 	var campaigns_before: Dictionary = legacy_identity.advertising.campaigns.duplicate(true)
 	Sim.upgrade(legacy_identity)
 	expect(legacy_identity.owner.is_empty() and legacy_identity.stores == stores_before and legacy_identity.quotes == contracts_before,
-		"Legacy save keeps blank entrepreneur identity and retains stores and supplier contracts for the identity prompt")
-	expect(legacy_identity.advertising.campaigns == campaigns_before and legacy_identity.products == game().state.products,
-		"Legacy save migration preserves campaigns and product inventory state")
+		"Legacy migration keeps blank CEO identity, all marketplace/web stores, and supplier terms")
+	expect(legacy_identity.advertising.campaigns == campaigns_before and legacy_identity.products == products_before
+		and legacy_identity.inbound == inbound_before,
+		"Legacy save migration preserves campaigns, supplier orders, and product inventory state")
 	expect(Saves.valid(legacy_identity), "Legacy save with missing CEO name remains loadable")
+	var legacy_save := "user://phase3_legacy_identity.save"
+	expect(Saves.save(legacy_identity, legacy_save, 1.0) == OK, "Legacy save with missing CEO name can be rewritten")
+	var identity_loaded := Saves.load_state(legacy_save)
+	expect(identity_loaded.owner == "" and identity_loaded.stores == stores_before
+		and identity_loaded.products == products_before and identity_loaded.advertising.campaigns == campaigns_before,
+		"Save/load preserves missing CEO prompt, stores, products, supplier terms, and campaigns")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(legacy_save))
 
 func test_supplier_progression() -> void:
 	var sim := game(1)
@@ -348,6 +412,7 @@ func test_campaign_lifecycle() -> void:
 	expect(state.cash == before, "Paused campaign does not spend")
 	expect(Ads.set_status(state, id, "active").is_empty(), "Resume paused campaign")
 	expect(Ads.set_status(state, id, "stopped").is_empty(), "Stop campaign")
+	expect(Ads.edit(state, id, {"daily_budget": 4000}) != "", "Stopped campaigns reject edits while retaining their history")
 	expect(Ads.duplicate_stopped(state, id).is_empty(), "Stopped campaign can be duplicated")
 	expect(state.advertising.campaigns[state.advertising.next_campaign - 1].status == "draft", "Duplicate starts as a draft")
 	expect(Saves.valid(state), "Campaign lifecycle state remains valid after transitions")
@@ -356,6 +421,7 @@ func test_supplier_direct_fulfillment() -> void:
 	var sim := game(0, 721)
 	var state := sim.state
 	sim.select_supplier(0, 4)
+	state.auto_dispatch = false
 	var cash_before: int = state.cash
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 2
@@ -364,11 +430,28 @@ func test_supplier_direct_fulfillment() -> void:
 	var order: Dictionary = state.orders.get(order_id, {})
 	expect(order.get("items", []).size() == 1 and order.items[0].get("direct_supplier", -1) == 4,
 		"Direct order records its supplier and landed cost")
-	expect(state.ledger.back().purchases > 0 and state.cash < cash_before + 12000,
-		"Direct supplier cost and freight are paid exactly once")
+	var landed_cost: int = int(order.items[0].cost)
+	var direct_report := sim.report(sim.state.day)
+	expect(state.ledger.back().direct_purchases == landed_cost and state.ledger.back().purchases == 0
+		and direct_report.inventory == 0 and direct_report.goods_in_transit == landed_cost,
+		"Supplier-direct cost is capitalized as goods in transit, not warehouse inventory")
+	expect(state.cash == cash_before + 12000 - landed_cost,
+		"Direct supplier goods and freight are paid exactly once")
+	expect(Fulfillment.ship(state, order_id, 1) != "", "Direct orders cannot be shipped again through warehouse dispatch")
 	expect(Saves.valid(state), "Direct supplier order remains compatible with save validation")
 	sim.advance(8)
 	order = state.orders[order_id]
 	expect(order.status == "delivered" and sim.stock(0) == 0,
 		"Supplier lead time controls delivery without deducting or replenishing warehouse stock")
+	direct_report = sim.report(sim.state.day)
+	expect(direct_report.inventory == 0 and direct_report.goods_in_transit == 0
+		and direct_report.direct_cogs == landed_cost,
+		"Delivery transfers goods in transit to direct COGS without creating warehouse stock")
 	reconcile(sim, "Supplier direct fulfillment")
+	var cash_at_refund: int = state.cash
+	expect(Service.refund(sim, order_id).is_empty(), "Refund a delivered supplier-direct order")
+	expect(sim.stock(0) == 0 and sim.report(state.day).inventory == 0 and state.cash == cash_at_refund - 12000,
+		"Direct refund pays the customer without restocking supplier-fulfilled goods")
+	expect(sim.report(state.day).direct_cogs == landed_cost and sim.report(state.day).goods_in_transit == 0,
+		"Refund retains the supplier cost as COGS and does not restore goods-in-transit")
+	reconcile(sim, "Supplier direct refund")

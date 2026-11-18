@@ -7,6 +7,7 @@ const Fulfillment = preload("res://fulfillment.gd")
 const Service = preload("res://customer_service.gd")
 const Storefront = preload("res://storefront.gd")
 const Saves = preload("res://save_store.gd")
+const Stores = preload("res://store_manager.gd")
 
 var failures := 0
 
@@ -25,7 +26,10 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func game() -> Sim:
-	return Sim.new(Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 1, 2, 153))
+	var state := Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 1, 2, 153)
+	state.website_active = true
+	state.stores = Stores.migration_defaults(state) # Explicit legacy fixture stores for Phase 2 regression coverage.
+	return Sim.new(state)
 
 func balances(sim: Sim, context: String) -> void:
 	var report := sim.report(sim.state.day)

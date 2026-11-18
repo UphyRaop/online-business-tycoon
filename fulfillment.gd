@@ -65,8 +65,9 @@ static func place(sim: RefCounted, channel: int, items: Array, total: int, offer
 	row.deposits += total
 	if direct_cost > 0:
 		state.cash -= direct_cost
-		row.purchases += direct_cost
+		row.direct_purchases += direct_cost
 		row.inbound_freight = int(row.get("inbound_freight", 0)) + direct_freight
+		row.direct_inbound_freight += direct_freight
 	var totals: Dictionary = row.channels[channel]
 	totals.placed += 1
 	if not offer_kind.is_empty():
@@ -77,6 +78,9 @@ static func ship(state: Dictionary, id: int, method: int) -> String:
 	var order: Dictionary = state.orders.get(id, {})
 	if order.get("status") != "queued" or method not in range(Catalog.SHIPPING.size()):
 		return "This order cannot be dispatched."
+	for item in order.items:
+		if item.has("direct_supplier"):
+			return "Supplier-direct orders follow their supplier's fulfillment schedule."
 	var shipping: Dictionary = Catalog.SHIPPING[method]
 	var rng := RandomNumberGenerator.new()
 	rng.state = state.seed
@@ -104,8 +108,6 @@ static func dispatch(state: Dictionary, order: Dictionary, method: int, delay: i
 	row.store_activity[order.get("store_id", order.channel)] = activity
 
 static func auto_dispatch(state: Dictionary, rng: RandomNumberGenerator) -> void:
-	if not state.auto_dispatch:
-		return
 	for id in state.active_orders:
 		var order: Dictionary = state.orders[id]
 		if order.status == "queued":
@@ -140,6 +142,8 @@ static func auto_dispatch(state: Dictionary, rng: RandomNumberGenerator) -> void
 					order.shipping_cost = 0
 					state.ledger.back().channels[order.channel].dispatched += 1
 				continue
+			if not state.auto_dispatch:
+				continue
 			var shipping: Dictionary = Catalog.SHIPPING[order.method]
 			var delay := rng.randi_range(1, 3) if rng.randf() >= shipping.reliability else 0
 			dispatch(state, order, order.method, delay)
@@ -173,6 +177,8 @@ static func complete(state: Dictionary, order: Dictionary, rng: RandomNumberGene
 	for item in order.items:
 		row.cogs += item.cost
 		channel.cogs += item.cost
+		if item.has("direct_supplier"):
+			row.direct_cogs += item.cost
 	var activity := Stores.store_activity(row, int(order.get("store_id", order.channel)))
 	activity.sales += order.total
 	activity.fees += fee

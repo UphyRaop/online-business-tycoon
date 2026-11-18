@@ -3,6 +3,7 @@ extends SceneTree
 const Sim = preload("res://simulation.gd")
 const Catalog = preload("res://catalog.gd")
 const Saves = preload("res://save_store.gd")
+const Stores = preload("res://store_manager.gd")
 
 var failures := 0
 
@@ -14,7 +15,10 @@ func expect(condition: bool, message: String) -> void:
 func _initialize() -> void:
 	for country in Catalog.COUNTRIES.size():
 		for difficulty in Catalog.DIFFICULTIES.size():
-			var sim := Sim.new(Sim.register("Mira", "Aster Labs", "Aster Shop", country, difficulty, 2, 153))
+			var data := Sim.register("Mira", "Aster Labs", "Aster Shop", country, difficulty, 2, 153)
+			data.website_active = true
+			data.stores = Stores.migration_defaults(data) # Keep the original two-channel Phase 1 fixture explicit.
+			var sim := Sim.new(data)
 			play_loop(sim)
 	test_save()
 	test_migration()
@@ -104,7 +108,10 @@ func test_migration() -> void:
 
 func test_channel_operations() -> void:
 	for channel in [0, 1]:
-		var sim := Sim.new(Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 2, channel, 153))
+		var data := Sim.register("Mira", "Aster Labs", "Aster Shop", 0, 2, channel, 153)
+		data.website_active = channel != 0
+		data.stores = Stores.migration_defaults(data) # Simulate a legacy channel fixture with its original store.
+		var sim := Sim.new(data)
 		sim.list_product(4, 3200)
 		sim.advance(1)
 		var empty := sim.report(1, 1)
