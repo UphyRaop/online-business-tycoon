@@ -136,7 +136,7 @@ func test_legacy_profile_migration() -> void:
 	for index in legacy.companies.size(): legacy.companies[index].erase("ownership_status")
 	legacy.schema_version = 1
 	var migrated := CEO.migrate_profile(legacy)
-	expect(migrated.schema_version == 2 and migrated.personal_finance_ledger.is_empty()
+	expect(migrated.schema_version == CEO.VERSION and migrated.personal_finance_ledger.is_empty()
 		and migrated.personal_cash == null and migrated.personal_net_worth == null
 		and migrated.companies[0].ownership_status == "owned",
 		"Legacy profiles migrate with existing ownership and no fabricated personal cash or sale history")

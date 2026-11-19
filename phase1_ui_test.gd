@@ -29,16 +29,47 @@ func press(title: String) -> void:
 			button.pressed.emit()
 			return
 	var primary := title.to_lower()
-	if primary in ["dashboard", "market", "order", "orders", "business", "finance", "profile"]:
-		var target := "Order" if primary in ["order", "orders"] else title
-		var drawer: Control = app.find_child("PrimaryNavigation", true, false)
-		var menu: Button = app.find_child("NavigationMenuButton", true, false)
-		if drawer != null and menu != null:
-			if not drawer.is_visible_in_tree():
-				menu.pressed.emit()
-			var navigation_item: Button = drawer.find_child("Primary_" + target, true, false)
-			if navigation_item != null and navigation_item.is_visible_in_tree():
-				navigation_item.pressed.emit()
+	var primary_target := ""
+	var secondary_title := title
+	var selects_secondary := false
+	if primary in ["dashboard", "market", "order", "orders", "business", "marketing", "finance", "profile"]:
+		primary_target = "Order" if primary in ["order", "orders"] else title
+	elif primary in ["advertising", "overview", "campaign manager", "campaign management", "ads analytics"]:
+		primary_target = "Marketing"
+		selects_secondary = primary != "marketing"
+		if primary in ["advertising", "overview"]: secondary_title = "Overview"
+		if primary in ["campaign manager", "campaign management"]: secondary_title = "Campaign Management"
+		if primary == "ads analytics": secondary_title = "Ads Analytics"
+	elif primary in ["my products", "inventory management", "management", "store management", "product catalogue"]:
+		primary_target = "Market"
+		if primary in ["my products", "inventory management"]: secondary_title = "Inventory Management"
+		if primary in ["management", "store management"]: secondary_title = "Store Management"
+		if primary == "product catalogue": secondary_title = "Product Catalogue"
+	elif primary in ["company profile", "company management"]:
+		primary_target = "Business"
+		secondary_title = "Company Management"
+	var drawer: Control = app.find_child("PrimaryNavigation", true, false)
+	var menu: Button = app.find_child("NavigationMenuButton", true, false)
+	if primary in ["save game", "main menu"] and drawer != null and menu != null:
+		if not drawer.is_visible_in_tree(): menu.pressed.emit()
+		var action_name := "DrawerActionSave" if primary == "save game" else "DrawerActionMainMenu"
+		var drawer_action: Button = drawer.find_child(action_name, true, false)
+		if drawer_action != null and drawer_action.is_visible_in_tree():
+			drawer_action.pressed.emit()
+			return
+	if primary_target in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"] and drawer != null and menu != null:
+		if not drawer.is_visible_in_tree(): menu.pressed.emit()
+		var navigation_item: Button = drawer.find_child("Primary_" + primary_target, true, false)
+		if navigation_item != null and navigation_item.is_visible_in_tree():
+			navigation_item.pressed.emit()
+			if secondary_title == title and not selects_secondary: return
+		else:
+			expect(false, "Missing primary route " + primary_target)
+			return
+	if not secondary_title.is_empty() and (secondary_title != title or selects_secondary):
+		for button in controls(app, "Button"):
+			if button.text.to_lower() == secondary_title.to_lower() and button.is_visible_in_tree():
+				button.pressed.emit()
 				return
 	expect(false, "Missing enabled button " + title)
 
@@ -87,6 +118,15 @@ func has_label(prefix: String) -> bool:
 func has_button(title: String) -> bool:
 	return controls(app, "Button").any(func(button): return button.text.to_lower() == title.to_lower() and button.is_visible_in_tree())
 
+func create_new_game_for_test(ceo_name: String, company_name: String) -> void:
+	if app.screen != "New Game": press("New Game")
+	var ceo_field := field_for_label("CEO Name")
+	if ceo_field != null: ceo_field.text = ceo_name
+	press("Continue to Company Registration")
+	var company_field := field_for_label("Company Name")
+	if company_field != null: company_field.text = company_name
+	press("Register company")
+
 func settle(name: String) -> void:
 	await process_frame
 	await process_frame
@@ -112,11 +152,15 @@ func run() -> void:
 	root.add_child(app)
 	press("New Game")
 	await settle("01-registration")
-	press("Register company")
-	expect(has_label("Enter an entrepreneur"), "Registration validates required names")
+	press("Continue to Company Registration")
+	expect(app.notice.to_lower().contains("ceo name"), "New Game requires a CEO name before company registration")
 	var inputs := controls(app, "LineEdit")
 	inputs[0].text = "Mira Founder"
-	inputs[1].text = "Aster Labs"
+	press("Continue to Company Registration")
+	press("Register company")
+	expect(app.notice.to_lower().contains("company name"), "Company registration independently requires a company name")
+	inputs = controls(app, "LineEdit")
+	inputs[0].text = "Aster Labs"
 	var choices := controls(app, "OptionButton")
 	select(choices[0], 4)
 	select(choices[1], 2)
@@ -127,23 +171,22 @@ func run() -> void:
 	app.sim.state.website_active = true
 
 	await settle("02-dashboard")
-	press("Browse product catalog")
+	press("Browse Product Catalogue")
 	choices = controls(app, "OptionButton")
 	select(choices[0], 1)
 	select(app.find_child("ProductSelection", true, false), 0)
-	choices = controls(app, "OptionButton")
-	select(choices[2], 0)
-	expect(has_label("Order quantity 1–500"), "Changing supplier exposes its minimum and maximum quantity terms")
+	press("View Details")
+	expect(has_label("Lead Time · MOQ · Maximum Order"), "Supplier details expose lead time and supplier-specific quantity limits")
 	await settle("03-market")
-	var quantity: LineEdit = field_for_label("Order quantity")
-	press("Accept Quotation")
-	quantity = field_for_label("Order quantity")
+	press("Accept Offer")
+	var quantity: LineEdit = field_for_label("Purchase Quantity")
 	quantity.text = "0"
-	press("Purchase Inventory")
+	quantity.text_changed.emit("0")
 	expect(has_label("Enter a quantity from"), "Purchase validation displays supplier-specific quantity limits")
-	quantity = field_for_label("Order quantity")
+	quantity = field_for_label("Purchase Quantity")
 	quantity.text = "10"
-	press("Purchase Inventory")
+	quantity.text_changed.emit("10")
+	press("Purchase")
 	expect(app.sim.stock(1) == 0 and app.sim.state.inbound[0].units == 10, "Purchase button schedules inbound stock")
 	app.selected_store_id = int(app.sim.state.stores.front().id)
 	app.selected_product = 1
@@ -186,7 +229,7 @@ func run() -> void:
 	inputs[1].text = "Aster Holdings"
 	press("Save Changes")
 	expect(app.sim.state.owner == "Mira Founder Updated" and app.sim.state.company == "Aster Holdings"
-		and not has_label("Website domain"), "Company Profile saves identity without exposing website controls")
+		and not has_label("Website Domain"), "Company Profile saves identity without exposing website controls")
 	press("Save Game")
 	press("Save to slot 1")
 	press("Back")
@@ -220,7 +263,7 @@ func run() -> void:
 	else:
 		expect(false, "Store-specific listing editor remains visible after opening")
 	expect(not Stores.listing(app.sim.state, test_store_id, 1).listed, "Store listing pause action")
-	var saved := Slots.read(Slots.AUTOSAVE)
+	var saved := Slots.read_for_game(app.active_game_id, Slots.AUTOSAVE)
 	expect(saved.state.day == 41 and not Stores.listing(saved.state, test_store_id, 1).listed, "Mutations autosave")
 	app.queue_free()
 	await process_frame

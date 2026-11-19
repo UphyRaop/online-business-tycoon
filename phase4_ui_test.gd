@@ -1,6 +1,7 @@
 extends "res://phase1_ui_test.gd"
 
 const CEO = preload("res://ceo_profile.gd")
+const Games = preload("res://game_store.gd")
 const Sim = preload("res://simulation.gd")
 const Catalog = preload("res://catalog.gd")
 const Style = preload("res://corporate_theme.gd")
@@ -13,20 +14,24 @@ func run() -> void:
 	root.size = Vector2i(1280, 720)
 	app = Main.instantiate()
 	root.add_child(app)
-	press("New Game")
-	var fields := controls(app, "LineEdit")
-	fields[0].text = "Kai Founder"
-	fields[1].text = "Harbor Works"
-	press("Register company")
+	create_new_game_for_test("Kai Founder", "Harbor Works")
 	await process_frame
+	var dashboard_inventory := app.find_child("DashboardInventoryOverview", true, false) as PanelContainer
+	expect(dashboard_inventory != null and dashboard_inventory.is_visible_in_tree()
+		and dashboard_inventory.find_child("InventorySummaryMetrics", true, false) != null
+		and dashboard_inventory.find_child("PreorderDemandSummary", true, false) != null,
+		"Dashboard includes responsive stock, reservation, low/out-of-stock, and pre-order inventory summaries")
 	var nav: PanelContainer = app.find_child("PrimaryNavigation", true, false)
 	var game_date: Label = app.find_child("GameDate", true, false)
 	var menu_button: Button = app.find_child("NavigationMenuButton", true, false)
 	var bank_balance: Label = app.find_child("CompanyBankBalance", true, false)
 	expect(nav != null and game_date != null and menu_button != null and bank_balance != null
 		and menu_button.get_parent() == game_date.get_parent() and bank_balance.get_parent() == game_date.get_parent()
-		and game_date.text.contains(" | ") and bank_balance.text.contains(app.money(app.sim.state.cash)),
+		and menu_button.icon != null and game_date.text.contains(" | ") and bank_balance.text.contains(app.money(app.sim.state.cash)),
 		"Header groups the hamburger, date/location, and actual available company bank balance on one row")
+	var page_heading: Control = app.find_child("PageHeading", true, false)
+	expect(page_heading != null and controls(page_heading, "Button").is_empty(),
+		"Save Game and Main Menu are not duplicated beside the page heading")
 	var content_scroll: ScrollContainer = app.find_child("GameContentScroll", true, false)
 	expect(content_scroll != null and not content_scroll.is_ancestor_of(game_date),
 		"Date, menu, and balance stay outside the page scroll area while content scrolls")
@@ -38,20 +43,27 @@ func run() -> void:
 	app.sim.state.cash = current_cash
 	app.set_notice("")
 	expect(nav != null and not nav.is_visible_in_tree(), "Primary navigation drawer is hidden by default")
-	press("☰")
+	press("Menu")
 	expect(nav != null and nav.is_visible_in_tree(), "Hamburger opens the left navigation overlay")
 	_check_primary_tabs_within_viewport(Vector2i(1280, 720))
-	for tab in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
+	for tab in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]:
 		var route_name: String = "Order" if tab in ["Order", "Orders"] else tab
-		expect(nav != null and nav.find_child("Primary_" + route_name, true, false) != null, "%s is present in the navigation drawer" % tab)
-	expect(controls(nav, "Button").filter(func(button): return str(button.name).begins_with("Primary_")).size() == 6,
-		"Drawer includes all six categories without horizontal primary tabs")
+		var item: Button = nav.find_child("Primary_" + route_name, true, false) if nav != null else null
+		expect(item != null and item.text == ("Orders" if tab == "Order" else tab) and item.icon != null,
+			"%s is present with a bundled graphic icon in the navigation drawer" % tab)
+	expect(controls(nav, "Button").filter(func(button): return str(button.name).begins_with("Primary_")).size() == 7,
+		"Drawer includes all seven primary categories without horizontal primary tabs")
+	expect(nav.find_child("DrawerActionSave", true, false) != null and nav.find_child("DrawerActionMainMenu", true, false) != null
+		and nav.find_child("DrawerActionSave", true, false).icon != null and nav.find_child("DrawerActionMainMenu", true, false).icon != null,
+		"Save Game and Main Menu are distinct icon actions in the drawer")
+	var action_label: Label = controls(nav, "Label").filter(func(node): return node.text == "Actions").front()
+	expect(action_label != null, "Drawer separates navigation from its action section")
 	var outside_click := InputEventMouseButton.new()
 	outside_click.button_index = MOUSE_BUTTON_LEFT
 	outside_click.pressed = true
 	app.navigation_overlay.gui_input.emit(outside_click)
 	expect(not app.navigation_open and not nav.is_visible_in_tree(), "Clicking the page overlay closes the drawer")
-	press("☰")
+	press("Menu")
 	var tab_key := InputEventKey.new()
 	tab_key.keycode = KEY_TAB
 	tab_key.pressed = true
@@ -63,6 +75,18 @@ func run() -> void:
 	escape.pressed = true
 	app._unhandled_key_input(escape)
 	expect(not app.navigation_open, "Escape closes the drawer on desktop")
+	var main_menu_button: Button = nav.find_child("DrawerActionMainMenu", true, false)
+	app.dirty = true
+	main_menu_button.pressed.emit()
+	expect(app.screen == "Game" and app.confirmation != null and app.confirmation.dialog_text.contains("discard"),
+		"Main Menu preserves the existing unsaved-progress confirmation")
+	if app.confirmation != null: app.confirmation.get_cancel_button().pressed.emit()
+	app.dirty = false
+	var save_button: Button = app.find_child("DrawerActionSave", true, false)
+	save_button.pressed.emit()
+	expect(app.screen == "Save", "Drawer Save Game opens the existing save screen")
+	press("Back")
+	expect(app.screen == "Game", "Returning from the Save Game screen keeps the current company active")
 
 	press("Dashboard")
 	expect(app.page == "Dashboard" and has_label("Business Alerts"), "Dashboard category works")
@@ -90,10 +114,10 @@ func run() -> void:
 	expect(app.page == "Store Listings" and has_label("Harbor Marketplace · Product listings"),
 		"Legacy product-listing route remains callable for compatibility without a secondary navigation tab")
 	app.navigate("Management")
-	var listing_actions := controls(app, "Button").filter(func(button): return button.text == "My Products")
-	expect(listing_actions.size() >= 3 and controls(app, "Button").filter(func(button): return button.text == "Manage Listings").is_empty(),
-		"Marketplace and website cards link to My Products without duplicate listing editors")
-	if listing_actions.size() >= 3:
+	var listing_actions := controls(app, "Button").filter(func(button): return button.text == "Inventory Management")
+	expect(listing_actions.size() >= 2 and controls(app, "Button").filter(func(button): return button.text == "Manage Listings").is_empty(),
+		"Marketplace and website cards link to Inventory Management without duplicate listing editors (found %d)" % listing_actions.size())
+	if listing_actions.size() == 2:
 		listing_actions.back().pressed.emit()
 		expect(app.page == "My Products" and has_label("Product portfolio"), "Store Management directs product work to My Products")
 	app.navigate("Management")
@@ -113,7 +137,7 @@ func run() -> void:
 		expect(Stores.get_store(app.sim.state, store_id).active, "Management reactivates destination %d" % store_id)
 
 	press("Order")
-	expect(app.page == "Orders" and has_label("Store operations"), "Order category opens customer orders")
+	expect(app.page == "Orders" and has_label("Store Operations"), "Order category opens customer orders")
 	press("Pre-orders")
 	expect(app.page == "Pre-orders" and has_label("Pre-orders"), "Order secondary route opens pre-order management")
 	press("Returns and Service")
@@ -130,22 +154,26 @@ func run() -> void:
 	press("Business")
 	expect(app.page == "Business" and has_label("Owned Stores"), "Business category opens Company Management")
 	var company_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Company Management")[0]
-	var unselected_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Advertising")[0]
 	var dashboard_primary: Button = nav.find_child("Primary_Dashboard", true, false)
 	expect(company_subtab.custom_minimum_size.y == 44 and dashboard_primary.custom_minimum_size.y >= 44
 		and company_subtab.get_theme_font_size("font_size") < dashboard_primary.get_theme_font_size("font_size"),
 		"Secondary navigation is visually smaller than drawer navigation while keeping a 44 px touch target")
+	press("Marketing")
+	var marketing_overview: Button = controls(app, "Button").filter(func(button): return button.text == "Overview")[0]
+	var unselected_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Campaign Management")[0]
 	var selected_tab_style := company_subtab.get_theme_stylebox("normal") as StyleBoxFlat
+	var selected_marketing_style := marketing_overview.get_theme_stylebox("normal") as StyleBoxFlat
 	var unselected_tab_style := unselected_subtab.get_theme_stylebox("normal") as StyleBoxFlat
 	var focus_tab_style := unselected_subtab.get_theme_stylebox("focus") as StyleBoxFlat
-	expect(company_subtab.flat and selected_tab_style != null and selected_tab_style.bg_color.a == 0.0
-		and selected_tab_style.border_width_bottom == 2 and selected_tab_style.border_color == Style.GOLD
+	expect(marketing_overview.custom_minimum_size.y == 44 and marketing_overview.flat and selected_marketing_style != null
+		and selected_marketing_style.bg_color.a == 0.0 and selected_marketing_style.border_width_bottom == 2
+		and selected_marketing_style.border_color == Style.GOLD
 		and unselected_subtab.flat and unselected_tab_style != null and unselected_tab_style.bg_color.a == 0.0
 		and unselected_tab_style.border_width_bottom == 0 and focus_tab_style != null
 		and focus_tab_style.border_color == Style.GOLD and focus_tab_style.border_width_left == 1,
-		"Secondary navigation uses a gold selected underline, transparent unselected tabs, and visible keyboard focus")
+		"Marketing secondary tabs use a gold selected underline, transparent inactive tabs, 44 px touch area, and visible keyboard focus")
 	press("Advertising")
-	expect(app.page == "Advertising" and has_label("Advertising Overview"), "Business secondary route opens Advertising")
+	expect(app.page == "Advertising" and has_label("Advertising Overview"), "Marketing Overview opens the advertising overview")
 	press("Campaign Manager")
 	expect(app.screen == "Campaign Manager" or app.page == "Campaign Manager", "Campaign Manager remains reachable")
 	press("Ads Analytics")
@@ -172,14 +200,14 @@ func run() -> void:
 	expect(app.page == "Store Profitability" and has_label("Harbor Marketplace") and has_label("Harbor Website"),
 		"Finance Store Profitability reports marketplace and website results")
 
-	var stored := Slots.write(1, app.sim.state)
-	var loaded := Slots.read(1)
+	var stored := Slots.write_for_game(app.active_game_id, 1, app.sim.state, app.ceo_profile)
+	var loaded := Slots.read_for_game(app.active_game_id, 1)
 	expect(stored == OK and Saves.valid(loaded.get("state", {})), "Save/load remains valid with both destination types")
 	var loaded_stores: Array = loaded.get("state", {}).get("stores", [])
 	expect(loaded_stores.size() == 2 and int(loaded_stores[0].id) == marketplace_id
 		and int(loaded_stores[1].id) == website_id and str(loaded_stores[1].domain) == "harbor.example.test",
 		"Save/load preserves marketplace and website IDs and website details")
-	Slots.delete_slot(1)
+	Slots.delete_for_game(app.active_game_id, 1)
 	press("Profile")
 	expect(app.page == "Profile" and has_label("CEO Profile") and has_label("Career Progression")
 		and has_label("Owned Companies") and has_label("Additional Information") and has_label("CEO ID")
@@ -194,12 +222,13 @@ func run() -> void:
 	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Profile"),
 		"Profile details are read-only until editing is explicitly activated")
 	var portrait: TextureRect = app.find_child("CEOAvatar", true, false)
-	expect(portrait != null and absf(portrait.custom_minimum_size.y / portrait.custom_minimum_size.x - 4.0 / 3.0) < 0.01,
+	var portrait_frame := app.find_child("CEOAvatarFrame", true, false) as PanelContainer
+	expect(portrait_frame != null and portrait != null and absf(portrait.custom_minimum_size.y / portrait.custom_minimum_size.x - 4.0 / 3.0) < 0.01,
 		"CEO portrait preserves the 3:4 frame on desktop")
 	var existing_photo := Image.create(48, 64, false, Image.FORMAT_RGBA8)
 	existing_photo.fill(Color("#dfb777"))
 	CEO.add_avatar(app.ceo_profile, "image/png", existing_photo.save_png_to_buffer())
-	CEO.save_profile(app.ceo_profile)
+	Games.update_game_profile(app.active_game_id, app.ceo_profile)
 	app.refresh_view()
 	expect(not has_button("Change Photo") and not has_button("Remove Photo"),
 		"Saved Profile hides photo actions until Edit Profile is selected")
@@ -226,10 +255,10 @@ func run() -> void:
 	press("Apply Crop")
 	await process_frame
 	var staged_photo := str(app.ceo_profile.avatar_data)
-	expect(staged_photo != "" and staged_photo != CEO.load_profile().avatar_data,
+	expect(staged_photo != "" and staged_photo != CEO.load_game_profile(app.active_game_id).avatar_data,
 		"Apply Crop updates the edit preview without persisting before Save Profile")
 	press("Cancel")
-	expect(app.ceo_profile.full_name == "Kai Founder" and app.ceo_profile.avatar_data == CEO.load_profile().avatar_data
+	expect(app.ceo_profile.full_name == "Kai Founder" and app.ceo_profile.avatar_data == CEO.load_game_profile(app.active_game_id).avatar_data
 		and not has_button("Save Changes"), "Cancel restores saved identity and photo after a staged replacement")
 	press("Edit Profile")
 	profile_fields = controls(app, "LineEdit")
@@ -242,27 +271,27 @@ func run() -> void:
 	await process_frame
 	press("Save Changes")
 	expect(app.ceo_profile.full_name == "Kai Global CEO" and app.sim.state.owner == "Kai Global CEO"
-		and CEO.load_profile().full_name == "Kai Global CEO" and CEO.load_profile().avatar_data == app.ceo_profile.avatar_data,
+		and CEO.load_game_profile(app.active_game_id).full_name == "Kai Global CEO" and CEO.load_game_profile(app.active_game_id).avatar_data == app.ceo_profile.avatar_data,
 		"Saving Profile persists edited identity and a replacement photo")
 	var retained_photo := str(app.ceo_profile.avatar_data)
 	press("Edit Profile")
 	press("Remove Photo")
 	expect(str(app.ceo_profile.avatar_data).is_empty(), "Remove Photo stages a reversible change while editing")
 	press("Cancel")
-	expect(str(app.ceo_profile.avatar_data) == retained_photo and CEO.load_profile().avatar_data == retained_photo,
+	expect(str(app.ceo_profile.avatar_data) == retained_photo and CEO.load_game_profile(app.active_game_id).avatar_data == retained_photo,
 		"Cancel restores the previously saved CEO photo")
 	press("Edit Profile")
 	press("Remove Photo")
 	press("Save Changes")
-	expect(str(app.ceo_profile.avatar_data).is_empty() and CEO.load_profile().avatar_data.is_empty(),
+	expect(str(app.ceo_profile.avatar_data).is_empty() and CEO.load_game_profile(app.active_game_id).avatar_data.is_empty(),
 		"Saving Profile commits photo removal")
 	CEO.add_avatar(app.ceo_profile, "image/png", existing_photo.save_png_to_buffer())
-	CEO.save_profile(app.ceo_profile)
+	Games.update_game_profile(app.active_game_id, app.ceo_profile)
 	var first_company_id := str(app.sim.state.company_id)
 	var second_company := Sim.register("Kai Global CEO", "Harbor Digital", "", 1, 1, 0, 9123)
 	app.ceo_profile = CEO.register_company(app.ceo_profile, second_company)
-	expect(Saves.save(second_company, CEO.company_path(second_company.company_id), 2.0) == OK
-		and CEO.save_profile(app.ceo_profile) == OK, "Second company save is linked without changing the current business")
+	expect(Saves.save(second_company, CEO.company_path_for_game(app.active_game_id, second_company.company_id), 2.0) == OK
+		and Games.update_game_profile(app.active_game_id, app.ceo_profile) == OK, "Second company save is linked without changing the current business")
 	app.navigate("Profile")
 	var switch_buttons := controls(app, "Button").filter(func(button): return button.text == "Switch")
 	expect(switch_buttons.size() == 1, "Profile offers company switching for the other owned company")
@@ -289,9 +318,10 @@ func run() -> void:
 	var ceo_avatar := app.find_child("CEOAvatar", true, false) as TextureRect
 	expect(mobile_current_labels.size() == 1 and mobile_current_labels[0].get_parent() is VBoxContainer,
 		"Mobile owned-company rows stack the company name and current status without narrow wrapping")
-	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size.x <= 150.0
+	var mobile_portrait_frame := app.find_child("CEOAvatarFrame", true, false) as PanelContainer
+	expect(mobile_portrait_frame != null and mobile_portrait_frame.custom_minimum_size.x <= 170.0 and ceo_avatar != null and ceo_avatar.custom_minimum_size.x <= 158.0
 		and absf(ceo_avatar.custom_minimum_size.y / ceo_avatar.custom_minimum_size.x - 4.0 / 3.0) < 0.01
-		and ceo_avatar.size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
+		and mobile_portrait_frame.get_parent().size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
 		"CEO avatar keeps its centered portrait aspect ratio on mobile")
 	app.navigate("Finance")
 	var secondary_scroll: ScrollContainer = app.find_child("SecondaryNavigationScroll", true, false)
@@ -299,7 +329,7 @@ func run() -> void:
 		and secondary_scroll.get_parent() is VBoxContainer and secondary_scroll.get_parent().get_parent() is ScrollContainer,
 		"Secondary tabs scroll horizontally inside the page and never remain sticky")
 	app.navigate("Profile")
-	for target in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
+	for target in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]:
 		press(target)
 		expect(app.primary_category(app.page) == target or (target == "Order" and app.primary_category(app.page) == "Order"),
 			"Mobile navigation opens %s" % target)
@@ -385,6 +415,6 @@ func _check_primary_tabs_within_viewport(viewport: Vector2i) -> void:
 			and button_bounds.position.x >= nav.get_global_rect().position.x - 1.0
 			and button_bounds.end.x <= nav.get_global_rect().end.x + 1.0,
 			"%s remains reachable within the viewport" % button.text)
-	expect(button_count == 6, "All six primary navigation items fit inside the drawer")
+	expect(button_count == 7, "All seven primary navigation items fit inside the drawer")
 	if opened_here:
 		app.close_navigation_drawer(false)

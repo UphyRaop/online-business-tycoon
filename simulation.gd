@@ -8,8 +8,9 @@ const Storefront = preload("res://storefront.gd")
 const Calendar = preload("res://game_calendar.gd")
 const Stores = preload("res://store_manager.gd")
 const Advertising = preload("res://advertising.gd")
+const SupplierCredit = preload("res://supplier_credit.gd")
 const PERIODS := [1, 7, 30, 365]
-const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses", "inventory_returns", "supplier_refunds"]
+const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "credit_purchases", "credit_inbound_freight", "supplier_repayments", "supplier_credit_adjustments", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses", "inventory_returns", "supplier_refunds"]
 const CHANNEL_FIELDS := ["orders", "sales", "cogs", "fees", "hosting", "shipping", "refunds",
 	"placed", "dispatched", "tracked_deliveries", "on_time", "checkouts", "abandoned", "stockouts", "bundles", "upsells", "refunded"]
 const VERSION := 6
@@ -117,6 +118,7 @@ static func upgrade(data: Dictionary) -> void:
 	Advertising.ensure_state(data)
 	Supply.ensure_progress(data)
 	Supply.migrate_references(data)
+	SupplierCredit.ensure(data)
 	data.version = VERSION
 	data.catalog_schema_version = 1
 
@@ -242,6 +244,7 @@ func buy(product: int, supplier: int, units: int) -> String:
 	var result := Supply.purchase(state, product, supplier, units)
 	if result.is_empty():
 		select_supplier(product, supplier)
+		SupplierCredit.record_upfront_purchase(state, supplier, int(state.next_purchase) - 1)
 	return result
 
 func return_stock(product: int, supplier: int, units: int) -> Dictionary:
@@ -313,13 +316,14 @@ func advance(days: int) -> void:
 		Fulfillment.auto_dispatch(state, rng)
 		state.day += 1
 		state.ledger.append(entry())
+		SupplierCredit.process_due(state)
 	state.seed = rng.state
 
 static func net(row: Dictionary) -> int:
 	return row.sales - row.refunds - row.cogs - row.fees - row.overhead - row.hosting - row.shipping - row.legacy - row.get("advertising", 0) - row.get("store_setup", 0) - row.get("store_expenses", 0) + row.get("supplier_refunds", 0) - row.get("inventory_returns", 0)
 
 static func cash_change(row: Dictionary) -> int:
-	return net(row) + row.cogs - row.purchases - row.get("direct_purchases", 0) + row.capital + row.deposits + row.get("inventory_returns", 0)
+	return net(row) + row.cogs - (row.purchases - row.get("credit_purchases", 0)) - row.get("direct_purchases", 0) - row.get("supplier_repayments", 0) - row.get("supplier_credit_adjustments", 0) + row.capital + row.deposits + row.get("inventory_returns", 0)
 
 func calendar_report(period: int, anchor: int) -> Dictionary:
 	var boundaries := Calendar.bounds(period, clampi(anchor, 1, state.day))
@@ -363,4 +367,7 @@ func report(days: int, end_day: int = 0) -> Dictionary:
 	result.assets = maxi(0, result.closing_cash) + inventory + goods_in_transit
 	result.overdraft = maxi(0, -result.closing_cash)
 	result.customer_deposits = deposits
+	result.supplier_payables = SupplierCredit.open_payables(state, -1, end)
+	result.payables = result.supplier_payables
+	result.liabilities = result.overdraft + result.customer_deposits + result.supplier_payables
 	return result

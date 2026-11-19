@@ -10,7 +10,7 @@ const PAGE_SIZE := 5
 const FILTERS := ["Active orders", "Queued", "In transit", "Delivered", "All orders"]
 
 static func show(app: Control) -> void:
-	var navigation: VBoxContainer = app.card("Store operations")
+	var navigation: VBoxContainer = app.card("Store Operations")
 	var tab: OptionButton = app.dropdown(navigation, ["Fulfillment", "Customer service", "Sales analytics", "Shipping settings"], app.orders_tab)
 	tab.custom_minimum_size.y = 44
 	tab.add_theme_font_size_override("font_size", 13)
@@ -132,7 +132,7 @@ static func fulfillment(app: Control) -> void:
 	var state: Dictionary = app.sim.state
 	var report: Dictionary = app.sim.report(30)
 	var delivered: int = total(report, "tracked_deliveries")
-	var filter: VBoxContainer = app.card("Order tracking")
+	var filter: VBoxContainer = app.card("Order Tracking")
 	app.metric(filter, "Awaiting delivery", str(state.active_orders.size()))
 	app.metric(filter, "30-day on-time rate", percent(total(report, "on_time"), delivered))
 	var picker: OptionButton = app.dropdown(filter, FILTERS, app.order_filter)
@@ -168,12 +168,12 @@ static func methods(app: Control) -> Array:
 
 static func service(app: Control) -> void:
 	var state: Dictionary = app.sim.state
-	var scores: VBoxContainer = app.card("Customer satisfaction and reputation")
+	var scores: VBoxContainer = app.card("Customer Satisfaction and Reputation")
 	app.metric(scores, "Satisfaction", "%d / 100" % state.satisfaction)
 	app.metric(scores, "Store reputation", "%d / 100" % state.reputation)
 	app.metric(scores, "Open cases", str(state.open_cases.size()))
 	scores.add_child(app.label("Unanswered cases escalate after five days. Store reputation affects future checkout traffic and conversion.", 14, Style.MUTED))
-	var queue: VBoxContainer = app.card("Complaints and returns")
+	var queue: VBoxContainer = app.card("Complaints and Returns")
 	var orders: Array = []
 	for id in state.open_cases:
 		orders.append(state.orders[id])
@@ -271,7 +271,7 @@ static func finish(app: Control, error: String, success: String) -> void:
 	app.refresh_view()
 
 static func analytics(app: Control) -> void:
-	var view: VBoxContainer = app.card("Checkout analytics")
+	var view: VBoxContainer = app.card("Checkout Analytics")
 	var window: OptionButton = app.dropdown(view, ["Last 7 days", "Last 30 days", "Last 365 days"], app.analytics_window)
 	window.item_selected.connect(func(index: int):
 		app.analytics_window = index

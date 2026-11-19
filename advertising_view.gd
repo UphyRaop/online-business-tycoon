@@ -11,10 +11,6 @@ const ChartLegend = preload("res://chart_legend.gd")
 static func overview(app: Control) -> void:
 	var view: VBoxContainer = app.card("Advertising Overview")
 	view.add_child(app.label("Simulated platforms · Local budgets · Campaign-attributed orders", 14, Style.MUTED))
-	app.action(view, "Campaign Manager", app.navigate.bind("Campaign Manager"), true)
-	var actions: HBoxContainer = app.row(view)
-	app.secondary_tab(actions, "Ads Analytics", app.navigate.bind("Advertising Analytics"), false)
-	app.secondary_tab(actions, "Management", app.navigate.bind("Management"), false)
 	var campaigns: Dictionary = app.sim.state.advertising.campaigns
 	var active := 0
 	var totals := Ads.empty_metrics()
@@ -39,9 +35,6 @@ static func overview(app: Control) -> void:
 
 static func manager(app: Control) -> void:
 	var view: VBoxContainer = app.card("Campaign Manager")
-	var links: HBoxContainer = app.row(view)
-	app.secondary_tab(links, "Overview", app.navigate.bind("Advertising"), app.page == "Advertising")
-	app.secondary_tab(links, "Ads Analytics", app.navigate.bind("Advertising Analytics"), app.page == "Advertising Analytics")
 	app.action(view, "Create campaign", func():
 		app.campaign_id = 0
 		app.navigate("Campaign Details")
@@ -76,8 +69,7 @@ static func details(app: Control) -> void:
 		app.set_notice("Campaign not found.", true)
 		app.navigate("Campaign Manager")
 		return
-	var view: VBoxContainer = app.card("Create campaign" if creating else existing.name)
-	app.secondary_tab(view, "Campaign Manager", app.navigate.bind("Campaign Manager"), true)
+	var view: VBoxContainer = app.card("Create Campaign" if creating else existing.name)
 	if not creating and not app.campaign_editing:
 		_campaign_summary(app, view, state, existing)
 		return
@@ -89,12 +81,10 @@ static func details(app: Control) -> void:
 			store_names.append(str(store.name))
 	if store_ids.is_empty():
 		view.add_child(app.label("Create a store before launching an advertising campaign.", 14, Style.MUTED))
-		app.secondary_tab(view, "Management", app.navigate.bind("Management"), false)
 		return
 	var selected_store: int = int(existing.get("store_id", store_ids[0])) if not creating else store_ids[0]
 	if selected_store not in store_ids:
 		view.add_child(app.label("This campaign's destination is inactive. Activate an eligible store before editing it.", 14, Style.MUTED))
-		app.secondary_tab(view, "Management", app.navigate.bind("Management"), false)
 		return
 	var store_index := maxi(0, store_ids.find(selected_store))
 	view.add_child(app.label("Destination store", 14, Style.MUTED))
@@ -258,7 +248,6 @@ static func _campaign_summary(app: Control, view: VBoxContainer, state: Dictiona
 	app.metric(view, "Lifetime Ad Spend", app.money(metrics.spend))
 	app.metric(view, "Attributed Purchases · Revenue", "%s · %s" % [_count(metrics.purchases), app.money(metrics.attributed_revenue - metrics.attributed_refunds)])
 	app.metric(view, "ROAS · CPA", "%.2f× · %s" % [metrics.roas, _average_cost(app, metrics.spend, metrics.purchases)])
-	app.secondary_tab(view, "Ads Analytics", app.navigate.bind("Advertising Analytics"), false)
 
 static func _campaign_controls(app: Control, view: VBoxContainer, state: Dictionary, existing: Dictionary) -> void:
 	var schedule_expired: bool = int(existing.get("end_day", 0)) > 0 and int(existing.end_day) < state.day
@@ -304,9 +293,6 @@ static func analytics(app: Control) -> void:
 	var ids: Array = campaigns.keys()
 	ids.sort()
 	var view: VBoxContainer = app.wide_card("Ads Analytics")
-	var nav: HBoxContainer = app.row(view)
-	app.secondary_tab(nav, "Overview", app.navigate.bind("Advertising"), false)
-	app.secondary_tab(nav, "Campaigns", app.navigate.bind("Campaign Manager"), false)
 	var period_choices := ["Daily · Last 7 Days", "Weekly · Last 8 Weeks", "Monthly · Last 12 Months", "All Time"]
 	view.add_child(app.label("Reporting Period", 14, Style.MUTED))
 	var periods: OptionButton = app.dropdown(view, period_choices, clampi(app.ad_period, 0, 3))

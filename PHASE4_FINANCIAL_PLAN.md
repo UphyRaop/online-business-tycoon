@@ -18,3 +18,9 @@
 5. **Expense controls and capital assets** — build on validated expense categories; classify capital expenditures only when the simulation has supported assets and depreciation rules. Preserve existing store setup treatment unless that policy is explicitly defined.
 
 Milestones 1 and subsequent safe reporting work can ship without changing company saves because they derive values from the existing ledger. Milestones that create new balances or obligations require versioned migration and model tests.
+
+## User-Approved Supplier Credit Addendum — 2026-11-19
+
+The later approved “UX Overhaul, Save Isolation, Supplier Credit & Multi-Agent QA” request explicitly authorizes deterministic, trust-based supplier credit. This approval supersedes this plan's earlier statement that supplier credit is not approved. It does not authorize changing existing immediate cash-purchase behavior, customer settlement timing, or unrelated loan/financing policies.
+
+Supplier credit was implemented in the approved UX/save-isolation work on `phase4-ux-save-supplier`. Its deterministic thresholds, credit-limit formula, seven-day due dates, late consequences, payable accounting, repayments, returns, save migration, and financial statement reconciliation are documented in `SUPPLIER_CREDIT_POLICY.md` and covered by the supplier-credit regression suites. Credit-funded inventory creates a payable without reducing cash at receipt; repayments reduce cash and payable exactly once. The existing cash-purchase path is preserved. This approval does not authorize changing customer settlement timing or adding unrelated loans/financing.

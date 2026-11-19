@@ -8,14 +8,11 @@ func run() -> void:
 	root.size = Vector2i(390, 844)
 	app = Main.instantiate()
 	root.add_child(app)
-	press("New Game")
+	create_new_game_for_test("Nora Founder", "Northstar Goods")
 	var fields := controls(app, "LineEdit")
-	fields[0].text = "Nora Founder"
-	fields[1].text = "Northstar Goods"
-	press("Register company")
 	expect(app.sim.state.stores.is_empty(), "New company starts with no marketplace stores or websites")
 	expect(app.sim.report(app.sim.state.day).closing_cash == app.sim.state.cash, "Dashboard Bank Balance uses the reconciled cash ledger balance")
-	var primary_names := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
+	var primary_names := ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]
 	var menu: Button = app.find_child("NavigationMenuButton", true, false)
 	if menu != null: menu.pressed.emit()
 	await process_frame
@@ -25,7 +22,8 @@ func run() -> void:
 	if drawer != null:
 		for button in controls(drawer, "Button"):
 			if button.tooltip_text in primary_names: nav_names.append(button.tooltip_text)
-	expect(nav_names.size() == 6 and "Profile" in nav_names, "Hamburger navigation presents all six primary categories including Profile")
+	expect(nav_names.size() == 7 and "Profile" in nav_names and "Marketing" in nav_names,
+		"Hamburger navigation presents all seven primary categories including Marketing and Profile")
 	if drawer != null:
 		for button in controls(drawer, "Button"):
 			if button.tooltip_text in primary_names:
@@ -34,7 +32,7 @@ func run() -> void:
 	press("Market")
 	await process_frame
 	await process_frame
-	expect(has_label("Product Catalogue") and controls(app, "Button").any(func(button): return button.text == "Request Quotation" and button.is_visible_in_tree()), "Market exposes product catalog and supplier quotation actions")
+	expect(has_label("Product Catalogue") and controls(app, "Button").any(func(button): return button.text == "View Details" and button.is_visible_in_tree()), "Market exposes the product catalogue and compact supplier details workflow")
 	var search_panel: Control = app.find_child("ProductSearchPanel", true, false)
 	var catalogue: Control = app.find_child("ProductCataloguePanel", true, false)
 	expect(search_panel != null and catalogue != null and search_panel.get_global_rect().position.y < catalogue.get_global_rect().position.y
@@ -64,7 +62,7 @@ func run() -> void:
 	search.text_changed.emit(search.text)
 	await settle("phase33-mobile-market")
 	press("Order")
-	expect(app.page == "Orders" and has_label("Store operations"), "Order opens the existing fulfillment workspace")
+	expect(app.page == "Orders" and has_label("Store Operations"), "Order opens the existing fulfillment workspace")
 	press("Pre-orders")
 	expect(has_label("No customer pre-orders yet"), "Pre-orders route has a clear empty state")
 	press("Business")

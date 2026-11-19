@@ -55,7 +55,7 @@ static func show(app: Control, product: int, store_id: int = -1) -> VBoxContaine
 		eligible.append(id)
 		product_names.append(Catalog.PRODUCTS[id].name)
 	upsell_form.add_child(app.label("Choose one or two additional units from products other than the primary product.", 14, Style.MUTED))
-	upsell_form.add_child(app.label("Upsell quantity", 14, Style.MUTED))
+	upsell_form.add_child(app.label("Upsell Quantity", 14, Style.MUTED))
 	var composition: OptionButton = app.dropdown(upsell_form, ["1 unit", "2 different products", "2 units of one product"], 0)
 	upsell_form.add_child(app.label("Additional product", 14, Style.MUTED))
 	var first_product: OptionButton = app.dropdown(upsell_form, product_names, 0)
