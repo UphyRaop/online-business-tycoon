@@ -127,18 +127,65 @@ func run() -> void:
 		"Profile explains that personal finance is not tracked and separates it from company accounts")
 	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Profile"),
 		"Profile details are read-only until editing is explicitly activated")
+	var portrait: TextureRect = app.find_child("CEOAvatar", true, false)
+	expect(portrait != null and absf(portrait.custom_minimum_size.y / portrait.custom_minimum_size.x - 4.0 / 3.0) < 0.01,
+		"CEO portrait preserves the 3:4 frame on desktop")
+	var existing_photo := Image.create(48, 64, false, Image.FORMAT_RGBA8)
+	existing_photo.fill(Color("#dfb777"))
+	CEO.add_avatar(app.ceo_profile, "image/png", existing_photo.save_png_to_buffer())
+	CEO.save_profile(app.ceo_profile)
+	app.refresh_view()
+	expect(not has_button("Change Photo") and not has_button("Remove Photo"),
+		"Saved Profile hides photo actions until Edit Profile is selected")
 	press("Edit Profile")
+	expect(has_button("Change Photo") and has_button("Remove Photo"),
+		"Photo replacement and removal actions appear inside Profile edit mode")
 	var profile_fields := controls(app, "LineEdit")
 	profile_fields[0].text = "Discarded CEO Name"
+	profile_fields[0].text_changed.emit(profile_fields[0].text)
+	var replacement_photo := Image.create(600, 400, false, Image.FORMAT_RGBA8)
+	replacement_photo.fill(Color("#4f87bc"))
+	app.open_avatar_crop(replacement_photo)
+	await process_frame
+	await process_frame
+	expect(app.find_child("AvatarCropModal", true, false) != null and has_button("Apply Crop")
+		and has_button("Reset"),
+		"Photo replacement opens a centered crop dialog over the Profile edit screen")
+	press("Apply Crop")
+	await process_frame
+	var staged_photo := str(app.ceo_profile.avatar_data)
+	expect(staged_photo != "" and staged_photo != CEO.load_profile().avatar_data,
+		"Apply Crop updates the edit preview without persisting before Save Profile")
 	press("Cancel")
-	expect(app.ceo_profile.full_name == "Kai Founder" and not has_button("Save Changes"),
-		"Cancel discards unsaved CEO profile edits")
+	expect(app.ceo_profile.full_name == "Kai Founder" and app.ceo_profile.avatar_data == CEO.load_profile().avatar_data
+		and not has_button("Save Changes"), "Cancel restores saved identity and photo after a staged replacement")
 	press("Edit Profile")
 	profile_fields = controls(app, "LineEdit")
 	profile_fields[0].text = "Kai Global CEO"
+	profile_fields[0].text_changed.emit(profile_fields[0].text)
+	app.open_avatar_crop(replacement_photo)
+	await process_frame
+	await process_frame
+	press("Apply Crop")
+	await process_frame
 	press("Save Changes")
 	expect(app.ceo_profile.full_name == "Kai Global CEO" and app.sim.state.owner == "Kai Global CEO"
-		and CEO.load_profile().full_name == "Kai Global CEO", "Profile editing persists the shared CEO identity")
+		and CEO.load_profile().full_name == "Kai Global CEO" and CEO.load_profile().avatar_data == app.ceo_profile.avatar_data,
+		"Saving Profile persists edited identity and a replacement photo")
+	var retained_photo := str(app.ceo_profile.avatar_data)
+	press("Edit Profile")
+	press("Remove Photo")
+	expect(str(app.ceo_profile.avatar_data).is_empty(), "Remove Photo stages a reversible change while editing")
+	press("Cancel")
+	expect(str(app.ceo_profile.avatar_data) == retained_photo and CEO.load_profile().avatar_data == retained_photo,
+		"Cancel restores the previously saved CEO photo")
+	press("Edit Profile")
+	press("Remove Photo")
+	press("Save Changes")
+	expect(str(app.ceo_profile.avatar_data).is_empty() and CEO.load_profile().avatar_data.is_empty(),
+		"Saving Profile commits photo removal")
+	CEO.add_avatar(app.ceo_profile, "image/png", existing_photo.save_png_to_buffer())
+	CEO.save_profile(app.ceo_profile)
 	var first_company_id := str(app.sim.state.company_id)
 	var second_company := Sim.register("Kai Global CEO", "Harbor Digital", "", 1, 1, 0, 9123)
 	app.ceo_profile = CEO.register_company(app.ceo_profile, second_company)
@@ -167,7 +214,8 @@ func run() -> void:
 	var ceo_avatar := app.find_child("CEOAvatar", true, false) as TextureRect
 	expect(mobile_current_labels.size() == 1 and mobile_current_labels[0].get_parent() is VBoxContainer,
 		"Mobile owned-company rows stack the company name and current status without narrow wrapping")
-	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size == Vector2(144, 192)
+	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size.x >= 190.0
+		and absf(ceo_avatar.custom_minimum_size.y / ceo_avatar.custom_minimum_size.x - 4.0 / 3.0) < 0.01
 		and ceo_avatar.size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
 		"CEO avatar keeps its centered portrait aspect ratio on mobile")
 	for target in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
@@ -192,6 +240,21 @@ func run() -> void:
 		var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
 		expect(shell_bounds.position.x * scale_x >= 0 and shell_bounds.end.x * scale_x <= float(viewport.x) + 1.0,
 			"Centered content shell fits %dx%d" % [viewport.x, viewport.y])
+	app.navigate("Profile")
+	press("Edit Profile")
+	app.open_avatar_crop(replacement_photo)
+	await process_frame
+	await process_frame
+	var mobile_modal: Control = app.find_child("AvatarCropModal", true, false)
+	var mobile_crop: Control = app.find_child("AvatarCropViewport", true, false)
+	var mobile_actions: Array = controls(mobile_modal, "Button") if mobile_modal != null else []
+	var crop_actions_fit := mobile_actions.filter(func(button): return button.text in ["Cancel", "Reset", "Apply Crop"]).all(
+		func(button): return button.get_global_rect().position.y >= 0 and button.get_global_rect().end.y <= root.size.y)
+	expect(mobile_modal != null and mobile_crop != null and mobile_crop.custom_minimum_size.x <= 220.0
+		and crop_actions_fit, "Mobile crop dialog fits its 3:4 editor and Cancel, Reset, and Apply Crop controls")
+	var modal_cancel: Variant = mobile_actions.filter(func(button): return button.text == "Cancel").back()
+	if modal_cancel != null: modal_cancel.pressed.emit()
+	press("Cancel")
 	print("Phase 4 navigation and Management UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 

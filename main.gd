@@ -64,6 +64,7 @@ var ceo_profile_corrupt := false
 var identity_conflict_record: Dictionary = {}
 var avatar_picker_callback: JavaScriptObject
 var profile_editing := false
+var profile_edit_snapshot: Dictionary = {}
 var company_profile_editing := false
 var store_listing_editing := false
 var campaign_editing := false
@@ -230,6 +231,13 @@ func profit_color(cents: int) -> Color:
 
 func _update_responsive_layout() -> void:
 	var viewport_width := size.x
+	if page == "Profile":
+		var avatar := find_child("CEOAvatar", true, false) as TextureRect
+		if avatar != null and avatar.get_parent() != null and avatar.get_parent().get_parent() is BoxContainer:
+			var identity_layout: BoxContainer = avatar.get_parent().get_parent()
+			if (identity_layout is HBoxContainer) != (viewport_width >= 600.0):
+				render()
+				return
 	if is_instance_valid(page_shell):
 		var horizontal_margin := 20 if viewport_width >= 900.0 else 12
 		page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
@@ -549,20 +557,13 @@ func profile_page() -> void:
 	identity_layout.add_child(portrait)
 	var avatar := TextureRect.new()
 	avatar.name = "CEOAvatar"
-	avatar.custom_minimum_size = Vector2(144, 192)
+	var portrait_width := 170.0 if size.x >= 600.0 else minf(280.0, maxf(240.0, size.x - 64.0))
+	avatar.custom_minimum_size = Vector2(portrait_width, portrait_width * 4.0 / 3.0)
 	avatar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	avatar.texture = _profile_avatar_texture()
 	portrait.add_child(avatar)
-	action(portrait, "Change Photo", open_avatar_picker)
-	if not str(ceo_profile.get("avatar_data", "")).is_empty():
-		action(portrait, "Remove Photo", func():
-			CEOProfile.clear_avatar(ceo_profile)
-			if write_progress(Slots.AUTOSAVE, "Profile photo removed."):
-				set_notice("Profile photo removed.")
-			refresh_view()
-		)
 	portrait.add_child(label("Stored in this browser only; never uploaded.", 13, Style.MUTED))
 	var details := VBoxContainer.new()
 	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -572,7 +573,18 @@ func profile_page() -> void:
 		var full_name := field(details, "Full Name", str(ceo_profile.get("full_name", sim.state.get("owner", ""))))
 		var residence := field(details, "Country of Residence", str(ceo_profile.get("country", "")))
 		var title := field(details, "Professional Title", str(ceo_profile.get("title", "Entrepreneur")))
+		full_name.text_changed.connect(func(value: String): ceo_profile.full_name = value)
+		residence.text_changed.connect(func(value: String): ceo_profile.country = value)
+		title.text_changed.connect(func(value: String): ceo_profile.title = value)
 		watch_edits([full_name, residence, title])
+		var photo_actions := row(details)
+		action(photo_actions, "Change Photo", open_avatar_picker)
+		if not str(ceo_profile.get("avatar_data", "")).is_empty():
+			action(photo_actions, "Remove Photo", func():
+				CEOProfile.clear_avatar(ceo_profile)
+				set_notice("Photo removal will take effect when you save your profile.")
+				refresh_view()
+			)
 		action(details, "Save Changes", func():
 			if full_name.text.strip_edges().is_empty() or title.text.strip_edges().is_empty():
 				set_notice("Enter a name and professional title.", true)
@@ -591,12 +603,22 @@ func profile_page() -> void:
 				set_notice("Profile changes could not be saved. " + error_string(result), true)
 				return
 			profile_editing = false
-			if write_progress(Slots.AUTOSAVE, "CEO profile updated."):
-				set_notice("Profile changes saved.")
+			profile_edit_snapshot.clear()
+			if not write_progress(Slots.AUTOSAVE, "CEO profile updated."):
+				ceo_profile = previous
+				sim.state.owner = previous_owner
+				CEOProfile.save_profile(ceo_profile)
+				profile_editing = true
+				profile_edit_snapshot = previous.duplicate(true)
+				return
+			set_notice("Profile changes saved.")
 			refresh_view()
 		, true)
 		action(details, "Cancel", func():
 			profile_editing = false
+			if not profile_edit_snapshot.is_empty():
+				ceo_profile = profile_edit_snapshot.duplicate(true)
+				profile_edit_snapshot.clear()
 			edit_checks.clear()
 			set_notice("")
 			refresh_view()
@@ -610,6 +632,7 @@ func profile_page() -> void:
 		metric(details, "Country of Residence", country_name)
 		metric(details, "Professional Title", professional_title)
 		action(details, "Edit Profile", func():
+			profile_edit_snapshot = ceo_profile.duplicate(true)
 			profile_editing = true
 			refresh_view()
 		)
@@ -665,19 +688,50 @@ func open_avatar_crop(image: Image) -> void:
 	if image == null or image.is_empty() or image.get_width() <= 0 or image.get_height() <= 0:
 		set_notice("Choose a readable photo file.", true)
 		return
+	if not profile_editing:
+		set_notice("Edit your profile before changing its photo.", true)
+		return
 	avatar_crop_source = image.duplicate()
-	screen = "Avatar Crop"
 	set_notice("")
 	render()
+	call_deferred("_show_avatar_crop_modal")
 
-func _avatar_crop_screen() -> void:
-	var editor_card := wide_card("Crop Your Profile Photo")
-	editor_card.add_child(label("Drag the photo to reposition it. Use the zoom slider for a closer crop. The portrait frame is 3:4.", 15, Style.MUTED))
+func _show_avatar_crop_modal() -> void:
+	if avatar_crop_source == null or avatar_crop_source.is_empty() or screen != "Game" or page != "Profile" or not profile_editing:
+		return
+	var overlay := Control.new()
+	overlay.name = "AvatarCropModal"
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.z_index = 100
+	add_child(overlay)
+	var shade := ColorRect.new()
+	shade.color = Color(0.02, 0.04, 0.08, 0.88)
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(shade)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.add_theme_constant_override("margin_left", 12)
+	center.add_theme_constant_override("margin_right", 12)
+	center.add_theme_constant_override("margin_top", 12)
+	center.add_theme_constant_override("margin_bottom", 12)
+	overlay.add_child(center)
+	var modal_width := minf(760.0, size.x - 24.0)
+	var editor_card := PanelContainer.new()
+	editor_card.name = "AvatarCropDialog"
+	editor_card.custom_minimum_size.x = maxf(280.0, modal_width)
+	editor_card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	editor_card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	editor_card.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 15, 16))
+	center.add_child(editor_card)
+	var content := stack(editor_card, 4)
+	content.add_child(label("Crop Profile Photo", 22))
+	content.add_child(label("Drag to reposition the photo or adjust the zoom. The crop frame uses a 3:4 portrait ratio.", 14, Style.MUTED))
 	var composition := FlowContainer.new()
-	composition.add_theme_constant_override("h_separation", 18)
-	composition.add_theme_constant_override("v_separation", 18)
-	editor_card.add_child(composition)
-	var crop_width := minf(320.0, maxf(220.0, size.x - 88.0))
+	composition.add_theme_constant_override("h_separation", 12)
+	composition.add_theme_constant_override("v_separation", 4)
+	content.add_child(composition)
+	var mobile_crop := size.x < 600.0
+	var crop_width := minf(200.0 if mobile_crop else 320.0, maxf(180.0 if mobile_crop else 220.0, size.x - (64.0 if mobile_crop else 88.0)))
 	var crop := AvatarCrop.new()
 	crop.name = "AvatarCropViewport"
 	crop.custom_minimum_size = Vector2(crop_width, crop_width * 4.0 / 3.0)
@@ -686,13 +740,13 @@ func _avatar_crop_screen() -> void:
 	composition.add_child(crop)
 	var controls := VBoxContainer.new()
 	controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	controls.custom_minimum_size.x = 220.0
+	controls.custom_minimum_size.x = minf(220.0, maxf(180.0, size.x - crop_width - 72.0))
 	controls.add_theme_constant_override("separation", 10)
 	composition.add_child(controls)
 	controls.add_child(label("Live Preview", 17, Style.GOLD))
 	var preview := TextureRect.new()
 	preview.name = "AvatarCropPreview"
-	preview.custom_minimum_size = Vector2(120, 160)
+	preview.custom_minimum_size = Vector2(65, 87) if mobile_crop else Vector2(120, 160)
 	preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
@@ -700,6 +754,7 @@ func _avatar_crop_screen() -> void:
 	crop.preview_changed.connect(func(image: Image):
 		preview.texture = ImageTexture.create_from_image(image)
 	)
+	preview.texture = ImageTexture.create_from_image(crop.crop_image())
 	controls.add_child(label("Zoom", 14, Style.MUTED))
 	var zoom := HSlider.new()
 	zoom.name = "AvatarCropZoom"
@@ -714,29 +769,22 @@ func _avatar_crop_screen() -> void:
 		crop.reset_crop()
 		zoom.value = 1.0
 	)
-	var buttons := row(editor_card)
+	var buttons := row(content)
 	action(buttons, "Cancel", func():
 		avatar_crop_source = null
-		screen = "Game"
-		page = "Profile"
+		overlay.queue_free()
 		set_notice("")
-		render()
 	)
-	action(buttons, "Save Photo", func():
+	action(buttons, "Apply Crop", func():
 		var finalized := crop.crop_image()
-		var previous := ceo_profile.duplicate(true)
 		var error := CEOProfile.set_avatar_image(ceo_profile, finalized)
 		if error != OK:
 			set_notice("The cropped photo could not be stored. Choose a smaller image.", true)
 			return
-		if not write_progress(Slots.AUTOSAVE, "Profile photo saved locally."):
-			ceo_profile = previous
-			return
 		avatar_crop_source = null
-		screen = "Game"
-		page = "Profile"
-		set_notice("Profile photo saved.")
-		render()
+		overlay.queue_free()
+		set_notice("Photo preview updated. Save your profile to keep this change.")
+		refresh_view()
 	, true)
 
 func _load_avatar_image(mime: String, data: PackedByteArray) -> Image:
@@ -902,6 +950,9 @@ func route_secondary(target: String) -> void:
 	navigate(target)
 
 func _reset_edit_modes() -> void:
+	if profile_editing and not profile_edit_snapshot.is_empty():
+		ceo_profile = profile_edit_snapshot.duplicate(true)
+	profile_edit_snapshot.clear()
 	profile_editing = false
 	company_profile_editing = false
 	store_listing_editing = false
@@ -1000,7 +1051,8 @@ func render() -> void:
 		masthead.add_child(label("ONLINE BUSINESS TYCOON", 13, Style.GOLD))
 	if screen == "Game":
 		var heading := row(masthead)
-		var title := label(page, 30)
+		var page_title := "Ads Analytics" if page == "Advertising Analytics" else page
+		var title := label(page_title, 30)
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		heading.add_child(title)
 		action(heading, "Save Game", open_screen.bind("Save")).size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -1048,7 +1100,6 @@ func render() -> void:
 			"Load": Menu.slots(self, false)
 			"Save": Menu.slots(self, true)
 			"Settings": Menu.settings(self)
-			"Avatar Crop": _avatar_crop_screen()
 			"Campaign Manager": AdsView.manager(self)
 			"Campaign Details": AdsView.details(self)
 			"Advertising Analytics": AdsView.analytics(self)

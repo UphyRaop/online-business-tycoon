@@ -100,9 +100,19 @@ func run() -> void:
 	app.sim.advance(8)
 	press("Ads Analytics")
 	expect(has_label("Ads Analytics"), "Campaign details opens ads analytics")
-	expect(has_label("Campaigns matched") and has_label("Portrait launch") and has_label("CPM")
-		and has_label("Advertising Platform") and has_label("Reporting Period") and has_label("Destination"),
-		"Analytics labels its filters and renders complete cost metrics")
+	expect(has_label("Total Ad Spend") and has_label("Attributed Revenue") and has_label("ROAS")
+		and has_label("Impressions") and has_label("Clicks") and has_label("Conversions")
+		and has_label("Ad Spend vs. Attributed Revenue") and has_label("ROAS Trend")
+		and has_label("Clicks and Conversions") and has_label("Campaign Performance")
+		and has_label("Portrait launch") and has_label("Advertising Platform")
+		and has_label("Reporting Period") and has_label("Destination Store"),
+		"Analytics dashboard uses recorded campaign data, KPI cards, trends, and accessible filters")
+	var expected_ad_spend := 0
+	for record in app.sim.state.advertising.history:
+		if int(record.day) >= maxi(1, app.sim.state.day - 6) and int(record.day) <= app.sim.state.day:
+			expected_ad_spend += int(record.spend)
+	expect(controls(app, "Label").any(func(node): return node.text == app.money(expected_ad_spend)),
+		"Ads Analytics KPI spend reconciles to campaign history for the selected date range")
 	select(controls(app, "OptionButton")[2], 3)
 	expect(not has_label("Portrait launch"), "Campaign status filter removes active campaigns when Paused is selected")
 	select(controls(app, "OptionButton")[2], 0)

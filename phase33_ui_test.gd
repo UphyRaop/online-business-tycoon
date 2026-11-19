@@ -25,14 +25,26 @@ func run() -> void:
 			expect(button.custom_minimum_size.y == app.TOUCH_HEIGHT, "Primary navigation uses the shared touch target height")
 	press("Market")
 	expect(has_label("Product Catalogue") and has_label("Supplier quotation"), "Market exposes catalog and supplier purchasing")
-	var category_button: MenuButton = controls(app, "MenuButton")[0]
-	category_button.get_popup().id_pressed.emit(0)
+	var category_button: OptionButton = app.find_child("ProductCategorySelection", true, false)
+	select(category_button, 1)
 	var search: LineEdit = field_for_label("Search products")
 	search.text = "Wireless Earbuds"
 	search.text_changed.emit(search.text)
-	var product_picker: OptionButton = controls(app, "OptionButton")[0]
+	var product_picker: OptionButton = app.find_child("ProductSelection", true, false)
 	expect(product_picker.item_count == 1 and product_picker.get_item_text(0) == "Wireless Earbuds · Electronics",
 		"Category and text filters isolate the expected catalog product")
+	select(product_picker, 0)
+	category_button = app.find_child("ProductCategorySelection", true, false)
+	search = field_for_label("Search products")
+	product_picker = app.find_child("ProductSelection", true, false)
+	expect(category_button.get_item_text(category_button.selected) == "Electronics" and has_label("Select Product")
+		and has_label("Electronics"), "Selected category, product selection, and product details have a clear hierarchy")
+	search.text = "no-such-product"
+	search.text_changed.emit(search.text)
+	expect(product_picker.disabled and has_label("No products match this category and search. Choose another category or clear the search."),
+		"Product catalog shows a useful empty state when filters match no products")
+	search.text = "Wireless Earbuds"
+	search.text_changed.emit(search.text)
 	await settle("phase33-mobile-market")
 	press("Order")
 	expect(app.page == "Orders" and has_label("Store operations"), "Order opens the existing fulfillment workspace")

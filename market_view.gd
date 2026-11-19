@@ -10,16 +10,15 @@ static func show(app: Control) -> void:
 	var product: int = app.selected_product
 	var item: Dictionary = app.sim.product_state(product)
 	var catalog: VBoxContainer = app.card("Product Catalogue")
-	var category_filter := MenuButton.new()
-	category_filter.text = Catalog.CATEGORIES[app.catalog_category] if app.catalog_category >= 0 else "All Categories"
-	category_filter.custom_minimum_size.y = app.TOUCH_HEIGHT
-	category_filter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	catalog.add_child(category_filter)
-	var category_menu: PopupMenu = category_filter.get_popup()
-	category_menu.add_item("All Categories", -1)
-	for category_id in Catalog.CATEGORIES.size(): category_menu.add_item(Catalog.CATEGORIES[category_id], category_id)
+	var category_choices: Array[String] = ["Select Category · All Products"]
+	category_choices.append_array(Catalog.CATEGORIES)
+	catalog.add_child(app.label("Browse by Category", 14, Style.MUTED))
+	var category_filter: OptionButton = app.dropdown(catalog, category_choices, app.catalog_category + 1)
+	category_filter.name = "ProductCategorySelection"
 	var search: LineEdit = app.field(catalog, "Search products", app.catalog_search, 64)
+	catalog.add_child(app.label("Select Product", 14, Style.MUTED))
 	var picker: OptionButton = app.dropdown(catalog, [], 0)
+	picker.name = "ProductSelection"
 	var visible_products: Array[int] = []
 	var refresh_picker := func():
 		picker.clear()
@@ -32,15 +31,14 @@ static func show(app: Control) -> void:
 			visible_products.append(id)
 			picker.add_item("%s · %s" % [entry.name, entry.category])
 		if visible_products.is_empty():
-			picker.add_item("No products match these filters")
+			picker.add_item("No matching products")
 			picker.disabled = true
 			return
 		picker.disabled = false
 		var current := visible_products.find(app.selected_product)
 		picker.select(maxi(0, current))
-	category_menu.id_pressed.connect(func(category_id: int):
-		app.catalog_category = category_id
-		category_filter.text = Catalog.CATEGORIES[category_id] if category_id >= 0 else "All Categories"
+	category_filter.item_selected.connect(func(selected_index: int):
+		app.catalog_category = selected_index - 1
 		refresh_picker.call()
 	)
 	search.text_changed.connect(func(value: String):
@@ -51,6 +49,12 @@ static func show(app: Control) -> void:
 		if index in range(visible_products.size()): app.open_product(visible_products[index])
 	)
 	refresh_picker.call()
+	var empty_state: Label = app.label("No products match this category and search. Choose another category or clear the search.", 14, Style.MUTED)
+	empty_state.name = "ProductSearchEmptyState"
+	empty_state.visible = visible_products.is_empty()
+	catalog.add_child(empty_state)
+	search.text_changed.connect(func(_value: String): empty_state.visible = visible_products.is_empty())
+	category_filter.item_selected.connect(func(_index: int): empty_state.visible = visible_products.is_empty())
 	var links: HBoxContainer = app.row(catalog)
 	app.secondary_tab(links, "My Products", app.navigate.bind("My Products"), app.page == "My Products")
 	var stock_label: Label = app.label("", 15, Style.MUTED)

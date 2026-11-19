@@ -19,7 +19,7 @@ func run() -> void:
 	app.sim.state.seed = 153
 	press("Market")
 	var choices := controls(app, "OptionButton")
-	select(choices[1], 0)
+	select(choices[2], 0)
 	press("Use forecast quantity")
 	var quantity: LineEdit = field_for_label("Order quantity")
 	expect(quantity.text.to_int() > 0, "Forecast fills the quantity field")
@@ -35,9 +35,9 @@ func run() -> void:
 	press("Save Changes")
 	press("Market")
 	choices = controls(app, "OptionButton")
-	select(choices[0], 4)
+	select(choices[1], 4)
 	choices = controls(app, "OptionButton")
-	select(choices[1], 0)
+	select(choices[2], 0)
 	quantity = field_for_label("Order quantity")
 	quantity.text = "20"
 	press("Purchase stock")
@@ -47,7 +47,7 @@ func run() -> void:
 	press("Save Changes")
 	press("Market")
 	choices = controls(app, "OptionButton")
-	select(choices[0], 4)
+	select(choices[1], 4)
 	var offers_before: Dictionary = app.sim.state.offers.get(4, {}).duplicate(true)
 	expect(has_visible_label("No offers saved") and not has_visible_label("Units per bundle")
 		and not has_visible_label("Upsell quantity") and controls(app, "Button").any(func(button): return button.text.to_lower() == "create offer" and button.is_visible_in_tree()),

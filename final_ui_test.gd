@@ -72,7 +72,7 @@ func run() -> void:
 	expect(has_label("Net revenue") and has_label("Product profit"), "Product portfolio shows sales and profit")
 	await settle("final-products")
 	press("Browse catalog")
-	select(controls(app, "OptionButton")[0], 4)
+	select(app.find_child("ProductSelection", true, false), 4)
 	open_first_store_listing()
 	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 0)
