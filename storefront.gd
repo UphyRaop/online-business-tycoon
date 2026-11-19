@@ -6,28 +6,31 @@ const Stores = preload("res://store_manager.gd")
 const Supply = preload("res://supply.gd")
 
 static func offers_for(state: Dictionary, product: int) -> Dictionary:
-	var stored: Variant = state.get("offers", {}).get(product, {})
-	if not stored is Dictionary:
-		return {}
-	if stored.has("mode"):
-		stored = {int(stored.mode): stored}
+	return _normalize_offers(state.get("offers", {}).get(product, {}))
+
+static func offers_for_store(state: Dictionary, store_id: int, product: int) -> Dictionary:
+	var store := Stores.get_store(state, store_id)
+	var store_offers: Dictionary = store.get("offers", {})
+	if store_offers.has(product):
+		return _normalize_offers(store_offers.get(product, {}))
+	return offers_for(state, product)
+
+static func _normalize_offers(stored: Variant) -> Dictionary:
+	if not stored is Dictionary: return {}
 	var normalized := {}
+	if stored.has("mode"): stored = {int(stored.mode): stored}
 	for key in stored:
 		var mode := int(key)
 		var offer: Variant = stored[key]
-		if not offer is Dictionary:
-			continue
+		if not offer is Dictionary: continue
 		var value: Dictionary = offer.duplicate(true)
 		value.mode = mode
 		if mode == 1:
-			# Old bundles had a second SKU. Preserve their discount and enabled state,
-			# while migrating the mechanic to two units of the selected SKU.
 			value.quantity = clampi(int(value.get("quantity", 2)), 2, 10)
 			value.discount = int(value.get("discount", 0))
 			value.price = int(value.get("price", 0))
 		else:
-			if not value.get("items", null) is Array:
-				value.items = [int(value.get("add_on", -1))]
+			if not value.get("items", null) is Array: value.items = [int(value.get("add_on", -1))]
 			value.discount = int(value.get("discount", 0))
 			value.price = int(value.get("price", 0))
 		value.enabled = value.get("enabled", true) == true
@@ -35,6 +38,48 @@ static func offers_for(state: Dictionary, product: int) -> Dictionary:
 	if normalized.get(1, {}).get("enabled", false) and normalized.get(2, {}).get("enabled", false):
 		normalized[2].enabled = false
 	return normalized
+
+static func set_bundle_for_store(state: Dictionary, store_id: int, product: int, quantity: int, discount: int, price: int = 0) -> String:
+	if Stores.index_of(state, store_id) < 0: return "Choose an existing store listing."
+	if not valid_product(product) or quantity < 2 or quantity > 10 or discount not in range(51) or price < 0:
+		return "Choose 2–10 units and a valid bundle price or discount."
+	var offers := offers_for_store(state, store_id, product)
+	var enabled: bool = offers.get(1, {}).get("enabled", true)
+	offers[1] = {"mode": 1, "quantity": quantity, "discount": discount, "price": price, "enabled": enabled}
+	if enabled and offers.has(2): offers[2].enabled = false
+	_store_offers_set(state, store_id, product, offers)
+	return ""
+
+static func set_upsell_for_store(state: Dictionary, store_id: int, product: int, items: Array, discount: int, price: int = 0) -> String:
+	if Stores.index_of(state, store_id) < 0: return "Choose an existing store listing."
+	if not valid_product(product) or items.is_empty() or items.size() > 2 or discount not in range(51) or price < 0:
+		return "Choose one or two additional units and a valid price or discount."
+	for add_on in items:
+		if not valid_product(add_on) or int(add_on) == product: return "Every upsell product must differ from the primary product."
+	var offers := offers_for_store(state, store_id, product)
+	var enabled: bool = offers.get(2, {}).get("enabled", true)
+	offers[2] = {"mode": 2, "items": items.duplicate(), "discount": discount, "price": price, "enabled": enabled}
+	if enabled and offers.has(1): offers[1].enabled = false
+	_store_offers_set(state, store_id, product, offers)
+	return ""
+
+static func set_enabled_for_store(state: Dictionary, store_id: int, product: int, mode: int, enabled: bool) -> String:
+	if Stores.index_of(state, store_id) < 0: return "Choose an existing store listing."
+	if not valid_product(product) or mode not in [1, 2]: return "Choose a valid product offer."
+	var offers := offers_for_store(state, store_id, product)
+	if not offers.has(mode): return "Save this offer before enabling or disabling it."
+	offers[mode].enabled = enabled
+	if enabled and offers.has(3 - mode): offers[3 - mode].enabled = false
+	_store_offers_set(state, store_id, product, offers)
+	return ""
+
+static func _store_offers_set(state: Dictionary, store_id: int, product: int, offers: Dictionary) -> void:
+	var index := Stores.index_of(state, store_id)
+	var store: Dictionary = state.stores[index].duplicate(true)
+	var values: Dictionary = store.get("offers", {})
+	values[product] = offers
+	store.offers = values
+	state.stores[index] = store
 
 static func set_bundle(state: Dictionary, product: int, quantity: int, discount: int, price: int = 0) -> String:
 	if not valid_product(product) or quantity < 2 or quantity > 10 or discount not in range(51) or price < 0:
@@ -98,7 +143,7 @@ static func run_product(sim: RefCounted, product: int, item: Dictionary, channel
 	var conversion := clampf(0.30 + (reputation - 0.7) * 0.25 + (value - 1.0) * 0.15
 		+ (2 - Catalog.SHIPPING[state.shipping].days) * 0.02, 0.05, 0.65) * Stores.conversion_multiplier(store)
 	conversion = clampf(conversion, 0.03, 0.70)
-	var offers := offers_for(state, product)
+	var offers := offers_for_store(state, store_id, product) if store_id >= 0 else offers_for(state, product)
 	if store_id >= 0:
 		state.advertising.visitors[store_id] = int(state.advertising.visitors.get(store_id, 0)) + attempts
 	for attempt in attempts:

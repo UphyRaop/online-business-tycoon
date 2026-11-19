@@ -9,6 +9,7 @@ const Supply = preload("res://supply.gd")
 static func place(sim: RefCounted, channel: int, items: Array, total: int, offer_kind: String,
 		prices: Array = [], store_id: int = -1, campaign_id: int = 0, allow_preorders: bool = false) -> int:
 	var state: Dictionary = sim.state
+	allocate_preorders_state(state)
 	if store_id < 0:
 		store_id = channel
 	var missing_stock := false
@@ -100,6 +101,7 @@ static func place(sim: RefCounted, channel: int, items: Array, total: int, offer
 	return id
 
 static func ship(state: Dictionary, id: int, method: int) -> String:
+	allocate_preorders_state(state)
 	var order: Dictionary = state.orders.get(id, {})
 	if order.get("status") != "queued" or method not in range(Catalog.SHIPPING.size()):
 		return "This order cannot be dispatched."
@@ -136,6 +138,7 @@ static func dispatch(state: Dictionary, order: Dictionary, method: int, delay: i
 	row.store_activity[order.get("store_id", order.channel)] = activity
 
 static func auto_dispatch(state: Dictionary, rng: RandomNumberGenerator) -> void:
+	allocate_preorders_state(state)
 	for id in state.active_orders:
 		var order: Dictionary = state.orders[id]
 		if order.status == "queued":
@@ -225,7 +228,9 @@ static func complete(state: Dictionary, order: Dictionary, rng: RandomNumberGene
 	Service.on_delivery(state, order, rng)
 
 static func allocate_preorders(sim: RefCounted) -> void:
-	var state: Dictionary = sim.state
+	allocate_preorders_state(sim.state)
+
+static func allocate_preorders_state(state: Dictionary) -> void:
 	var ids: Array = state.orders.keys()
 	ids.sort_custom(func(a: int, b: int):
 		var first: Dictionary = state.orders[a]
@@ -237,8 +242,8 @@ static func allocate_preorders(sim: RefCounted) -> void:
 		if not order.get("preorder", false) or order.status != "queued": continue
 		for index in order.items.size():
 			var line: Dictionary = order.items[index]
-			if not line.get("awaiting_stock", false) or sim.stock(int(line.product)) < 1: continue
-			var allocated: Dictionary = sim.reserve_unit(int(line.product))
+			if not line.get("awaiting_stock", false) or _stock_in_lots(state, int(line.product)) < 1: continue
+			var allocated: Dictionary = _reserve_from_lots(state, int(line.product))
 			allocated.product = int(line.product)
 			allocated.product_id = Catalog.product_id(int(line.product))
 			if line.has("revenue"): allocated.revenue = int(line.revenue)
@@ -255,6 +260,30 @@ static func allocate_preorders(sim: RefCounted) -> void:
 			order.expected_restock = state.day
 			order.fulfillment_delay = Catalog.SHIPPING[order.method].days
 			order.promise = maxi(order.promise, state.day + 1 + Catalog.SHIPPING[order.method].days)
+		state.orders[id] = order
+
+static func _stock_in_lots(state: Dictionary, product: int) -> int:
+	var total := 0
+	for lot in state.get("products", {}).get(product, {}).get("lots", []):
+		total += maxi(0, int(lot.get("units", 0)))
+	return total
+
+static func _reserve_from_lots(state: Dictionary, product: int) -> Dictionary:
+	var item: Dictionary = state.products.get(product, {}).duplicate(true)
+	var lots: Array = item.get("lots", [])
+	if lots.is_empty(): return {"awaiting_stock": true, "product": product}
+	var lot: Dictionary = lots.front()
+	var unit := {"product": product, "product_id": Catalog.product_id(product), "cost": lot.cost,
+		"quality": lot.quality, "freight": lot.get("freight", 0)}
+	if lot.has("supplier"): unit.supplier = lot.supplier
+	if lot.has("supplier_id"): unit.supplier_id = lot.supplier_id
+	if lot.has("supplier_name"): unit.supplier_name = lot.supplier_name
+	lot.units -= 1
+	if lot.units <= 0: lots.pop_front()
+	else: lots[0] = lot
+	item.lots = lots
+	state.products[product] = item
+	return unit
 
 static func outstanding_preorders(state: Dictionary, product: int = -1, store_id: int = -1) -> int:
 	var total := 0

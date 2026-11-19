@@ -17,6 +17,7 @@ const Saves = preload("res://save_store.gd")
 const AvatarCrop = preload("res://avatar_crop_viewport.gd")
 const FinanceManagement = preload("res://finance_management.gd")
 const FinanceChart = preload("res://ads_chart.gd")
+const ChartLegend = preload("res://chart_legend.gd")
 const NAV := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
@@ -397,7 +398,7 @@ func start_new_game() -> void:
 				show_screen("CEO identity conflict")
 				return
 			if ceo_profile.is_empty():
-				ceo_profile = CEOProfile.ensure({}, str(preserved.get("owner", "")))
+				ceo_profile = CEOProfile.ensure_legacy({}, str(preserved.get("owner", "")))
 			ceo_profile = CEOProfile.sync_company(ceo_profile, preserved)
 			var archive_result := Saves.save(preserved, CEOProfile.company_path(str(preserved.company_id)), float(latest.get("saved_at", 0)))
 			if archive_result != OK:
@@ -513,7 +514,7 @@ func _sync_ceo_profile() -> void:
 	if sim == null or ceo_profile_corrupt:
 		return
 	if ceo_profile.is_empty():
-		ceo_profile = CEOProfile.ensure({}, str(sim.state.get("owner", "")))
+		ceo_profile = CEOProfile.ensure_legacy({}, str(sim.state.get("owner", "")))
 	if str(ceo_profile.get("full_name", "")).strip_edges().is_empty():
 		ceo_profile.full_name = str(sim.state.get("owner", ""))
 	sim.state.owner = str(ceo_profile.get("full_name", sim.state.get("owner", "")))
@@ -559,14 +560,13 @@ func profile_page() -> void:
 	identity_layout.add_child(portrait)
 	var avatar := TextureRect.new()
 	avatar.name = "CEOAvatar"
-	var portrait_width := 170.0 if size.x >= 600.0 else minf(280.0, maxf(240.0, size.x - 64.0))
+	var portrait_width := 170.0 if size.x >= 600.0 else minf(150.0, maxf(132.0, size.x * 0.38))
 	avatar.custom_minimum_size = Vector2(portrait_width, portrait_width * 4.0 / 3.0)
 	avatar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	avatar.texture = _profile_avatar_texture()
 	portrait.add_child(avatar)
-	portrait.add_child(label("Stored in this browser only; never uploaded.", 13, Style.MUTED))
 	var details := VBoxContainer.new()
 	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	details.add_theme_constant_override("separation", 8)
@@ -640,8 +640,22 @@ func profile_page() -> void:
 		)
 	var career := card("Career Progression")
 	metric(career, "Career Level", "%d · %d XP" % [CEOProfile.level(ceo_profile), int(ceo_profile.get("xp", 0))], Style.GOLD)
+	metric(career, "Career Title", CEOProfile.progression_title(ceo_profile), Style.GOLD)
+	career.add_child(label("A progression label based on career level, not an employment claim.", 13, Style.MUTED))
 	metric(career, "XP Until Next Level", str(CEOProfile.xp_to_next_level(ceo_profile)))
 	metric(career, "Personal Reputation", "%d / 100" % int(ceo_profile.get("personal_reputation", 0)))
+	var additional := card("Additional Information")
+	var company_records: Array = ceo_profile.get("companies", [])
+	var active_companies := 0
+	for company_record in company_records:
+		if not bool(company_record.get("bankrupt", false)):
+			active_companies += 1
+	var ceo_id := str(ceo_profile.get("ceo_id", ""))
+	var career_start := str(ceo_profile.get("career_start_date", ""))
+	metric(additional, "CEO ID", ceo_id if not ceo_id.is_empty() else "Not available")
+	metric(additional, "Career Start Date", career_start if not career_start.is_empty() else "Not available")
+	metric(additional, "Total Companies Founded", str(company_records.size()))
+	metric(additional, "Active Companies", str(active_companies))
 	var achievements := card("Achievements")
 	var earned: Array = ceo_profile.get("achievements", [])
 	if earned.is_empty():
@@ -727,36 +741,33 @@ func _show_avatar_crop_modal() -> void:
 	center.add_child(editor_card)
 	var content := stack(editor_card, 4)
 	content.add_child(label("Crop Profile Photo", 22))
-	content.add_child(label("Drag to reposition the photo or adjust the zoom. The crop frame uses a 3:4 portrait ratio.", 14, Style.MUTED))
-	var composition := FlowContainer.new()
-	composition.add_theme_constant_override("h_separation", 12)
-	composition.add_theme_constant_override("v_separation", 4)
-	content.add_child(composition)
+	content.add_child(label("Drag to reposition the photo or adjust the zoom. The preview uses a 3:4 portrait ratio.", 14, Style.MUTED))
 	var mobile_crop := size.x < 600.0
-	var crop_width := minf(200.0 if mobile_crop else 320.0, maxf(180.0 if mobile_crop else 220.0, size.x - (64.0 if mobile_crop else 88.0)))
+	var composition := VBoxContainer.new()
+	composition.alignment = BoxContainer.ALIGNMENT_CENTER
+	composition.add_theme_constant_override("separation", 8)
+	content.add_child(composition)
+	var crop_width := minf(200.0 if mobile_crop else 300.0, maxf(180.0 if mobile_crop else 240.0, size.x - (64.0 if mobile_crop else 88.0)))
+	var preview_section := VBoxContainer.new()
+	preview_section.name = "AvatarCropPreviewSection"
+	preview_section.alignment = BoxContainer.ALIGNMENT_CENTER
+	preview_section.add_theme_constant_override("separation", 6)
+	preview_section.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	composition.add_child(preview_section)
+	var preview_title := label("Live Preview", 17, Style.GOLD)
+	preview_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	preview_section.add_child(preview_title)
 	var crop := AvatarCrop.new()
 	crop.name = "AvatarCropViewport"
 	crop.custom_minimum_size = Vector2(crop_width, crop_width * 4.0 / 3.0)
 	crop.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	crop.set_image(avatar_crop_source)
-	composition.add_child(crop)
+	preview_section.add_child(crop)
 	var controls := VBoxContainer.new()
-	controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	controls.custom_minimum_size.x = minf(220.0, maxf(180.0, size.x - crop_width - 72.0))
-	controls.add_theme_constant_override("separation", 10)
+	controls.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	controls.custom_minimum_size.x = crop_width
+	controls.add_theme_constant_override("separation", 6)
 	composition.add_child(controls)
-	controls.add_child(label("Live Preview", 17, Style.GOLD))
-	var preview := TextureRect.new()
-	preview.name = "AvatarCropPreview"
-	preview.custom_minimum_size = Vector2(65, 87) if mobile_crop else Vector2(120, 160)
-	preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	controls.add_child(preview)
-	crop.preview_changed.connect(func(image: Image):
-		preview.texture = ImageTexture.create_from_image(image)
-	)
-	preview.texture = ImageTexture.create_from_image(crop.crop_image())
 	controls.add_child(label("Zoom", 14, Style.MUTED))
 	var zoom := HSlider.new()
 	zoom.name = "AvatarCropZoom"
@@ -968,11 +979,12 @@ func primary_navigation(parent: Node) -> void:
 	nav.name = "PrimaryNavigation"
 	nav.size_flags_horizontal = Control.SIZE_FILL
 	nav.columns = 3 if viewport_width < 1024.0 else 6
-	nav.add_theme_constant_override("h_separation", 6)
-	nav.add_theme_constant_override("v_separation", 6)
+	nav.add_theme_constant_override("h_separation", 5)
+	nav.add_theme_constant_override("v_separation", 5)
 	parent.add_child(nav)
 	for target in NAV:
 		var tab := action(nav, target, navigate.bind(target), target == primary_category(page))
+		tab.custom_minimum_size.y = 48
 		tab.add_theme_font_size_override("font_size", 12 if viewport_width < 600.0 else 13)
 		tab.clip_text = true
 		tab.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 145)
@@ -993,8 +1005,8 @@ func secondary_navigation(parent: Node) -> void:
 		"Finance": routes = [["Statements", "Finance"], ["Expense Management", "Expense Management"], ["Store Profitability", "Store Profitability"]]
 		_: return
 	var strip := FlowContainer.new()
-	strip.add_theme_constant_override("h_separation", 8)
-	strip.add_theme_constant_override("v_separation", 6)
+	strip.add_theme_constant_override("h_separation", 6)
+	strip.add_theme_constant_override("v_separation", 4)
 	parent.add_child(strip)
 	for route in routes:
 		var title: String = route[0]
@@ -1044,11 +1056,19 @@ func render() -> void:
 	page_shell.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	page_shell.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
+	var shell := page_shell
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.follow_focus = true
+	shell.add_child(scroll)
+	body = stack(scroll, 8)
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var right_space := Control.new()
 	right_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(right_space)
-	var shell := page_shell
-	var masthead := stack(shell, 3)
+	var masthead := stack(body, 3)
 	if screen != "Title":
 		masthead.add_child(label("ONLINE BUSINESS TYCOON", 13, Style.GOLD))
 	if screen == "Game":
@@ -1072,16 +1092,8 @@ func render() -> void:
 			"CEO identity conflict": "Identity choice"}
 		masthead.add_child(label(titles.get(screen, screen), 30))
 	if screen == "Game":
-		secondary_navigation(shell)
-	divider(shell)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.follow_focus = true
-	shell.add_child(scroll)
-	body = stack(scroll, 12)
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		secondary_navigation(body)
+	divider(body)
 	page_wide = stack(body, 12)
 	page_wide.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_grid = GridContainer.new()
@@ -1092,7 +1104,7 @@ func render() -> void:
 	body.add_child(page_grid)
 	status = label(notice, 14, Style.RED if error_notice else Style.GREEN)
 	status.visible = not notice.is_empty()
-	shell.add_child(status)
+	body.add_child(status)
 	if screen != "Game":
 		match screen:
 			"Title": Menu.title(self)
@@ -1159,6 +1171,8 @@ func setup() -> void:
 			owner_name = str(ceo_profile.get("full_name", owner_name))
 		var new_state := Sim.register(owner_name, company_name, "",
 			country.selected, difficulty.selected, 0, randi())
+		if ceo_profile.is_empty():
+			ceo_profile = CEOProfile.ensure({}, owner_name)
 		enter_game(new_state)
 		persist("Company registered.")
 	, true)
@@ -1393,7 +1407,7 @@ func financial_dashboard(report: Dictionary) -> void:
 	for item in [
 		["Company Cash", money(summary.cash)], ["Revenue", money(summary.revenue)],
 		["Expenses", money(-summary.expenses)], ["Gross Profit", money(summary.gross_profit)],
-		["Net Profit", money(summary.net_profit)], ["Operating Cash Flow", money(summary.operating_cash_flow)],
+		["Net Profit", money(summary.net_profit)],
 		["Receivables", money(summary.receivables)], ["Supplier Payables", money(summary.payables)],
 		["Customer Deposits Held", money(summary.customer_deposits)],
 	]:
@@ -1431,9 +1445,11 @@ func financial_dashboard(report: Dictionary) -> void:
 		{"name": "Net Profit", "values": profit, "color": Color("#83b7ff")},
 	])
 	trend.add_child(chart)
-	var legend := row(trend)
-	for item in [["Revenue", Style.GREEN], ["Expenses", Style.GOLD], ["Net Profit", Color("#83b7ff")]]:
-		legend.add_child(label("● %s" % item[0], 12, item[1]))
+	trend.add_child(ChartLegend.build([
+		{"name": "Revenue", "color": Style.GREEN},
+		{"name": "Expenses", "color": Style.GOLD},
+		{"name": "Net Profit", "color": Color("#83b7ff")},
+	]))
 
 func expense_management() -> void:
 	var controls := card("Expense Reporting Period")
@@ -1498,6 +1514,8 @@ func income_statement(report: Dictionary) -> void:
 	metric(view, "Advertising", money(-report.advertising))
 	metric(view, "Store setup costs", money(-report.store_setup))
 	metric(view, "Additional store operating costs", money(-report.store_expenses))
+	if report.get("inventory_returns", 0) > 0:
+		metric(view, "Supplier return loss", money(report.supplier_refunds - report.inventory_returns))
 	if report.legacy != 0:
 		metric(view, "Prototype expenses", money(-report.legacy))
 	divider(view)
@@ -1527,6 +1545,7 @@ func cash_flow(report: Dictionary) -> void:
 	metric(view, "Warehouse goods paid", money(-(report.purchases - (report.inbound_freight - report.direct_inbound_freight))))
 	metric(view, "Supplier-direct goods paid", money(-(report.direct_purchases - report.direct_inbound_freight)))
 	metric(view, "Inbound freight paid", money(-report.inbound_freight))
+	metric(view, "Supplier refunds received", money(report.supplier_refunds))
 	metric(view, "Outbound shipping paid", money(-report.shipping))
 	metric(view, "Advertising paid", money(-report.advertising))
 	metric(view, "Store setup paid", money(-report.store_setup))

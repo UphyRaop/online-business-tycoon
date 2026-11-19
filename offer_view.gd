@@ -2,12 +2,18 @@ extends RefCounted
 
 const Catalog = preload("res://catalog.gd")
 const Storefront = preload("res://storefront.gd")
+const Stores = preload("res://store_manager.gd")
 const Style = preload("res://corporate_theme.gd")
 
-static func show(app: Control, product: int) -> VBoxContainer:
-	var view: VBoxContainer = app.card("Offers")
+static func show(app: Control, product: int, store_id: int = -1) -> VBoxContainer:
+	var store := Stores.get_store(app.sim.state, store_id) if store_id >= 0 else {}
+	var heading := "Offer Settings · %s · %s" % [str(store.get("name", "Store")), Catalog.PRODUCTS[product].name] if store_id >= 0 else "Offer Settings"
+	var view: VBoxContainer = app.card(heading)
 	var state: Dictionary = app.sim.state
-	view.add_child(app.label("Primary product: " + Catalog.PRODUCTS[product].name, 15, Style.GOLD))
+	if store_id >= 0:
+		view.add_child(app.label("This configuration applies only to the selected store and product listing.", 14, Style.MUTED))
+	else:
+		view.add_child(app.label("Primary product: " + Catalog.PRODUCTS[product].name, 15, Style.GOLD))
 	var currency: String = Catalog.CURRENCIES[state.country]
 	var form: VBoxContainer = app.stack(view, 8)
 	form.add_child(app.label("Create an offer", 18))
@@ -111,7 +117,7 @@ static func show(app: Control, product: int) -> VBoxContainer:
 			app.set_notice("Enter a valid fixed bundle price.", true)
 			return
 		var price := _price_cents(app, bundle_price.text) if bundle_pricing.selected == 1 else 0
-		var error := Storefront.set_bundle(state, product, qty, discount, price)
+		var error := Storefront.set_bundle_for_store(state, store_id, product, qty, discount, price) if store_id >= 0 else Storefront.set_bundle(state, product, qty, discount, price)
 		if not error.is_empty():
 			app.set_notice(error, true)
 			return
@@ -139,7 +145,7 @@ static func show(app: Control, product: int) -> VBoxContainer:
 			app.set_notice("Enter a valid fixed upsell price.", true)
 			return
 		var price := _price_cents(app, upsell_price.text) if upsell_pricing.selected == 1 else 0
-		var error := Storefront.set_upsell(state, product, items, discount, price)
+		var error := Storefront.set_upsell_for_store(state, store_id, product, items, discount, price) if store_id >= 0 else Storefront.set_upsell(state, product, items, discount, price)
 		if not error.is_empty():
 			app.set_notice(error, true)
 			return
@@ -150,7 +156,7 @@ static func show(app: Control, product: int) -> VBoxContainer:
 	action_row.visible = false
 
 	var load_saved := func():
-		var saved := Storefront.offers_for(state, product)
+		var saved := Storefront.offers_for_store(state, store_id, product) if store_id >= 0 else Storefront.offers_for(state, product)
 		var saved_bundle: Dictionary = saved.get(1, {})
 		var saved_upsell: Dictionary = saved.get(2, {})
 		quantity.text = str(saved_bundle.get("quantity", 2))
@@ -193,21 +199,21 @@ static func show(app: Control, product: int) -> VBoxContainer:
 		app.set_notice("")
 
 	var existing: VBoxContainer = app.stack(view, 8)
-	var offers := Storefront.offers_for(state, product)
+	var offers := Storefront.offers_for_store(state, store_id, product) if store_id >= 0 else Storefront.offers_for(state, product)
 	var bundle: Dictionary = offers.get(1, {})
 	var upsell: Dictionary = offers.get(2, {})
 	if bundle.is_empty() and upsell.is_empty():
 		existing.add_child(app.label("No offers saved for this product.", 14, Style.MUTED))
 	else:
 		if not bundle.is_empty():
-			_existing_offer(app, existing, product, 1, bundle, open_edit)
+			_existing_offer(app, existing, product, store_id, 1, bundle, open_edit)
 		if not upsell.is_empty():
-			_existing_offer(app, existing, product, 2, upsell, open_edit)
+			_existing_offer(app, existing, product, store_id, 2, upsell, open_edit)
 	app.action(view, "Create Offer", open_create, true)
 	view.move_child(form, view.get_child_count() - 1)
 	return view
 
-static func _existing_offer(app: Control, parent: VBoxContainer, product: int, mode: int, offer: Dictionary, edit_action: Callable) -> void:
+static func _existing_offer(app: Control, parent: VBoxContainer, product: int, store_id: int, mode: int, offer: Dictionary, edit_action: Callable) -> void:
 	var is_bundle := mode == 1
 	var card: VBoxContainer = app.stack(parent, 6)
 	card.add_child(app.label("Bundle" if is_bundle else "Upsell", 18))
@@ -227,9 +233,12 @@ static func _existing_offer(app: Control, parent: VBoxContainer, product: int, m
 	var disable_title := "Disable bundle" if is_bundle else "Disable upsell"
 	var status_title := disable_title if offer.get("enabled", true) else enable_title
 	app.action(actions, status_title, func():
-		var current := Storefront.offers_for(app.sim.state, product)
+		var current := Storefront.offers_for_store(app.sim.state, store_id, product) if store_id >= 0 else Storefront.offers_for(app.sim.state, product)
 		var next_enabled := not bool(current.get(mode, {}).get("enabled", true))
-		Storefront.set_enabled(app.sim.state, product, mode, next_enabled)
+		if store_id >= 0:
+			Storefront.set_enabled_for_store(app.sim.state, store_id, product, mode, next_enabled)
+		else:
+			Storefront.set_enabled(app.sim.state, product, mode, next_enabled)
 		app.persist("%s %s." % ["Bundle" if is_bundle else "Upsell", "enabled" if next_enabled else "disabled"])
 		app.refresh_view()
 	)

@@ -96,7 +96,7 @@ func run() -> void:
 	expect(app.page == "Business" and has_label("Owned Stores"), "Business category opens Company Profile")
 	var company_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Company Profile")[0]
 	var dashboard_primary: Button = controls(nav, "Button").filter(func(button): return button.text == "Dashboard")[0]
-	expect(company_subtab.custom_minimum_size.y == 44 and dashboard_primary.custom_minimum_size.y == app.TOUCH_HEIGHT
+	expect(company_subtab.custom_minimum_size.y == 44 and dashboard_primary.custom_minimum_size.y >= 44
 		and company_subtab.get_theme_font_size("font_size") < dashboard_primary.get_theme_font_size("font_size"),
 		"Secondary navigation is visually smaller than primary tabs while keeping a 44 px touch target")
 	press("Advertising")
@@ -108,7 +108,7 @@ func run() -> void:
 
 	press("Finance")
 	expect(app.page == "Finance" and has_label("Financial Dashboard") and has_label("Income Statement")
-		and has_label("Company Cash") and has_label("Gross Profit") and has_label("Operating Cash Flow")
+		and has_label("Company Cash") and has_label("Gross Profit") and not has_label("Operating Cash Flow")
 		and has_label("Receivables") and has_label("Supplier Payables") and has_label("Financial Trends · Last 7 Recorded Days"),
 		"Finance opens a cash, performance, liquidity, and trend dashboard above financial statements")
 	expect(has_label("Known Fixed-Cost Estimate") and has_label("Informational estimate only."),
@@ -117,6 +117,12 @@ func run() -> void:
 	expect(app.page == "Expense Management" and has_label("Expense Breakdown") and has_label("Daily Ledger History"),
 		"Expense Management shows period-based categories and daily ledger history")
 	press("Statements")
+	var statement_controls := controls(app, "OptionButton")
+	if statement_controls.size() >= 2:
+		statement_controls[1].select(2)
+		statement_controls[1].item_selected.emit(2)
+	expect(has_label("Cash Flow Statement") and not has_label("Operating Cash Flow"),
+		"Cash Flow Statement remains available while the separate Operating Cash Flow display is removed")
 	press("Store Profitability")
 	expect(app.page == "Store Profitability" and has_label("Harbor Marketplace") and has_label("Harbor Website"),
 		"Finance Store Profitability reports marketplace and website results")
@@ -131,7 +137,13 @@ func run() -> void:
 	Slots.delete_slot(1)
 	press("Profile")
 	expect(app.page == "Profile" and has_label("CEO Profile") and has_label("Career Progression")
-		and has_label("Owned Companies"), "Profile category presents identity, career, and owned companies with consistent title case")
+		and has_label("Owned Companies") and has_label("Additional Information") and has_label("CEO ID")
+		and has_label("Career Start Date") and has_label("Total Companies Founded") and has_label("Active Companies"),
+		"Profile category presents identity, career, company totals, and additional information with consistent title case")
+	expect(has_label("Career Title") and has_label("Aspiring Entrepreneur"),
+		"New CEO profile displays a progression title derived from its current level")
+	expect(not has_label("Stored in this browser only; never uploaded."),
+		"Profile no longer shows the browser storage developer message")
 	expect(has_label("Personal cash and net worth are not currently tracked."),
 		"Profile explains that personal finance is not tracked and separates it from company accounts")
 	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Profile"),
@@ -157,9 +169,15 @@ func run() -> void:
 	app.open_avatar_crop(replacement_photo)
 	await process_frame
 	await process_frame
+	var desktop_crop_dialog: Control = app.find_child("AvatarCropDialog", true, false)
+	var desktop_preview_section: Control = app.find_child("AvatarCropPreviewSection", true, false)
+	var crop_centered := desktop_crop_dialog != null and desktop_preview_section != null and absf(
+		(desktop_preview_section.get_global_rect().get_center().x - desktop_crop_dialog.get_global_rect().get_center().x)) <= 3.0
 	expect(app.find_child("AvatarCropModal", true, false) != null and has_button("Apply Crop")
 		and has_button("Reset"),
 		"Photo replacement opens a centered crop dialog over the Profile edit screen")
+	expect(crop_centered and not app.find_child("AvatarCropPreview", true, false),
+		"Desktop crop presents one large live preview centered in the cropping dialog")
 	press("Apply Crop")
 	await process_frame
 	var staged_photo := str(app.ceo_profile.avatar_data)
@@ -223,7 +241,7 @@ func run() -> void:
 	var ceo_avatar := app.find_child("CEOAvatar", true, false) as TextureRect
 	expect(mobile_current_labels.size() == 1 and mobile_current_labels[0].get_parent() is VBoxContainer,
 		"Mobile owned-company rows stack the company name and current status without narrow wrapping")
-	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size.x >= 190.0
+	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size.x <= 150.0
 		and absf(ceo_avatar.custom_minimum_size.y / ceo_avatar.custom_minimum_size.x - 4.0 / 3.0) < 0.01
 		and ceo_avatar.size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
 		"CEO avatar keeps its centered portrait aspect ratio on mobile")
@@ -261,6 +279,10 @@ func run() -> void:
 		func(button): return button.get_global_rect().position.y >= 0 and button.get_global_rect().end.y <= root.size.y)
 	expect(mobile_modal != null and mobile_crop != null and mobile_crop.custom_minimum_size.x <= 220.0
 		and crop_actions_fit, "Mobile crop dialog fits its 3:4 editor and Cancel, Reset, and Apply Crop controls")
+	var mobile_avatar: TextureRect = app.find_child("CEOAvatar", true, false)
+	expect(mobile_avatar != null and mobile_avatar.custom_minimum_size.x <= 150.0
+		and absf(mobile_avatar.custom_minimum_size.y / mobile_avatar.custom_minimum_size.x - 4.0 / 3.0) < 0.01,
+		"Mobile Profile keeps a compact 3:4 CEO portrait")
 	var modal_cancel: Variant = mobile_actions.filter(func(button): return button.text == "Cancel").back()
 	if modal_cancel != null: modal_cancel.pressed.emit()
 	press("Cancel")

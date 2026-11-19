@@ -22,12 +22,22 @@ func run() -> void:
 	expect(nav_names.size() == 6 and "Profile" in nav_names, "Game navigation presents all six primary categories including Profile")
 	for button in controls(app, "Button"):
 		if button.text in primary_names:
-			expect(button.custom_minimum_size.y == app.TOUCH_HEIGHT, "Primary navigation uses the shared touch target height")
+			expect(button.custom_minimum_size.y >= 44.0 and button.custom_minimum_size.y <= 48.0,
+				"Primary navigation uses a compact touch target of at least 44 px")
 	press("Market")
+	await process_frame
+	await process_frame
 	expect(has_label("Product Catalogue") and has_label("Supplier quotation"), "Market exposes catalog and supplier purchasing")
+	var search_panel: Control = app.find_child("ProductSearchPanel", true, false)
+	var catalogue: Control = app.find_child("ProductCataloguePanel", true, false)
+	expect(search_panel != null and catalogue != null and search_panel.get_global_rect().position.y < catalogue.get_global_rect().position.y
+		and field_for_label("Search Product") != null,
+		"Search Product is immediately above Product Catalogue")
+	expect(has_label("Return Inventory to Supplier") and has_label("No unreserved purchased stock is eligible to return."),
+		"Supplier return controls appear in inventory management with a safe empty state")
 	var category_button: OptionButton = app.find_child("ProductCategorySelection", true, false)
 	select(category_button, 1)
-	var search: LineEdit = field_for_label("Search products")
+	var search: LineEdit = field_for_label("Search Product")
 	search.text = "Wireless Earbuds"
 	search.text_changed.emit(search.text)
 	var product_picker: OptionButton = app.find_child("ProductSelection", true, false)
@@ -35,7 +45,7 @@ func run() -> void:
 		"Category and text filters isolate the expected catalog product")
 	select(product_picker, 0)
 	category_button = app.find_child("ProductCategorySelection", true, false)
-	search = field_for_label("Search products")
+	search = field_for_label("Search Product")
 	product_picker = app.find_child("ProductSelection", true, false)
 	expect(category_button.get_item_text(category_button.selected) == "Electronics" and has_label("Select Product")
 		and has_label("Electronics"), "Selected category, product selection, and product details have a clear hierarchy")
@@ -56,6 +66,8 @@ func run() -> void:
 	expect(has_label("Reporting Period") and has_label("Advertising Platform") and has_label("Campaign Status")
 		and has_label("Destination"), "Ads Analytics explains each filter")
 	var filters := controls(app, "OptionButton")
+	expect(filters.size() >= 3 and filters[2].get_item_text(0) == "All Status",
+		"Campaign status dropdown uses the revised All Status label")
 	select(filters[0], 1)
 	expect(app.ad_period == 1, "Last 7 Days reporting filter changes the period")
 	filters = controls(app, "OptionButton")

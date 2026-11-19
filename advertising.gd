@@ -301,6 +301,12 @@ static func empty_metrics() -> Dictionary:
 	value.estimated_profit = 0
 	return value
 
+static func ctr_percent(clicks: int, impressions: int) -> float:
+	return 100.0 * float(clicks) / float(impressions) if impressions > 0 else 0.0
+
+static func cpm_cents(spend: int, impressions: int) -> float:
+	return float(spend) * 1000.0 / float(impressions) if impressions > 0 else 0.0
+
 static func stochastic_count(expected: float, rng: RandomNumberGenerator) -> int:
 	var count := floori(expected)
 	if rng.randf() < expected - count: count += 1
@@ -319,9 +325,9 @@ static func aggregate_range(state: Dictionary, campaign_id: int, first_day: int,
 	for record in state.advertising.history:
 		if int(record.campaign_id) != campaign_id or int(record.day) < result.start_day or int(record.day) > result.end_day: continue
 		for field in METRIC_FIELDS: result[field] += int(record.get(field, 0))
-	result.ctr = 100.0 * result.clicks / result.impressions if result.impressions > 0 else 0.0
+	result.ctr = ctr_percent(result.clicks, result.impressions)
 	result.cpc = float(result.spend) / result.clicks if result.clicks > 0 else 0.0
-	result.cpm = float(result.spend) / result.impressions * 1000.0 if result.impressions > 0 else 0.0
+	result.cpm = cpm_cents(result.spend, result.impressions)
 	var conversions: int = result.purchases + result.preorders - result.preorders_cancelled
 	result.conversions = maxi(0, conversions)
 	result.conversion_rate = 100.0 * float(result.conversions) / result.clicks if result.clicks > 0 else 0.0

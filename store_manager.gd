@@ -26,11 +26,11 @@ static func migration_defaults(state: Dictionary) -> Array:
 		{"id": 0, "name": marketplace_name, "type": 0,
 			"brand": brand, "domain": "", "platform": -1, "website_platform": "", "website_fee_bps": 0,
 			"active": int(state.get("channel", 0)) in [0, 2],
-			"legacy": true, "created": 1, "setup_cost": 0, "daily_cost": 0, "listings": {}},
+			"legacy": true, "created": 1, "setup_cost": 0, "daily_cost": 0, "listings": {}, "offers": {}},
 		{"id": 1, "name": website_name, "type": 1, "brand": brand, "website_platform": "legacy", "website_fee_bps": LEGACY_WEBSITE_FEE_BPS,
 			"domain": str(state.get("website_domain", "my-business.shop")),
 			"active": state.get("website_active", int(state.get("channel", 0)) != 0),
-			"legacy": true, "created": 1, "setup_cost": 0, "daily_cost": 0, "listings": {}},
+			"legacy": true, "created": 1, "setup_cost": 0, "daily_cost": 0, "listings": {}, "offers": {}},
 	]
 
 static func website_platform_index(platform_id: String) -> int:
@@ -79,7 +79,7 @@ static func create(state: Dictionary, name: String, kind: int, brand: String, do
 		"website_fee_bps": int(WEBSITE_PLATFORMS[website_platform].fee_bps) if kind == 1 else 0,
 		"active": true, "legacy": false,
 		"created": state.day, "setup_cost": cost, "daily_cost": daily_cost(state.country, kind, website_platform),
-		"listings": {},
+		"listings": {}, "offers": {},
 	}
 	state.stores.append(store)
 	state.cash -= cost

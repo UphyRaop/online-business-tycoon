@@ -121,14 +121,16 @@ static func valid(state: Dictionary) -> bool:
 		var direct_cogs: int = row.get("direct_cogs", 0)
 		var direct_purchases: int = row.get("direct_purchases", 0)
 		var direct_freight: int = row.get("direct_inbound_freight", 0)
-		if direct_cogs < 0 or direct_purchases < 0 or direct_freight < 0 or direct_freight > direct_purchases:
+		if direct_cogs < 0 or direct_purchases < 0 or direct_freight < 0 or direct_freight > direct_purchases or int(row.get("inventory_returns", 0)) < 0 or int(row.get("supplier_refunds", 0)) < 0:
 			return false
-		inventory += row.purchases - (row.cogs - direct_cogs)
+		inventory += row.purchases - (row.cogs - direct_cogs) - int(row.get("inventory_returns", 0))
 		goods_in_transit += direct_purchases - direct_cogs
 		if goods_in_transit < 0:
 			return false
 		deposits += row.deposits
 	if not state.get("products") is Dictionary or computed_cash != state.cash:
+		return false
+	if not valid_supplier_returns(state):
 		return false
 	var stock_value := 0
 	for product in state.products:
@@ -157,6 +159,73 @@ static func valid_lot(lot: Variant) -> bool:
 		return false
 	var freight: Variant = lot.get("freight", 0)
 	return freight is int and freight >= 0 and freight < lot.cost
+
+static func valid_store_offers(raw: Variant) -> bool:
+	if not raw is Dictionary: return false
+	for product in raw:
+		if not valid_product(product) or not raw[product] is Dictionary: return false
+		if not valid_offer_config(int(product), raw[product]): return false
+	return true
+
+static func valid_offer_config(product: int, raw: Dictionary) -> bool:
+	var offers := Storefront._normalize_offers(raw)
+	for mode in offers:
+		var offer: Variant = offers[mode]
+		if mode not in [1, 2] or not offer is Dictionary or int(offer.get("mode", 0)) != mode:
+			return false
+		if not offer.get("discount") is int or int(offer.discount) not in range(51) or not offer.get("enabled", true) is bool:
+			return false
+		if not offer.get("price", 0) is int or int(offer.get("price", 0)) < 0:
+			return false
+		if mode == 1:
+			if not offer.get("quantity") is int or int(offer.quantity) not in range(2, 11): return false
+		else:
+			var items: Variant = offer.get("items", [])
+			if not items is Array or items.is_empty() or items.size() > 2: return false
+			for item in items:
+				if not valid_product(item) or int(item) == product: return false
+	return true
+
+static func valid_supplier_returns(state: Dictionary) -> bool:
+	if not state.get("supplier_returns") is Array or not state.get("next_supplier_return") is int or state.next_supplier_return < 1:
+		return false
+	var ids := {}
+	var by_day := {}
+	var maximum_id := 0
+	for record in state.supplier_returns:
+		if not record is Dictionary: return false
+		for field in ["id", "day", "product", "supplier", "units", "original_purchase_cost", "landed_cost", "refund"]:
+			if not record.get(field) is int: return false
+		if record.id < 1 or record.day < 1 or record.day > state.day or not valid_product(record.product) or record.supplier < -1 or record.supplier >= Catalog.SUPPLIERS.size(): return false
+		if record.units < 1 or record.original_purchase_cost < 1 or record.landed_cost < record.original_purchase_cost or record.refund < 0 or record.refund > record.original_purchase_cost / 2.0: return false
+		if ids.has(record.id) or not record.get("supplier_name") is String or not record.get("date") is String or record.get("product_id") != Catalog.product_id(record.product): return false
+		if record.supplier >= 0 and record.get("supplier_id") != Catalog.supplier_id(record.supplier): return false
+		if record.supplier < 0 and record.get("supplier_id", "") != "": return false
+		if not record.get("allocations") is Array or record.allocations.is_empty(): return false
+		var units := 0
+		var goods := 0
+		var landed := 0
+		var refund := 0
+		for allocation in record.allocations:
+			if not allocation is Dictionary: return false
+			for field in ["units", "original_unit_cost", "landed_unit_cost", "freight_per_unit"]:
+				if not allocation.get(field) is int: return false
+			if allocation.units < 1 or allocation.original_unit_cost < 1 or allocation.landed_unit_cost < allocation.original_unit_cost or allocation.freight_per_unit != allocation.landed_unit_cost - allocation.original_unit_cost or not allocation.get("cost_fallback") is bool: return false
+			units += allocation.units
+			goods += allocation.units * allocation.original_unit_cost
+			landed += allocation.units * allocation.landed_unit_cost
+			refund += floori(float(allocation.original_unit_cost) * 0.5) * allocation.units
+		if units != record.units or goods != record.original_purchase_cost or landed != record.landed_cost or refund != record.refund: return false
+		ids[record.id] = true
+		maximum_id = maxi(maximum_id, record.id)
+		if not by_day.has(record.day): by_day[record.day] = {"cost": 0, "refund": 0}
+		by_day[record.day].cost += record.landed_cost
+		by_day[record.day].refund += record.refund
+	if state.next_supplier_return <= maximum_id: return false
+	for day in state.ledger.size():
+		var values: Dictionary = by_day.get(day + 1, {"cost": 0, "refund": 0})
+		if int(state.ledger[day].get("inventory_returns", 0)) != int(values.cost) or int(state.ledger[day].get("supplier_refunds", 0)) != int(values.refund): return false
+	return true
 
 static func valid_operations(state: Dictionary, committed_cost: int, goods_in_transit: int, deposits: int) -> bool:
 	for field in ["inbound", "active_orders", "open_cases", "stores"]:
@@ -199,7 +268,7 @@ static func valid_operations(state: Dictionary, committed_cost: int, goods_in_tr
 				return false
 		if not store.get("website_fee_bps") is int or store.website_fee_bps < 0 or store.website_fee_bps > 2000:
 			return false
-		if not store.get("active") is bool or not store.get("legacy") is bool or not store.get("listings") is Dictionary:
+		if not store.get("active") is bool or not store.get("legacy") is bool or not store.get("listings") is Dictionary or not valid_store_offers(store.get("offers", {})):
 			return false
 		if store.id < 0 or store_ids.has(store.id) or store.type not in [0, 1] or store.created < 1 or store.setup_cost < 0 or store.daily_cost < 0 or store.name.strip_edges().is_empty() or store.brand.strip_edges().is_empty():
 			return false

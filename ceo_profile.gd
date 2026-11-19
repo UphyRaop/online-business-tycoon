@@ -17,6 +17,7 @@ static func empty(owner: String = "") -> Dictionary:
 		"avatar_mime": "",
 		"country": "",
 		"title": "Entrepreneur",
+		"career_start_date": Time.get_date_string_from_system(),
 		"xp": 0,
 		"achievements": [],
 		"awarded_events": [],
@@ -74,6 +75,8 @@ static func valid(profile: Dictionary) -> bool:
 		return false
 	if not profile.get("achievements") is Array or not profile.get("awarded_events") is Array or not profile.get("companies") is Array:
 		return false
+	if profile.has("career_start_date") and not profile.career_start_date is String:
+		return false
 	if not (profile.get("personal_cash") == null or _whole_number(profile.personal_cash)):
 		return false
 	if not (profile.get("personal_net_worth") == null or _whole_number(profile.personal_net_worth)):
@@ -100,6 +103,12 @@ static func ensure(profile: Dictionary, owner: String = "") -> Dictionary:
 		result.ceo_id = _new_id("ceo")
 	if str(result.full_name).strip_edges().is_empty() and not owner.strip_edges().is_empty():
 		result.full_name = owner.strip_edges()
+	return result
+
+static func ensure_legacy(profile: Dictionary, owner: String = "") -> Dictionary:
+	var result := ensure(profile, owner)
+	if not profile.has("career_start_date"):
+		result.career_start_date = ""
 	return result
 
 static func register_company(profile: Dictionary, state: Dictionary) -> Dictionary:
@@ -191,6 +200,16 @@ static func level(profile: Dictionary) -> int:
 
 static func xp_to_next_level(profile: Dictionary) -> int:
 	return LEVEL_XP - (int(profile.get("xp", 0)) % LEVEL_XP)
+
+static func progression_title(profile: Dictionary) -> String:
+	var current := level(profile)
+	if current >= 50: return "Business Tycoon"
+	if current >= 40: return "Business Magnate"
+	if current >= 30: return "Chief Executive Officer"
+	if current >= 20: return "Managing Director"
+	if current >= 10: return "Business Owner"
+	if current >= 5: return "Startup Founder"
+	return "Aspiring Entrepreneur"
 
 static func company_index(profile: Dictionary, company_id: String) -> int:
 	for index in profile.get("companies", []).size():

@@ -2,20 +2,23 @@ extends RefCounted
 
 const Catalog = preload("res://catalog.gd")
 const Supply = preload("res://supply.gd")
-const Offers = preload("res://offer_view.gd")
+const Fulfillment = preload("res://fulfillment.gd")
 const Calendar = preload("res://game_calendar.gd")
 const Style = preload("res://corporate_theme.gd")
 
 static func show(app: Control) -> void:
 	var product: int = app.selected_product
 	var item: Dictionary = app.sim.product_state(product)
+	var search_panel: VBoxContainer = app.wide_card("Product Search")
+	search_panel.name = "ProductSearchPanel"
+	var search: LineEdit = app.field(search_panel, "Search Product", app.catalog_search, 64)
 	var catalog: VBoxContainer = app.card("Product Catalogue")
+	catalog.name = "ProductCataloguePanel"
 	var category_choices: Array[String] = ["Select Category · All Products"]
 	category_choices.append_array(Catalog.CATEGORIES)
 	catalog.add_child(app.label("Browse by Category", 14, Style.MUTED))
 	var category_filter: OptionButton = app.dropdown(catalog, category_choices, app.catalog_category + 1)
 	category_filter.name = "ProductCategorySelection"
-	var search: LineEdit = app.field(catalog, "Search products", app.catalog_search, 64)
 	catalog.add_child(app.label("Select Product", 14, Style.MUTED))
 	var picker: OptionButton = app.dropdown(catalog, [], 0)
 	picker.name = "ProductSelection"
@@ -65,11 +68,6 @@ static func show(app: Control) -> void:
 	var listings: VBoxContainer = app.card("Store listings")
 	listings.add_child(app.label("Product listings belong to individual stores. Create a marketplace or website and manage its listings under Market / Management.", 14, Style.MUTED))
 	app.secondary_tab(listings, "Management", app.navigate.bind("Management"), false)
-	var offers := Offers.show(app, product)
-	app.secondary_tab(links, "Offers", func():
-		var scroll: ScrollContainer = app.body.get_parent()
-		scroll.scroll_vertical += roundi(offers.get_parent().global_position.y - scroll.global_position.y)
-	)
 
 static func supplier_form(app: Control, product: int, item: Dictionary, stock_label: Label) -> void:
 	var state: Dictionary = app.sim.state
@@ -154,6 +152,64 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 	, true)
 	refresh.call()
 	refresh_inbound(app, product, inbound, shipments)
+	supplier_returns(app, product)
+
+static func supplier_returns(app: Control, product: int) -> void:
+	var state: Dictionary = app.sim.state
+	Fulfillment.allocate_preorders(app.sim)
+	var view: VBoxContainer = app.card("Return Inventory to Supplier")
+	view.add_child(app.label("Only available, unreserved warehouse stock can be returned. Refunds are 50% of original goods cost; inbound freight is not refunded.", 13, Style.MUTED))
+	var sources := Supply.return_sources(state, product)
+	if sources.is_empty():
+		view.add_child(app.label("No unreserved purchased stock is eligible to return.", 14, Style.MUTED))
+	else:
+		var supplier_ids: Array[int] = []
+		var supplier_choices: Array[String] = []
+		for source in sources:
+			supplier_ids.append(int(source.supplier))
+			supplier_choices.append("%s · %d available" % [str(source.name), int(source.units)])
+		var supplier: OptionButton = app.dropdown(view, supplier_choices, 0)
+		var quantity: LineEdit = app.field(view, "Quantity to Return", "1", 10)
+		quantity.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+		var preview_label: Label = app.label("", 14, Style.GOLD)
+		view.add_child(preview_label)
+		var refresh_preview := func():
+			var preview := Supply.preview_return(state, product, supplier_ids[supplier.selected], units_from(quantity.text))
+			if not str(preview.get("error", "")).is_empty():
+				preview_label.text = str(preview.error)
+				return
+			preview_label.text = "Original goods cost %s · Landed inventory removed %s · Supplier refund %s" % [
+				app.money(int(preview.original_purchase_cost)), app.money(int(preview.landed_cost)), app.money(int(preview.refund))]
+		quantity.text_changed.connect(func(_value: String): refresh_preview.call())
+		supplier.item_selected.connect(func(_index: int): refresh_preview.call())
+		refresh_preview.call()
+		app.action(view, "Return Stock", func():
+			var preview := Supply.preview_return(state, product, supplier_ids[supplier.selected], units_from(quantity.text))
+			if not str(preview.get("error", "")).is_empty():
+				app.set_notice(str(preview.error), true)
+				return
+			app.confirm_action("Return %d units to %s?" % [int(preview.units), str(preview.supplier_name)],
+				"This permanently removes unreserved stock. The refund is %s; inbound freight is not refunded." % app.money(int(preview.refund)),
+				"Confirm Return", func():
+					var result: Dictionary = app.sim.return_stock(product, supplier_ids[supplier.selected], units_from(quantity.text))
+					if not str(result.get("error", "")).is_empty():
+						app.set_notice(str(result.error), true)
+						return
+					app.persist("Supplier return recorded in company cash and the financial ledger.")
+					app.refresh_view()
+			)
+		, true)
+	var history: VBoxContainer = app.card("Supplier Return History")
+	var records: Array = []
+	for record in state.get("supplier_returns", []):
+		if int(record.get("product", -1)) == product: records.append(record)
+	records.sort_custom(func(a: Dictionary, b: Dictionary): return int(a.id) > int(b.id))
+	if records.is_empty():
+		history.add_child(app.label("No supplier returns have been recorded for this product.", 13, Style.MUTED))
+	else:
+		for record in records.slice(0, mini(5, records.size())):
+			app.metric(history, "%s · %d units · %s" % [str(record.date), int(record.units), str(record.supplier_name)],
+				"Goods cost %s · Refund %s" % [app.money(int(record.original_purchase_cost)), app.money(int(record.refund))])
 
 static func refresh_inbound(app: Control, product: int, inbound: VBoxContainer, shipments: VBoxContainer) -> void:
 	var state: Dictionary = app.sim.state
