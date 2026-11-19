@@ -54,10 +54,10 @@ func option_after_label(prefix: String) -> OptionButton:
 	return null
 
 func open_first_store_listing() -> void:
-	press("Manage stores")
+	press("Management")
 	var listings := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
 	if listings.is_empty():
-		expect(false, "Store Management exposes per-store listings")
+		expect(false, "Management exposes per-store listings")
 		return
 	listings[0].pressed.emit()
 
@@ -123,15 +123,15 @@ func run() -> void:
 	quantity.text = "10"
 	press("Purchase stock")
 	expect(app.sim.stock(1) == 0 and app.sim.state.inbound[0].units == 10, "Purchase button schedules inbound stock")
-	press("Manage stores")
+	press("Management")
 	var listings_buttons := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
 	if not listings_buttons.is_empty():
 		listings_buttons[0].pressed.emit()
 	else:
-		expect(false, "Store Management exposes per-store listings")
+		expect(false, "Management exposes per-store listings")
 	select(controls(app, "OptionButton")[1], 1)
 	press("Save store listing")
-	expect(Stores.listing(app.sim.state, 0, 1).listed, "Store listing is published through Store Management")
+	expect(Stores.listing(app.sim.state, 0, 1).listed, "Store listing is published through Management")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "250000"
 	press("Save store listing")
@@ -178,12 +178,12 @@ func run() -> void:
 	await settle("06-business")
 	press("My Products")
 	press("Manage Wireless Earbuds")
-	press("Manage stores")
+	press("Management")
 	var store_listing_buttons := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
 	if not store_listing_buttons.is_empty():
 		store_listing_buttons[0].pressed.emit()
 	else:
-		expect(false, "Store listing can be paused through Store Management")
+		expect(false, "Store listing can be paused through Management")
 	select(controls(app, "OptionButton")[1], 0)
 	press("Save store listing")
 	expect(not Stores.listing(app.sim.state, 0, 1).listed, "Store listing pause action")

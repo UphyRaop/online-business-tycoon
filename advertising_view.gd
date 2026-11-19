@@ -12,7 +12,7 @@ static func overview(app: Control) -> void:
 	app.action(view, "Campaign Manager", app.navigate.bind("Campaign Manager"), true)
 	var actions: HBoxContainer = app.row(view)
 	app.action(actions, "Advertising Analytics", app.navigate.bind("Advertising Analytics"))
-	app.action(actions, "Store Management", app.navigate.bind("Store Management"))
+	app.action(actions, "Management", app.navigate.bind("Management"))
 	var campaigns: Dictionary = app.sim.state.advertising.campaigns
 	var active := 0
 	var totals := Ads.empty_metrics()
@@ -95,12 +95,12 @@ static func details(app: Control) -> void:
 			store_names.append(str(store.name))
 	if store_ids.is_empty():
 		view.add_child(app.label("Create a store before launching an advertising campaign.", 14, Style.MUTED))
-		app.action(view, "Store Management", app.navigate.bind("Store Management"))
+		app.action(view, "Management", app.navigate.bind("Management"))
 		return
 	var selected_store: int = int(existing.get("store_id", store_ids[0])) if not creating else store_ids[0]
 	if selected_store not in store_ids:
 		view.add_child(app.label("This campaign's destination is inactive. Activate an eligible store before editing it.", 14, Style.MUTED))
-		app.action(view, "Store Management", app.navigate.bind("Store Management"))
+		app.action(view, "Management", app.navigate.bind("Management"))
 		return
 	var store_index := maxi(0, store_ids.find(selected_store))
 	view.add_child(app.label("Destination store", 14, Style.MUTED))

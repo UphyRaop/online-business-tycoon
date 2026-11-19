@@ -8,8 +8,8 @@ const Calendar = preload("res://game_calendar.gd")
 const Style = preload("res://corporate_theme.gd")
 
 static func management(app: Control) -> void:
-	var intro: VBoxContainer = app.card("Stores under %s" % app.sim.state.company)
-	intro.add_child(app.label("Stores share company inventory. Listings, sales, operating costs, and campaigns are tracked by store.", 14, Style.MUTED))
+	var intro: VBoxContainer = app.card("Management · %s" % app.sim.state.company)
+	intro.add_child(app.label("Manage marketplace stores and websites here. Inventory is shared, while each destination keeps its own listings, costs, sales, and campaigns.", 14, Style.MUTED))
 	app.action(intro, "Advertising", app.navigate.bind("Advertising"))
 	var stores: VBoxContainer = app.card("Owned stores · %d" % app.sim.state.stores.size())
 	for store in app.sim.state.stores:
@@ -33,12 +33,7 @@ static func management(app: Control) -> void:
 			app.navigate("Store Listings")
 		)
 		var status: String = "Deactivate" if store.active else "Activate"
-		app.action(actions, status, func():
-			var enabled: bool = not store.active
-			Stores.set_active(app.sim.state, id, enabled)
-			app.persist("%s is now %s." % [store.name, "active" if enabled else "inactive"])
-			app.refresh_view()
-		)
+		app.action(actions, status, app.set_store_active.bind(id, not store.active))
 	var open_form: Button = app.action(intro, "Open New Store", func():
 		app.show_new_store_form = true
 		app.refresh_view()
@@ -117,7 +112,7 @@ static func profitability(app: Control) -> void:
 	summary.add_child(app.label("Lifetime results by marketplace store and website. Shared company inventory costs are assigned to the order that consumes each unit.", 14, Style.MUTED))
 	if app.sim.state.stores.is_empty():
 		summary.add_child(app.label("No stores or websites have been created yet.", 14, Style.MUTED))
-		app.action(summary, "Open Store Management", app.navigate.bind("Store Management"))
+		app.action(summary, "Open Management", app.navigate.bind("Management"))
 		return
 	for store in app.sim.state.stores:
 		var result: Dictionary = Stores.report(app.sim.state, int(store.id))
@@ -134,14 +129,14 @@ static func listings(app: Control) -> void:
 	var store := Stores.get_store(app.sim.state, app.selected_store_id)
 	if store.is_empty():
 		app.set_notice("Select an owned store before managing its listings.", true)
-		app.navigate("Store Management")
+		app.navigate("Management")
 		return
 	var heading: VBoxContainer = app.card("%s · Product listings" % store.name)
 	var website_index := Stores.website_platform_index(str(store.get("website_platform", "legacy")))
 	var website_name: String = Stores.WEBSITE_PLATFORMS[website_index].name if website_index >= 0 else "Website"
 	var subtitle: String = "Shared company inventory · Marketplace" if store.type == 0 else "Shared company inventory · %s · %s" % [website_name, store.domain]
 	heading.add_child(app.label(subtitle, 14, Style.MUTED))
-	app.action(heading, "Store Management", app.navigate.bind("Store Management"))
+	app.action(heading, "Management", app.navigate.bind("Management"))
 	var products := Catalog.PRODUCTS.map(func(item): return item.name)
 	var picker: OptionButton = app.dropdown(heading, products, app.selected_product)
 	var item: Dictionary = app.sim.product_state(app.selected_product)

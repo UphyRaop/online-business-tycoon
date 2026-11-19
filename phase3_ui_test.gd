@@ -28,16 +28,16 @@ func run() -> void:
 	inputs[0].text = "Mira Rouf Kalil"
 	press("Save company profile")
 	expect(app.sim.state.owner == "Mira Rouf Kalil" and app.sim.state.company == "Aster Labs", "Company Profile edits CEO identity independently")
-	press("Store Management")
+	press("Management")
 	expect(not has_label("Open a new store"), "New-store form is collapsed by default")
 	press("Open New Store")
-	expect(has_label("Owned stores · 0"), "Business opens Store Management with no default stores")
+	expect(has_label("Owned stores · 0"), "Business opens Management with no default stores")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "Aster Shop"
 	inputs[1].text = "Aster Brand"
 	select(controls(app, "OptionButton")[0], 0)
 	press("Create store")
-	expect(app.sim.state.stores.size() == 1, "Marketplace creation is performed through Store Management")
+	expect(app.sim.state.stores.size() == 1, "Marketplace creation is performed through Management")
 	var store_id: int = app.sim.state.stores.back().id
 	press("Deactivate")
 	expect(not app.sim.state.stores.back().active and app.notice == "Aster Shop is now inactive.",
@@ -90,7 +90,7 @@ func run() -> void:
 	expect(has_label("Portrait launch"), "Campaign status filter restores the all-status comparison")
 	await settle("phase3-analytics")
 	press("Business")
-	press("Store Management")
+	press("Management")
 	expect(has_label("Owned stores"), "Growth opens multi-store management")
 	press("Open New Store")
 	inputs = controls(app, "LineEdit")

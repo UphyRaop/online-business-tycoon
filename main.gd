@@ -11,6 +11,7 @@ const Menu = preload("res://menu_view.gd")
 const Calendar = preload("res://game_calendar.gd")
 const AdsView = preload("res://advertising_view.gd")
 const StoresView = preload("res://stores_view.gd")
+const StoreManager = preload("res://store_manager.gd")
 const NAV := ["Dashboard", "Market", "Order", "Business", "Finance"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
@@ -361,17 +362,27 @@ func apply_text_setting(enabled: bool) -> void:
 	set_notice("Settings saved." if result == OK else "Applied for this session. Settings could not be saved.", result != OK)
 	render()
 
+func set_store_active(store_id: int, enabled: bool) -> void:
+	var error := StoreManager.set_active(sim.state, store_id, enabled)
+	if not error.is_empty():
+		set_notice(error, true)
+		return
+	var store: Dictionary = StoreManager.get_store(sim.state, store_id)
+	persist("%s is now %s." % [store.name, "active" if enabled else "inactive"])
+	refresh_view()
+
 func navigate(target: String) -> void:
-	# Older in-session or serialized navigation targets are redirected to the
-	# consolidated Business > Advertising destination.
+	# Older in-session or serialized navigation targets remain valid.
 	if target == "Growth": target = "Advertising"
+	# Retain compatibility with the previous route label without changing saves.
+	if target == "Store Management": target = "Management"
 	if target == "Order": target = "Orders"
 	if target in NAV:
 		if target == primary_category(page):
 			target = "Orders" if target == "Order" else target
 		else:
 			target = str(category_last_page.get(target, target))
-	if target != "Store Management": show_new_store_form = false
+	if target != "Management": show_new_store_form = false
 	discard_form_then(func():
 		page = target
 		category_last_page[primary_category(target)] = target
@@ -380,7 +391,7 @@ func navigate(target: String) -> void:
 	)
 
 func primary_category(target: String) -> String:
-	if target in ["Market", "My Products", "Store Management", "Store Listings"]: return "Market"
+	if target in ["Market", "My Products", "Management", "Store Listings"]: return "Market"
 	if target in ["Orders", "Pre-orders"]: return "Order"
 	if target in ["Business", "Advertising", "Campaign Manager", "Campaign Details", "Advertising Analytics"]: return "Business"
 	if target in ["Finance", "Store Profitability"]: return "Finance"
@@ -400,11 +411,31 @@ func route_secondary(target: String) -> void:
 		target = "Orders"
 	navigate(target)
 
+func primary_navigation(parent: Node) -> void:
+	var nav := FlowContainer.new()
+	nav.name = "PrimaryNavigation"
+	nav.size_flags_horizontal = Control.SIZE_FILL
+	nav.add_theme_constant_override("h_separation", 6)
+	nav.add_theme_constant_override("v_separation", 6)
+	parent.add_child(nav)
+	var narrow_viewport := get_viewport_rect().size.x < 600.0
+	for target in NAV:
+		var tab := action(nav, target, navigate.bind(target), target == primary_category(page))
+		tab.add_theme_font_size_override("font_size", 12 if narrow_viewport else 13)
+		tab.clip_text = true
+		tab.custom_minimum_size.x = 70 if narrow_viewport else 100
+		tab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		for button_state in ["normal", "hover", "pressed", "focus", "disabled"]:
+			var style: StyleBox = tab.get_theme_stylebox(button_state).duplicate()
+			style.content_margin_left = 4
+			style.content_margin_right = 4
+			tab.add_theme_stylebox_override(button_state, style)
+
 func secondary_navigation(parent: Node) -> void:
 	var category := primary_category(page)
 	var routes: Array = []
 	match category:
-		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Stores and Websites", "Store Management"], ["Product Listings", "Store Listings"]]
+		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Management", "Management"], ["Product Listings", "Store Listings"]]
 		"Order": routes = [["Customer Orders", "Orders"], ["Pre-orders", "Pre-orders"], ["Returns and Service", "Returns & Service"]]
 		"Business": routes = [["Company Profile", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Advertising Analytics", "Advertising Analytics"]]
 		"Finance": routes = [["Statements", "Finance"], ["Store Profitability", "Store Profitability"]]
@@ -453,14 +484,19 @@ func render() -> void:
 		heading.add_child(title)
 		action(heading, "Save Game", open_screen.bind("Save")).size_flags_horizontal = Control.SIZE_SHRINK_END
 		action(heading, "Menu", leave_game).size_flags_horizontal = Control.SIZE_SHRINK_END
-		masthead.add_child(label("%s  /  %s" % [Calendar.format(sim.state.day), Catalog.COUNTRIES[sim.state.country]], 14, Style.MUTED))
+		var game_date := label("%s  /  %s" % [Calendar.format(sim.state.day), Catalog.COUNTRIES[sim.state.country]], 14, Style.MUTED)
+		game_date.name = "GameDate"
+		masthead.add_child(game_date)
+		primary_navigation(masthead)
 	elif screen == "Title":
 		Menu.brand(self, masthead)
 	else:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
 			"Campaign Manager": "Campaign Manager", "Campaign Details": "Campaign Details",
-			"Advertising Analytics": "Advertising Analytics", "Store Management": "Store Management", "Store Listings": "Store Listings"}
+			"Advertising Analytics": "Advertising Analytics", "Management": "Management", "Store Listings": "Store Listings"}
 		masthead.add_child(label(titles.get(screen, screen), 30))
+	if screen == "Game":
+		secondary_navigation(shell)
 	divider(shell)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -483,22 +519,9 @@ func render() -> void:
 			"Campaign Manager": AdsView.manager(self)
 			"Campaign Details": AdsView.details(self)
 			"Advertising Analytics": AdsView.analytics(self)
-			"Store Management": StoresView.management(self)
+			"Management": StoresView.management(self)
 			"Store Listings": StoresView.listings(self)
 		return
-	divider(shell)
-	var nav := row(shell)
-	for target in NAV:
-		var tab := action(nav, target, navigate.bind(target), target == primary_category(page))
-		tab.add_theme_font_size_override("font_size", 13)
-		tab.clip_text = true
-		tab.size_flags_stretch_ratio = 1.3 if target == "Dashboard" else 1.0
-		for button_state in ["normal", "hover", "pressed", "focus", "disabled"]:
-			var style: StyleBox = tab.get_theme_stylebox(button_state).duplicate()
-			style.content_margin_left = 4
-			style.content_margin_right = 4
-			tab.add_theme_stylebox_override(button_state, style)
-	secondary_navigation(shell)
 	match page:
 		"Dashboard": dashboard()
 		"Market": Market.show(self)
@@ -511,13 +534,13 @@ func render() -> void:
 		"Campaign Manager": AdsView.manager(self)
 		"Campaign Details": AdsView.details(self)
 		"Advertising Analytics": AdsView.analytics(self)
-		"Store Management": StoresView.management(self)
+		"Management": StoresView.management(self)
 		"Store Profitability": StoresView.profitability(self)
 		"Store Listings": StoresView.listings(self)
 
 func setup() -> void:
 	var details := card("Company registration")
-	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Stores.", 15, Style.MUTED))
+	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Management.", 15, Style.MUTED))
 	var owner := field(details, "Entrepreneur name", "")
 	var company := field(details, "Company name", "")
 	details.add_child(label("Starting country", 14, Style.MUTED))
@@ -682,7 +705,7 @@ func business() -> void:
 		names_saved.call()
 		persist("Company profile saved.")
 	)
-	action(card("Stores and listings"), "Store Management", navigate.bind("Store Management"), true)
+	action(card("Management"), "Management", navigate.bind("Management"), true)
 	action(card("Inventory and listings"), "My Products", navigate.bind("My Products"))
 	action(card("Business advertising"), "Advertising", navigate.bind("Advertising"))
 	var saves := card("Local progress")
