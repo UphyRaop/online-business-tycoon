@@ -12,6 +12,26 @@ const GREEN := Color("#7cdbb1")
 const RED := Color("#ff9d9c")
 const SUCCESS_INK := Color("#10251d")
 const DANGER_INK := Color("#341514")
+const EDIT_FILL := Color("#83b7ff")
+const EDIT_INK := Color("#071321")
+const WARNING_FILL := Color("#ffd166")
+const WARNING_INK := Color("#0c121c")
+const DISABLED_FILL := Color("#252f3d")
+const DISABLED_TEXT := Color("#c1cad6")
+const BUTTON_TOUCH_HEIGHT := 48
+const BUTTON_TOUCH_WIDTH := 44
+const ROLE_PRIMARY := "primary"
+const ROLE_NAVIGATION := "navigation"
+const ROLE_EDIT := "edit"
+const ROLE_SUCCESS := "success"
+const ROLE_WARNING := "warning"
+const ROLE_DESTRUCTIVE := "destructive"
+const ROLE_DISABLED := "disabled"
+const ROLE_SECONDARY := "secondary"
+const PROPER_WORDS := {
+	"ceo": "CEO", "cpm": "CPM", "cpc": "CPC", "ctr": "CTR", "cpa": "CPA", "roas": "ROAS", "roi": "ROI", "sku": "SKU", "id": "ID", "ui": "UI",
+	"ebay": "eBay", "iphone": "iPhone", "woocommerce": "WooCommerce", "shein": "SHEIN", "tiktok": "TikTok", "shopify": "Shopify", "wix": "Wix", "lazada": "Lazada", "shopee": "Shopee", "godot": "Godot",
+}
 
 static func box(fill: Color, border: Color, radius: int, padding: int) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
@@ -58,18 +78,79 @@ static func build() -> Theme:
 	return theme
 
 static func primary(control: Button) -> void:
-	role(control, GOLD, INK)
+	apply_button_role(control, ROLE_PRIMARY)
 
 static func secondary(control: Button) -> void:
-	role(control, SURFACE, TEXT)
+	apply_button_role(control, ROLE_SECONDARY)
 
 static func success(control: Button) -> void:
-	role(control, GREEN, SUCCESS_INK)
+	apply_button_role(control, ROLE_SUCCESS)
 
 static func danger(control: Button) -> void:
-	role(control, RED, DANGER_INK)
+	apply_button_role(control, ROLE_DESTRUCTIVE)
+
+static func navigation(control: Button, selected: bool = false) -> void:
+	apply_button_role(control, ROLE_NAVIGATION, selected)
+
+static func edit(control: Button) -> void:
+	apply_button_role(control, ROLE_EDIT)
+
+static func warning(control: Button) -> void:
+	apply_button_role(control, ROLE_WARNING)
+
+static func destructive(control: Button) -> void:
+	apply_button_role(control, ROLE_DESTRUCTIVE)
+
+static func disabled(control: Button) -> void:
+	apply_button_role(control, ROLE_DISABLED)
+
+static func apply_button_role(control: Button, semantic_role: String, selected: bool = false) -> void:
+	control.custom_minimum_size.x = maxf(control.custom_minimum_size.x, BUTTON_TOUCH_WIDTH)
+	control.custom_minimum_size.y = maxf(control.custom_minimum_size.y, BUTTON_TOUCH_HEIGHT)
+	control.focus_mode = Control.FOCUS_ALL
+	control.disabled = semantic_role == ROLE_DISABLED
+	match semantic_role:
+		ROLE_PRIMARY:
+			role(control, GOLD, INK)
+		ROLE_NAVIGATION:
+			var fill := GOLD if selected else SURFACE
+			var ink := INK if selected else TEXT
+			role(control, fill, ink)
+			control.add_theme_stylebox_override("normal", box(fill, GOLD if selected else LINE, 9, 10))
+			control.add_theme_stylebox_override("hover", box(fill.lightened(0.12), GOLD if selected else LINE.lightened(0.18), 9, 10))
+		ROLE_EDIT:
+			role(control, EDIT_FILL, EDIT_INK)
+		ROLE_SUCCESS:
+			role(control, GREEN, SUCCESS_INK)
+		ROLE_WARNING:
+			role(control, WARNING_FILL, WARNING_INK)
+		ROLE_DESTRUCTIVE:
+			role(control, RED, DANGER_INK)
+		ROLE_DISABLED:
+			control.add_theme_stylebox_override("disabled", box(DISABLED_FILL, LINE, 9, 10))
+			control.add_theme_color_override("font_disabled_color", DISABLED_TEXT)
+		_:
+			role(control, SURFACE, TEXT)
+
+static func button_role_for_action(title: String) -> String:
+	var name := title.strip_edges().to_lower()
+	if name.begins_with("delete") or name.begins_with("remove") or name.begins_with("permanently remove") or name.begins_with("stop") or name.begins_with("deactivate") or name.begins_with("unpublish") or name.begins_with("sell company") or name.begins_with("reset"):
+		return ROLE_DESTRUCTIVE
+	if name.begins_with("edit") or name.begins_with("change") or name.begins_with("update"):
+		return ROLE_EDIT
+	if name.begins_with("pause") or name.begins_with("hold"):
+		return ROLE_WARNING
+	if name.begins_with("create") or name.begins_with("save") or name.begins_with("register") or name.begins_with("continue") or name.begins_with("apply") or name.begins_with("launch") or name.begins_with("publish") or name.begins_with("purchase") or name.begins_with("buy ") or name.begins_with("reactivate"):
+		return ROLE_PRIMARY
+	if name.begins_with("confirm") or name.begins_with("complete") or name.begins_with("approve") or name.contains("refund"):
+		return ROLE_SUCCESS
+	if name == "cancel" or name == "back" or name == "close" or name == "menu" or name == "switch" or name.begins_with("discard") or name == "previous" or name == "next" or name.begins_with("open ") or name.begins_with("manage") or name.begins_with("view "):
+		return ROLE_NAVIGATION
+	return ROLE_SECONDARY
 
 static func role(control: Button, fill: Color, ink: Color) -> void:
+	control.custom_minimum_size.x = maxf(control.custom_minimum_size.x, BUTTON_TOUCH_WIDTH)
+	control.custom_minimum_size.y = maxf(control.custom_minimum_size.y, BUTTON_TOUCH_HEIGHT)
 	control.add_theme_stylebox_override("normal", box(fill, fill, 9, 10))
 	control.add_theme_stylebox_override("hover", box(fill.lightened(0.15), fill.lightened(0.18), 9, 10))
 	control.add_theme_stylebox_override("pressed", box(fill.darkened(0.13), fill.darkened(0.1), 9, 10))
@@ -77,3 +158,43 @@ static func role(control: Button, fill: Color, ink: Color) -> void:
 	control.add_theme_stylebox_override("focus", focus)
 	for color in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		control.add_theme_color_override(color, ink)
+
+static func heading_text(value: String) -> String:
+	var words := value.strip_edges().split(" ", false)
+	for index in words.size():
+		var word: String = words[index]
+		var prefix := ""
+		while not word.is_empty() and word.substr(0, 1) in ["(", "[", "\"", "'"]:
+			prefix += word.substr(0, 1)
+			word = word.substr(1)
+		var suffix := ""
+		while not word.is_empty() and word.substr(word.length() - 1, 1) in [")", "]", "\"", "'", ":", ",", ".", "?", "!"]:
+			suffix = word.substr(word.length() - 1, 1) + suffix
+			word = word.substr(0, word.length() - 1)
+		var key := word.to_lower()
+		if PROPER_WORDS.has(key):
+			words[index] = prefix + str(PROPER_WORDS[key]) + suffix
+		elif word == word.to_upper() or (word != word.to_lower() and word != word.to_upper()):
+			continue
+		elif index > 0 and word.to_lower() in ["and", "or", "of", "for", "to", "in", "on", "at", "by", "from", "with"]:
+			words[index] = prefix + word.to_lower() + suffix
+		elif not word.is_empty():
+			words[index] = prefix + word.substr(0, 1).to_upper() + word.substr(1) + suffix
+	return " ".join(words)
+
+static func sentence_text(value: String) -> String:
+	var text := value.strip_edges()
+	if text.is_empty(): return text
+	var first_space := text.find(" ")
+	var first_word := text.substr(0, first_space) if first_space >= 0 else text
+	var core := first_word
+	var suffix := ""
+	while not core.is_empty() and core.substr(core.length() - 1, 1) in [")", "]", "\"", "'", ":", ",", ".", "?", "!"]:
+		suffix = core.substr(core.length() - 1, 1) + suffix
+		core = core.substr(0, core.length() - 1)
+	if core.to_lower() in PROPER_WORDS:
+		var corrected := str(PROPER_WORDS[core.to_lower()]) + suffix
+		return corrected + (text.substr(first_space) if first_space >= 0 else "")
+	if core != core.to_lower() and core != core.to_upper():
+		return text
+	return text.substr(0, 1).to_upper() + text.substr(1)
