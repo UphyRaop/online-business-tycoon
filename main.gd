@@ -15,6 +15,8 @@ const StoreManager = preload("res://store_manager.gd")
 const CEOProfile = preload("res://ceo_profile.gd")
 const Saves = preload("res://save_store.gd")
 const AvatarCrop = preload("res://avatar_crop_viewport.gd")
+const FinanceManagement = preload("res://finance_management.gd")
+const FinanceChart = preload("res://ads_chart.gd")
 const NAV := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
@@ -931,7 +933,7 @@ func primary_category(target: String) -> String:
 	if target in ["Market", "My Products", "Management", "Store Listings"]: return "Market"
 	if target in ["Orders", "Pre-orders"]: return "Order"
 	if target in ["Business", "Advertising", "Campaign Manager", "Campaign Details", "Advertising Analytics"]: return "Business"
-	if target in ["Finance", "Store Profitability"]: return "Finance"
+	if target in ["Finance", "Expense Management", "Store Profitability"]: return "Finance"
 	if target == "Profile": return "Profile"
 	return "Dashboard"
 
@@ -988,7 +990,7 @@ func secondary_navigation(parent: Node) -> void:
 		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Management", "Management"], ["Product Listings", "Store Listings"]]
 		"Order": routes = [["Customer Orders", "Orders"], ["Pre-orders", "Pre-orders"], ["Returns and Service", "Returns & Service"]]
 		"Business": routes = [["Company Profile", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
-		"Finance": routes = [["Statements", "Finance"], ["Store Profitability", "Store Profitability"]]
+		"Finance": routes = [["Statements", "Finance"], ["Expense Management", "Expense Management"], ["Store Profitability", "Store Profitability"]]
 		_: return
 	var strip := FlowContainer.new()
 	strip.add_theme_constant_override("h_separation", 8)
@@ -1115,6 +1117,7 @@ func render() -> void:
 		"Pre-orders": Operations.preorders(self)
 		"Business": business()
 		"Finance": finance()
+		"Expense Management": expense_management()
 		"Profile": profile_page()
 		"Advertising": AdsView.overview(self)
 		"Campaign Manager": AdsView.manager(self)
@@ -1348,15 +1351,16 @@ func business() -> void:
 	action(controls, "Load Game", open_screen.bind("Load"))
 
 func finance() -> void:
+	var anchor: int = report_end if report_end > 0 else sim.state.day
+	var boundaries := Calendar.bounds(period, anchor)
+	var report := sim.calendar_report(period, anchor)
+	financial_dashboard(report)
 	var controls := card("Financial statements")
 	var selection := dropdown(controls, Calendar.PERIODS, period)
 	selection.item_selected.connect(func(index: int):
 		period = index
 		render()
 	)
-	var anchor: int = report_end if report_end > 0 else sim.state.day
-	var boundaries := Calendar.bounds(period, anchor)
-	var report := sim.calendar_report(period, anchor)
 	var scope := Calendar.format_range(boundaries.x, boundaries.y)
 	controls.add_child(label(scope, 15, Style.GOLD))
 	if report.start != boundaries.x or report.end != boundaries.y or report.end == sim.state.day:
@@ -1377,6 +1381,101 @@ func finance() -> void:
 		1: balance_sheet(report)
 		2: cash_flow(report)
 	channel_cards(report, scope)
+
+func financial_dashboard(report: Dictionary) -> void:
+	var view := card("Financial Dashboard")
+	var summary := FinanceManagement.dashboard(sim.state, report)
+	var kpis := GridContainer.new()
+	kpis.columns = 3 if size.x >= 900.0 else 2
+	kpis.add_theme_constant_override("h_separation", 10)
+	kpis.add_theme_constant_override("v_separation", 10)
+	view.add_child(kpis)
+	for item in [
+		["Company Cash", money(summary.cash)], ["Revenue", money(summary.revenue)],
+		["Expenses", money(-summary.expenses)], ["Gross Profit", money(summary.gross_profit)],
+		["Net Profit", money(summary.net_profit)], ["Operating Cash Flow", money(summary.operating_cash_flow)],
+		["Receivables", money(summary.receivables)], ["Supplier Payables", money(summary.payables)],
+		["Customer Deposits Held", money(summary.customer_deposits)],
+	]:
+		var metric_card := PanelContainer.new()
+		metric_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		metric_card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 10, 10))
+		var content := VBoxContainer.new()
+		content.add_child(label(str(item[0]), 12, Style.MUTED))
+		content.add_child(label(str(item[1]), 16, Style.GOLD))
+		metric_card.add_child(content)
+		kpis.add_child(metric_card)
+	view.add_child(label("This report uses existing ledger rules. Delivered sales and supplier orders settle immediately, so receivables and supplier payables are zero. Customer deposits remain a liability until delivery or refund.", 13, Style.MUTED))
+	var forecast := card("Known Fixed-Cost Estimate")
+	metric(forecast, "Known next-day fixed costs", money(-int(summary.known_fixed_costs)))
+	metric(forecast, "Cash after known fixed costs", money(int(summary.cash_after_known_fixed_costs)), profit_color(int(summary.cash_after_known_fixed_costs)))
+	forecast.add_child(label("Informational estimate only. It excludes future sales, variable expenses, advertising, new supplier orders, and unsettled receipts. Forecast cash is not available cash.", 13, Style.MUTED))
+	var trend := card("Financial Trends · Last 7 Recorded Days")
+	var daily := FinanceManagement.daily_totals(sim.state, maxi(1, sim.state.day - 7), sim.state.day - 1)
+	var trend_labels: Array[String] = []
+	var revenue: Array[float] = []
+	var expenses: Array[float] = []
+	var profit: Array[float] = []
+	for row in daily:
+		var day := int(row.day)
+		trend_labels.append("D%d" % day)
+		revenue.append(float(sim.state.ledger[day - 1].sales))
+		expenses.append(float(row.expenses))
+		profit.append(float(row.net_profit))
+	var chart := FinanceChart.new()
+	chart.custom_minimum_size.y = 170
+	chart.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chart.configure(trend_labels, [
+		{"name": "Revenue", "values": revenue, "color": Style.GREEN},
+		{"name": "Expenses", "values": expenses, "color": Style.GOLD},
+		{"name": "Net Profit", "values": profit, "color": Color("#83b7ff")},
+	])
+	trend.add_child(chart)
+	var legend := row(trend)
+	for item in [["Revenue", Style.GREEN], ["Expenses", Style.GOLD], ["Net Profit", Color("#83b7ff")]]:
+		legend.add_child(label("● %s" % item[0], 12, item[1]))
+
+func expense_management() -> void:
+	var controls := card("Expense Reporting Period")
+	var selection := dropdown(controls, Calendar.PERIODS, period)
+	selection.item_selected.connect(func(index: int):
+		period = index
+		render()
+	)
+	var anchor: int = report_end if report_end > 0 else sim.state.day
+	var boundaries := Calendar.bounds(period, anchor)
+	var report := sim.calendar_report(period, anchor)
+	var scope := Calendar.format_range(boundaries.x, boundaries.y)
+	controls.add_child(label(scope, 15, Style.GOLD))
+	var dates := row(controls)
+	var older := action(dates, "Previous", change_report_end.bind(boundaries.x - 1))
+	older.disabled = boundaries.x <= 1
+	var newer := action(dates, "Next", change_report_end.bind(boundaries.y + 1))
+	newer.disabled = boundaries.y >= sim.state.day
+	var categories := card("Expense Breakdown")
+	var entries := FinanceManagement.expense_categories(report)
+	if entries.is_empty():
+		categories.add_child(label("No expenses were recorded for this period.", 14, Style.MUTED))
+	else:
+		for entry in entries:
+			metric(categories, str(entry.label), money(-int(entry.amount)))
+	var inventory_paid_total: int = int(report.purchases) + int(report.direct_purchases) + int(report.inbound_freight)
+	if inventory_paid_total > 0:
+		categories.add_child(label("Inventory purchase and freight cash payments are tracked separately from expenses because unsold inventory remains an asset; Cost of Goods Sold is recognized when units sell.", 13, Style.MUTED))
+		metric(categories, "Inventory and freight cash payments", money(-inventory_paid_total))
+	var history := card("Daily Ledger History")
+	var daily := FinanceManagement.daily_totals(sim.state, report.start, report.end)
+	if daily.is_empty():
+		history.add_child(label("No recorded daily entries are available for this period.", 14, Style.MUTED))
+	for entry in daily:
+		var day_card := PanelContainer.new()
+		day_card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 8, 10))
+		var day_content := VBoxContainer.new()
+		day_content.add_child(label(Calendar.format(int(entry.day)), 15, Style.GOLD))
+		metric(day_content, "Sales · Total expenses", "%s · %s" % [money(int(entry.sales)), money(-int(entry.expenses))])
+		metric(day_content, "Net profit · Cash movement", "%s · %s" % [money(int(entry.net_profit)), money(int(entry.cash_change))])
+		day_card.add_child(day_content)
+		history.add_child(day_card)
 
 func change_report_end(day: int) -> void:
 	report_end = day

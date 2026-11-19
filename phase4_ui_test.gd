@@ -107,7 +107,16 @@ func run() -> void:
 	expect(app.screen == "Advertising Analytics" or app.page == "Advertising Analytics", "Ads Analytics remains reachable")
 
 	press("Finance")
-	expect(app.page == "Finance" and has_label("Income Statement"), "Finance category opens statements")
+	expect(app.page == "Finance" and has_label("Financial Dashboard") and has_label("Income Statement")
+		and has_label("Company Cash") and has_label("Gross Profit") and has_label("Operating Cash Flow")
+		and has_label("Receivables") and has_label("Supplier Payables") and has_label("Financial Trends · Last 7 Recorded Days"),
+		"Finance opens a cash, performance, liquidity, and trend dashboard above financial statements")
+	expect(has_label("Known Fixed-Cost Estimate") and has_label("Informational estimate only."),
+		"Finance clearly separates the fixed-cost forecast from available cash")
+	press("Expense Management")
+	expect(app.page == "Expense Management" and has_label("Expense Breakdown") and has_label("Daily Ledger History"),
+		"Expense Management shows period-based categories and daily ledger history")
+	press("Statements")
 	press("Store Profitability")
 	expect(app.page == "Store Profitability" and has_label("Harbor Marketplace") and has_label("Harbor Website"),
 		"Finance Store Profitability reports marketplace and website results")

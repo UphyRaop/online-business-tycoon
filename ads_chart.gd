@@ -20,16 +20,23 @@ func _draw() -> void:
 	if chart_labels.is_empty():
 		draw_string(ThemeDB.fallback_font, Vector2(40, 28), "No recorded activity for this period", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#a6b5c8"))
 		return
-	var peak := 0.0
+	var minimum := 0.0
+	var maximum := 0.0
 	for item in series:
-		for value in item.get("values", []): peak = maxf(peak, float(value))
-	if peak <= 0.0: peak = 1.0
+		for value in item.get("values", []):
+			minimum = minf(minimum, float(value))
+			maximum = maxf(maximum, float(value))
+	var span := maximum - minimum
+	if span <= 0.0: span = 1.0
+	if minimum < 0.0 and maximum > 0.0:
+		var zero_y := bounds.end.y - bounds.size.y * (0.0 - minimum) / span
+		draw_line(Vector2(bounds.position.x, zero_y), Vector2(bounds.end.x, zero_y), Color("#52637a"), 1.0)
 	for item in series:
 		var values: Array = item.get("values", [])
 		var points := PackedVector2Array()
 		for index in values.size():
 			var x := bounds.position.x + (bounds.size.x * 0.5 if values.size() == 1 else bounds.size.x * float(index) / float(values.size() - 1))
-			var y := bounds.end.y - bounds.size.y * float(values[index]) / peak
+			var y := bounds.end.y - bounds.size.y * (float(values[index]) - minimum) / span
 			points.append(Vector2(x, y))
 		if points.size() > 1: draw_polyline(points, item.get("color", Color.WHITE), 2.5, true)
 		for point in points: draw_circle(point, 3.0, item.get("color", Color.WHITE))
