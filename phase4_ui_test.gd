@@ -128,8 +128,8 @@ func run() -> void:
 		"A single desktop content card expands to the full content width")
 
 	press("Business")
-	expect(app.page == "Business" and has_label("Owned Stores"), "Business category opens Company Profile")
-	var company_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Company Profile")[0]
+	expect(app.page == "Business" and has_label("Owned Stores"), "Business category opens Company Management")
+	var company_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Company Management")[0]
 	var unselected_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Advertising")[0]
 	var dashboard_primary: Button = nav.find_child("Primary_Dashboard", true, false)
 	expect(company_subtab.custom_minimum_size.y == 44 and dashboard_primary.custom_minimum_size.y >= 44
@@ -189,7 +189,7 @@ func run() -> void:
 		"New CEO profile displays a progression title derived from its current level")
 	expect(not has_label("Stored in this browser only; never uploaded."),
 		"Profile no longer shows the browser storage developer message")
-	expect(has_label("Personal cash and net worth are not currently tracked."),
+	expect(has_label("Personal cash and net worth remain untracked."),
 		"Profile explains that personal finance is not tracked and separates it from company accounts")
 	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Profile"),
 		"Profile details are read-only until editing is explicitly activated")

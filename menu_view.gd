@@ -4,6 +4,7 @@ const Catalog = preload("res://catalog.gd")
 const Slots = preload("res://save_slots.gd")
 const Style = preload("res://corporate_theme.gd")
 const Calendar = preload("res://game_calendar.gd")
+const CEOProfile = preload("res://ceo_profile.gd")
 const LOGO = preload("res://icon.svg")
 
 static func brand(app: Control, parent: Node) -> void:
@@ -29,6 +30,11 @@ static func title(app: Control) -> void:
 	if not latest.is_empty():
 		describe(app, play, latest)
 	app.action(play, "New Game", app.start_new_game, latest.is_empty())
+	if not app.ceo_profile.is_empty() and not app.ceo_profile.get("companies", []).is_empty():
+		if CEOProfile.owned_companies(app.ceo_profile).is_empty():
+			app.action(play, "Start Another Company", func(): app.show_screen("Setup"), true)
+		else:
+			app.action(play, "Choose Company", app.show_company_selection)
 	app.action(play, "Load Game", app.open_screen.bind("Load"))
 	app.action(play, "Settings", app.open_screen.bind("Settings"))
 
