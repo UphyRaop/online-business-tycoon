@@ -7,6 +7,7 @@ const Fulfillment = preload("res://fulfillment.gd")
 const Calendar = preload("res://game_calendar.gd")
 const Style = preload("res://corporate_theme.gd")
 const Offers = preload("res://offer_view.gd")
+const Finance = preload("res://finance_management.gd")
 
 static func management(app: Control) -> void:
 	var intro: VBoxContainer = app.card("Store Management · %s" % app.sim.state.company)
@@ -120,16 +121,22 @@ static func profitability(app: Control) -> void:
 		app.refresh_view()
 	)
 	var anchor := int(app.report_end) if int(app.report_end) > 0 else int(app.sim.state.day)
-	var bounds := Calendar.bounds(app.period, clampi(anchor, 1, int(app.sim.state.day)))
-	var start_day := maxi(1, bounds.x)
-	var end_day := mini(bounds.y, int(app.sim.state.day) - 1)
-	summary.add_child(app.label(Calendar.format_range(bounds.x, bounds.y), 15, Style.GOLD))
+	var selected_bounds := Calendar.bounds(app.period, clampi(anchor, 1, int(app.sim.state.day)))
+	var period_report := Finance.completed_period_report(app.sim, app.period, anchor)
+	var start_day := int(period_report.get("start", 0))
+	var end_day := int(period_report.get("end", 0))
+	var has_completed_days := start_day > 0 and end_day >= start_day
+	if not has_completed_days:
+		start_day = int(app.sim.state.day)
+		end_day = int(app.sim.state.day) - 1
+	var date_label := Calendar.format_range(start_day, end_day) if has_completed_days else Calendar.format_range(selected_bounds.x, selected_bounds.y)
+	summary.add_child(app.label(date_label, 15, Style.GOLD))
 	var dates: HBoxContainer = app.row(summary)
-	var previous: Button = app.action(dates, "Previous", change_profitability_period.bind(app, bounds.x - 1))
-	previous.disabled = bounds.x <= 1
-	var next: Button = app.action(dates, "Next", change_profitability_period.bind(app, bounds.y + 1))
-	next.disabled = bounds.y >= int(app.sim.state.day) - 1
-	if end_day < start_day:
+	var previous: Button = app.action(dates, "Previous", change_profitability_period.bind(app, selected_bounds.x - 1))
+	previous.disabled = selected_bounds.x <= 1
+	var next: Button = app.action(dates, "Next", change_profitability_period.bind(app, selected_bounds.y + 1))
+	next.disabled = selected_bounds.y >= int(app.sim.state.day) - 1
+	if not has_completed_days:
 		summary.add_child(app.label("No completed days are available for this period yet. Current-day activity remains live but is not included in historical reports.", 14, Style.MUTED))
 	var total_profit := 0
 	var expanded_id := int(app.get_meta("expanded_profitability_store_id", -1))

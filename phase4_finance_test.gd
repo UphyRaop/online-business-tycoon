@@ -78,8 +78,8 @@ func _initialize() -> void:
 	day_one_sim.state.ledger.append(Sim.entry())
 	var day_two_daily := Finance.completed_period_report(day_one_sim, 0, 2)
 	var day_two_month := Finance.completed_period_report(day_one_sim, 2, 2)
-	expect(day_two_daily.end == 0 and day_two_daily.sales == 0,
-		"A selected current daily period remains empty until that day completes")
+	expect(day_two_daily.start == 1 and day_two_daily.end == 1 and day_two_daily.sales == 0,
+		"The current Daily selection reports the last completed day, excluding current activity")
 	expect(day_two_month.start == 1 and day_two_month.end == 1,
 		"A monthly report includes completed days but excludes the current unfinished day")
 
@@ -118,6 +118,7 @@ func _initialize() -> void:
 	expect(transactions.size() == 1 and transaction_cash_total == Sim.cash_change(transaction_row),
 		"Money In/Out transaction activity reconciles exactly to ledger cash movement with supplier credit and freight")
 	expect(transactions[0].other.any(func(item): return item.label == "Cost of goods sold")
+		and transactions[0].other.any(func(item): return item.label == "Supplier credit inventory purchase")
 		and transactions[0].incoming.any(func(item): return item.label == "Supplier refunds")
 		and transactions[0].outgoing.any(func(item): return item.label == "Supplier repayments"),
 		"Transaction categories separate non-cash costs from receipts and payments")

@@ -45,40 +45,7 @@ static func dashboard(state: Dictionary, report: Dictionary) -> Dictionary:
 static func completed_period_report(simulation: RefCounted, period: int, anchor: int) -> Dictionary:
 	# Simulation owns the historical cut-off so finance, stores, sales and ads
 	# share the same rule. Keep this wrapper for existing finance UI callers.
-	if simulation.has_method("calendar_report_completed"):
-		return simulation.calendar_report_completed(period, anchor)
-	var state: Dictionary = simulation.state
-	var selected_day := clampi(anchor, 1, int(state.get("day", 1)))
-	var bounds := Calendar.bounds(period, selected_day)
-	var first_day := maxi(1, bounds.x)
-	var last_day := mini(bounds.y, int(state.get("day", 1)) - 1)
-	if last_day < first_day:
-		return empty_completed_report(state)
-	return simulation.report(last_day - first_day + 1, last_day)
-
-static func empty_completed_report(state: Dictionary) -> Dictionary:
-	# At the beginning of Day 1 there is no completed trading history yet. The
-	# opening capital is still a real balance-sheet asset and equity balance.
-	var report := Simulation.entry()
-	var opening_capital := 0
-	var ledger: Array = state.get("ledger", [])
-	if not ledger.is_empty():
-		opening_capital = int(ledger[0].get("capital", 0))
-	report.start = 1
-	report.end = 0
-	report.opening_cash = 0
-	report.closing_cash = opening_capital
-	report.inventory = 0
-	report.goods_in_transit = 0
-	report.equity_capital = opening_capital
-	report.retained = 0
-	report.assets = opening_capital
-	report.overdraft = 0
-	report.customer_deposits = 0
-	report.supplier_payables = 0
-	report.payables = 0
-	report.liabilities = 0
-	return report
+	return simulation.calendar_report_completed(period, anchor)
 
 static func transaction_rows(state: Dictionary, first_day: int, last_day: int) -> Array[Dictionary]:
 	## Cash movement grouped like a banking activity feed. Non-cash entries such
@@ -86,7 +53,7 @@ static func transaction_rows(state: Dictionary, first_day: int, last_day: int) -
 	var result: Array[Dictionary] = []
 	var first := maxi(1, first_day)
 	var last := mini(int(state.get("day", 1)) - 1, last_day)
-	for day in range(first, last + 1):
+	for day in range(last, first - 1, -1):
 		if day - 1 < 0 or day - 1 >= state.ledger.size():
 			continue
 		var row: Dictionary = state.ledger[day - 1]
@@ -108,6 +75,9 @@ static func transaction_rows(state: Dictionary, first_day: int, last_day: int) -
 		_add_transaction(outgoing, "Store operating costs", int(cash.store_expenses))
 		_add_transaction(outgoing, "Other operating costs", int(cash.other_operating))
 		_add_transaction(other, "Cost of goods sold", -int(row.cogs))
+		_add_transaction(other, "Supplier credit inventory purchase", -int(row.get("credit_purchases", 0)))
+		_add_transaction(other, "Credit-financed inbound freight", -int(row.get("credit_inbound_freight", 0)))
+		_add_transaction(other, "Supplier credit return applied to payable", int(row.get("supplier_credit_adjustments", 0)))
 		_add_transaction(other, "Inventory return adjustment", int(row.get("supplier_refunds", 0)) - int(row.get("inventory_returns", 0)))
 		if not incoming.is_empty() or not outgoing.is_empty() or not other.is_empty():
 			result.append({"day": day, "incoming": incoming, "outgoing": outgoing, "other": other,
