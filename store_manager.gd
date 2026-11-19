@@ -262,12 +262,17 @@ static func store_activity(row: Dictionary, store_id: int) -> Dictionary:
 		row.store_activity = records
 	return records[store_id]
 
-static func report(state: Dictionary, store_id: int, end_day: int = 0) -> Dictionary:
-	var last := clampi(end_day if end_day > 0 else state.day - 1, 1, state.day)
+static func report(state: Dictionary, store_id: int, end_day: int = 0, start_day: int = 1) -> Dictionary:
+	# Day `state.day` has not been completed yet. Store reports use only closed
+	# ledger days, even if a caller explicitly requests the current day.
+	var last := mini(end_day if end_day > 0 else int(state.day) - 1, int(state.day) - 1)
 	var totals := {}
 	for field in ACTIVITY_FIELDS:
 		totals[field] = 0
-	for i in range(last):
+	var first := maxi(1, start_day)
+	if last < first:
+		return totals
+	for i in range(first - 1, last):
 		var activity: Dictionary = state.ledger[i].get("store_activity", {}).get(store_id, {})
 		for field in ACTIVITY_FIELDS:
 			totals[field] += int(activity.get(field, 0))
