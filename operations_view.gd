@@ -33,7 +33,9 @@ static func preorders(app: Control) -> void:
 	var view: VBoxContainer = app.card("Pre-orders")
 	var ids: Array = []
 	for id in state.orders:
-		if state.orders[id].get("preorder", false): ids.append(id)
+		if state.orders[id].get("preorder", false):
+			if app.preorder_show_history or state.orders[id].status not in ["delivered", "cancelled"]:
+				ids.append(id)
 	ids.sort_custom(func(a: int, b: int):
 		var first: Dictionary = state.orders[a]
 		var second: Dictionary = state.orders[b]
@@ -41,6 +43,11 @@ static func preorders(app: Control) -> void:
 	)
 	var pending := ids.filter(func(id): return state.orders[id].status not in ["delivered", "cancelled"])
 	app.metric(view, "Outstanding pre-orders", str(pending.size()))
+	app.action(view, "Show Outstanding Only" if app.preorder_show_history else "View Completed History", func():
+		app.preorder_show_history = not app.preorder_show_history
+		app.order_page = 0
+		app.render()
+	)
 	var overdue := 0
 	for id in pending:
 		var order: Dictionary = state.orders[id]
@@ -50,29 +57,34 @@ static func preorders(app: Control) -> void:
 	if ids.is_empty():
 		view.add_child(app.label("No customer pre-orders yet. Enable pre-orders on a product listing in Market / Management.", 14, Style.MUTED))
 		return
-	for id in ids:
+	for index in range(ids.size() - 1, -1, -1):
+		var id: int = ids[index]
 		var order: Dictionary = state.orders[id]
 		var store: Dictionary = Stores.get_store(state, int(order.store_id))
-		var card: VBoxContainer = app.card("Pre-order #%04d" % int(id))
+		var card: VBoxContainer = app.card("Pre-order #%04d · %s" % [int(id), str(order.status).capitalize()])
 		var product_names := PackedStringArray()
 		for line in order.items:
 			product_names.append(Catalog.PRODUCTS[int(line.product)].name)
-		app.metric(card, "Product", " + ".join(product_names))
-		app.metric(card, "Store / Website", str(store.get("name", "Unknown store")))
-		app.metric(card, "Quantity", str(order.items.size()))
-		app.metric(card, "Order date", Calendar.format(int(order.placed)))
-		app.metric(card, "Payment", "Collected · held as customer deposit" if order.status != "delivered" else "Captured · revenue recognized on delivery")
-		app.metric(card, "Pre-order status", _preorder_status(str(order.get("preorder_status", "awaiting_stock"))))
-		app.metric(card, "Customer wait", "%d days estimated" % int(order.get("fulfillment_delay", 0)))
-		if int(order.get("expected_restock", 0)) > 0 and order.status not in ["delivered", "cancelled"]:
-			var confirmed := false
-			for batch in state.inbound:
-				if int(batch.product) in order.items.map(func(line): return int(line.product)):
-					confirmed = true
-			app.metric(card, "Estimated replenishment", "%s%s" % [Calendar.format(int(order.expected_restock)), " · shipment confirmed" if confirmed else " · estimate only"])
-		else:
-			app.metric(card, "Estimated replenishment", "Uncertain" if order.status not in ["delivered", "cancelled"] else "Completed")
-		app.metric(card, "Payment amount", app.money(int(order.total)))
+		app.metric(card, "Product · Store", "%s · %s" % [" + ".join(product_names), str(store.get("name", "Unknown store"))])
+		app.metric(card, "Status · Payment", "%s · %s" % [_preorder_status(str(order.get("preorder_status", "awaiting_stock"))), app.money(int(order.total))])
+		var expanded := bool(app.expanded_order_details.get(id, false))
+		app.action(card, "Hide Details" if expanded else "Order Details", func():
+			app.expanded_order_details[id] = not bool(app.expanded_order_details.get(id, false))
+			app.render()
+		)
+		if expanded:
+			app.metric(card, "Order Date", Calendar.format(int(order.placed)))
+			app.metric(card, "Quantity", str(order.items.size()))
+			app.metric(card, "Payment", "Collected · held as customer deposit" if order.status != "delivered" else "Captured · revenue recognized on delivery")
+			app.metric(card, "Customer Wait", "%d days estimated" % int(order.get("fulfillment_delay", 0)))
+			if int(order.get("expected_restock", 0)) > 0 and order.status not in ["delivered", "cancelled"]:
+				var confirmed := false
+				for batch in state.inbound:
+					if int(batch.product) in order.items.map(func(line): return int(line.product)):
+						confirmed = true
+				app.metric(card, "Estimated Replenishment", "%s%s" % [Calendar.format(int(order.expected_restock)), " · shipment confirmed" if confirmed else " · estimate only"])
+			else:
+				app.metric(card, "Estimated Replenishment", "Uncertain" if order.status not in ["delivered", "cancelled"] else "Completed")
 		if order.status not in ["delivered", "cancelled"]:
 			app.action(card, "Cancel and refund pre-order", func():
 				var error := Service.cancel_preorder(app.sim, int(id))
@@ -130,7 +142,7 @@ static func shipping_settings(app: Control) -> void:
 
 static func fulfillment(app: Control) -> void:
 	var state: Dictionary = app.sim.state
-	var report: Dictionary = app.sim.report(30)
+	var report: Dictionary = app.sim.report_completed(30)
 	var delivered: int = total(report, "tracked_deliveries")
 	var filter: VBoxContainer = app.card("Order Tracking")
 	app.metric(filter, "Awaiting delivery", str(state.active_orders.size()))
@@ -204,13 +216,26 @@ static func change_page(app: Control, delta: int) -> void:
 
 static func order_card(app: Control, order: Dictionary, cases_only: bool) -> void:
 	var state: Dictionary = app.sim.state
-	var view: VBoxContainer = app.card("Order #%04d" % order.id)
+	var view: VBoxContainer = app.card("Order #%04d · %s" % [order.id, str(order.status).capitalize()])
 	var names := PackedStringArray()
 	for item in order.items:
 		names.append(Catalog.PRODUCTS[item.product].name)
-	view.add_child(app.label(" + ".join(names), 15))
-	app.metric(view, Catalog.CHANNELS[order.channel], app.money(order.total))
-	if not cases_only:
+	app.metric(view, "Product · %s" % Catalog.CHANNELS[order.channel], "%s · %s" % [" + ".join(names), app.money(order.total)])
+	if not cases_only and order.status == "queued":
+		view.add_child(app.label("Awaiting dispatch", 14, Style.GOLD))
+		var method: OptionButton = app.dropdown(view, methods(app), order.method)
+		app.action(view, "Dispatch Order", func():
+			finish(app, Fulfillment.ship(state, order.id, method.selected), "Order dispatched.")
+		, true)
+	elif not cases_only:
+		var expanded := bool(app.expanded_order_details.get(int(order.id), false))
+		app.action(view, "Hide Details" if expanded else "Order Details", func():
+			app.expanded_order_details[int(order.id)] = not bool(app.expanded_order_details.get(int(order.id), false))
+			app.render()
+		)
+		if expanded:
+			tracking(app, view, order)
+	else:
 		tracking(app, view, order)
 	if order.case_status == "open":
 		app.divider(view)
@@ -278,8 +303,8 @@ static func analytics(app: Control) -> void:
 		app.refresh_view()
 	)
 	var days: int = [7, 30, 365][app.analytics_window]
-	var report: Dictionary = app.sim.report(days)
-	view.add_child(app.label(Calendar.format_range(report.start, report.end), 14, Style.MUTED))
+	var report: Dictionary = app.sim.report_completed(days)
+	view.add_child(app.label(app.report_range_label(report), 14, Style.MUTED))
 	for channel in Catalog.FEES.size():
 		var totals: Dictionary = report.channels[channel]
 		var details: VBoxContainer = app.card(Catalog.CHANNELS[channel])

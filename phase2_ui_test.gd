@@ -1,6 +1,7 @@
 extends "res://phase1_ui_test.gd"
 
 const Storefront = preload("res://storefront.gd")
+const Calendar = preload("res://game_calendar.gd")
 
 
 func run() -> void:
@@ -16,43 +17,33 @@ func run() -> void:
 	app.sim.state.website_active = true
 	app.sim.state.seed = 153
 	press("Market")
-	press("View Details")
+	await browse_catalog_product("Kitchen", 0)
 	expect(has_label("Forecast"), "Supplier Details shows the product demand forecast")
 	var quantity: LineEdit = field_for_label("Purchase Quantity")
 	expect(quantity != null, "Supplier Details exposes an editable purchase quantity")
 	quantity.text = "20"
 	quantity.text_changed.emit("20")
 	press("Negotiate")
-	expect(has_label("Negotiated offer:"), "Negotiation updates the supplier's simulated offer")
-	press("Accept Offer")
-	quantity = field_for_label("Purchase Quantity")
-	quantity.text = "20"
-	quantity.text_changed.emit("20")
-	press("Purchase")
-	expect(has_label("PO-0001") and has_label("0 available · 20 inbound"), "Purchase updates forecast and inbound tracking")
+	expect(has_label("Negotiated supplier response:"), "Negotiation displays the actual supplier response and terms")
+	await quote_and_confirm_purchase()
+	expect(has_label("Purchase Confirmed") and app.sim.state.inbound.size() == 1 and app.sim.state.inbound[0].units == 20,
+		"A confirmed supplier quotation creates one purchase order with the requested quantity")
 	open_first_store_listing()
 	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 1)
 	press("Save Changes")
 	press("Market")
-	var choices := controls(app, "OptionButton")
-	select(choices[1], 4)
-	press("View Details")
+	await browse_catalog_product("Kitchen", 4)
 	quantity = field_for_label("Purchase Quantity")
 	quantity.text = "20"
 	quantity.text_changed.emit("20")
-	press("Accept Offer")
-	quantity = field_for_label("Purchase Quantity")
-	quantity.text = "20"
-	quantity.text_changed.emit("20")
-	press("Purchase")
+	await quote_and_confirm_purchase()
 	open_first_store_listing()
 	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 1)
 	press("Save Changes")
 	press("Market")
-	choices = controls(app, "OptionButton")
-	select(choices[1], 4)
+	await browse_catalog_product("Kitchen", 4)
 	open_first_store_listing()
 	var offer_store_id: int = app.selected_store_id
 	var offers_before: Dictionary = Storefront.offers_for_store(app.sim.state, offer_store_id, 4).duplicate(true)
@@ -105,7 +96,7 @@ func run() -> void:
 	await settle("phase2-market")
 
 	press("Order")
-	choices = controls(app, "OptionButton")
+	var choices := controls(app, "OptionButton")
 	select(choices[0], 3)
 	press("Edit Dispatch Settings")
 	choices = controls(app, "OptionButton")
@@ -115,8 +106,8 @@ func run() -> void:
 	expect(app.sim.state.shipping == 0 and not app.sim.state.auto_dispatch, "Fulfillment saves method and processing mode")
 	select(choices[0], 0)
 	press("Dashboard")
-	press("+7")
-	press("+7")
+	await confirm_advance(7)
+	await confirm_advance(7)
 	press("Order")
 	expect(has_label("Awaiting dispatch"), "Manual orders appear in the tracking queue")
 	select(controls(app, "OptionButton")[1], 1)
@@ -142,7 +133,7 @@ func run() -> void:
 		return
 	var tracked: Dictionary = app.sim.state.orders[shipped]
 	press("Dashboard")
-	press("+7")
+	await confirm_advance(7)
 	press("Order")
 	var tabs := controls(app, "OptionButton")
 	select(tabs[0], 1)
@@ -155,7 +146,8 @@ func run() -> void:
 	select(controls(app, "OptionButton")[0], 2)
 	expect(has_label("Checkout conversion") and has_label("Abandoned checkouts"), "Sales analytics opens")
 	select(controls(app, "OptionButton")[1], 0)
-	expect(has_label("Fri, 16 Jan 2026"), "Analytics window updates")
+	var completed_report: Dictionary = app.sim.report_completed(7)
+	expect(has_label(Calendar.format(int(completed_report.start))), "Analytics window updates to completed-day dates")
 	await settle("phase2-analytics")
 	print("Phase 2 UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)

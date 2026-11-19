@@ -330,6 +330,34 @@ func calendar_report(period: int, anchor: int) -> Dictionary:
 	var end := mini(state.day, boundaries.y)
 	return report(end - maxi(1, boundaries.x) + 1, end)
 
+func report_completed(days: int, end_day: int = 0) -> Dictionary:
+	var last_completed := int(state.get("day", 1)) - 1
+	var requested_end := end_day if end_day > 0 else last_completed
+	var end := mini(requested_end, last_completed)
+	if end < 1:
+		return _empty_completed_report()
+	return report(mini(maxi(1, days), end), end)
+
+func calendar_report_completed(period: int, anchor: int = 0) -> Dictionary:
+	var last_completed := int(state.get("day", 1)) - 1
+	if last_completed < 1:
+		return _empty_completed_report()
+	var requested_anchor := anchor if anchor > 0 else last_completed
+	var boundaries := Calendar.bounds(period, clampi(requested_anchor, 1, last_completed))
+	var start := maxi(1, boundaries.x)
+	var end := mini(last_completed, boundaries.y)
+	return report_completed(maxi(1, end - start + 1), end)
+
+func _empty_completed_report() -> Dictionary:
+	var result := entry()
+	result.merge({
+		"start": 0, "end": 0, "opening_cash": 0, "closing_cash": 0,
+		"inventory": 0, "goods_in_transit": 0, "equity_capital": 0, "retained": 0,
+		"assets": 0, "overdraft": 0, "customer_deposits": 0,
+		"supplier_payables": 0, "payables": 0, "liabilities": 0,
+	}, true)
+	return result
+
 func report(days: int, end_day: int = 0) -> Dictionary:
 	var end := clampi(end_day if end_day > 0 else state.day, 1, state.day)
 	var start := maxi(1, end - days + 1)

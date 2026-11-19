@@ -68,8 +68,8 @@ func run() -> void:
 	press("Advertising")
 	expect(has_label("Advertising Overview"), "Growth tab opens the advertising overview")
 	await settle("phase3-growth")
-	press("Campaign Manager")
-	expect(has_label("Campaign Manager"), "Overview opens the campaign manager")
+	press("Ads Manager")
+	expect(has_label("Ads Manager"), "Marketing opens the Ads Manager")
 	press("Create campaign")
 	inputs = controls(app, "LineEdit")
 	expect(inputs.size() >= 5, "Campaign detail form exposes its configuration fields")
@@ -88,7 +88,7 @@ func run() -> void:
 	press("Cancel")
 	expect(app.sim.state.advertising.campaigns[1].name == "Portrait launch",
 		"Cancel discards unsaved campaign edits")
-	press("Campaign Manager")
+	press("Ads Manager")
 	press("Manage campaign")
 	press("Pause")
 	expect(app.sim.state.advertising.campaigns[1].status == "paused", "Campaign pause button changes campaign state")
@@ -106,7 +106,7 @@ func run() -> void:
 		"Analytics dashboard uses recorded campaign data, KPI cards, trends, and accessible filters")
 	var expected_ad_spend := 0
 	for record in app.sim.state.advertising.history:
-		if int(record.day) >= maxi(1, app.sim.state.day - 6) and int(record.day) <= app.sim.state.day:
+		if int(record.day) >= maxi(1, app.sim.state.day - 7) and int(record.day) < app.sim.state.day:
 			expected_ad_spend += int(record.spend)
 	expect(controls(app, "Label").any(func(node): return node.text == app.money(expected_ad_spend)),
 		"Ads Analytics KPI spend reconciles to campaign history for the selected date range")

@@ -100,6 +100,14 @@ var navigation_drawer: PanelContainer
 var navigation_open := false
 var navigation_toggle: Button
 var bank_balance_label: Label
+var day_advance_pending := false
+var day_advance_processing := false
+var profile_sections_expanded := {"achievements": false, "technical": false}
+var transaction_details_expanded: Dictionary = {}
+var expanded_order_details: Dictionary = {}
+var preorder_show_history := false
+var ad_expanded_campaigns: Dictionary = {}
+var header_mobile_layout := false
 
 func _ready() -> void:
 	theme = Style.build()
@@ -298,6 +306,9 @@ func _update_responsive_layout() -> void:
 		inventory_parent.move_child(replacement, inventory_index)
 	var date_label := find_child("GameDate", true, false) as Label
 	if date_label != null and sim != null:
+		if screen == "Game" and (viewport_width < 600.0) != header_mobile_layout:
+			render()
+			return
 		date_label.text = _game_date_text(viewport_width)
 		date_label.tooltip_text = Calendar.format(sim.state.day) + " | " + Catalog.COUNTRIES[sim.state.country]
 	if page == "Profile":
@@ -310,15 +321,15 @@ func _update_responsive_layout() -> void:
 		var horizontal_margin := 20 if viewport_width >= 900.0 else 12
 		page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
 	if is_instance_valid(page_grid):
-		page_grid.columns = 2 if viewport_width >= 900.0 else 1
+		page_grid.columns = 2 if viewport_width >= 768.0 else 1
 		_reflow_page_cards()
 	if is_instance_valid(navigation_drawer):
 		var drawer_width := clampf(viewport_width * 0.78, 260.0, 320.0)
 		navigation_drawer.offset_right = drawer_width
 	if is_instance_valid(navigation_toggle):
-		navigation_toggle.custom_minimum_size.x = 72 if viewport_width < 600.0 else 92
+		navigation_toggle.custom_minimum_size.x = 52 if viewport_width < 600.0 else 76
 	if is_instance_valid(bank_balance_label):
-		bank_balance_label.custom_minimum_size.x = 128 if viewport_width < 600.0 else 245
+		bank_balance_label.custom_minimum_size.x = 112 if viewport_width < 600.0 else 225
 		_refresh_bank_balance()
 	var kpis := find_child("DashboardKpis", true, false) as GridContainer
 	if kpis != null:
@@ -433,7 +444,8 @@ func has_form_edits() -> bool:
 			return true
 	return false
 
-func confirm_action(title: String, message: String, confirm_text: String, callback: Callable) -> void:
+func confirm_action(title: String, message: String, confirm_text: String, callback: Callable,
+		cancel_callback: Callable = Callable()) -> void:
 	if is_instance_valid(confirmation):
 		return
 	var dialog := ConfirmationDialog.new()
@@ -449,6 +461,13 @@ func confirm_action(title: String, message: String, confirm_text: String, callba
 	dialog.confirmed.connect(func():
 		dialog.hide()
 		callback.call()
+	)
+	dialog.canceled.connect(func():
+		if confirmation == dialog:
+			confirmation = null
+		dialog.hide()
+		if cancel_callback.is_valid():
+			cancel_callback.call()
 	)
 	dialog.visibility_changed.connect(func():
 		if not dialog.visible:
@@ -908,12 +927,30 @@ func profile_page() -> void:
 			refresh_view()
 		)
 	var career := card("Career Progression")
-	metric(career, "Career Level", "%d · %d XP" % [CEOProfile.level(ceo_profile), int(ceo_profile.get("xp", 0))], Style.GOLD)
+	var current_level := CEOProfile.level(ceo_profile)
+	var total_xp := int(ceo_profile.get("xp", 0))
+	var current_level_xp := posmod(total_xp, CEOProfile.LEVEL_XP)
+	metric(career, "Current Level", str(current_level), Style.GOLD)
 	metric(career, "Career Title", CEOProfile.progression_title(ceo_profile), Style.GOLD)
-	career.add_child(label("A progression label based on career level, not an employment claim.", 13, Style.MUTED))
-	metric(career, "XP Until Next Level", str(CEOProfile.xp_to_next_level(ceo_profile)))
+	metric(career, "Current XP", _grouped_integer(total_xp))
+	metric(career, "XP to Next Level", str(CEOProfile.xp_to_next_level(ceo_profile)))
+	var progress := ProgressBar.new()
+	progress.name = "CareerXPProgress"
+	progress.min_value = 0
+	progress.max_value = CEOProfile.LEVEL_XP
+	progress.value = current_level_xp
+	progress.show_percentage = false
+	progress.custom_minimum_size.y = 14
+	progress.tooltip_text = "%d / %d XP toward the next level" % [current_level_xp, CEOProfile.LEVEL_XP]
+	career.add_child(progress)
+	var next_title := CEOProfile.next_title(ceo_profile)
+	if not str(next_title.get("title", "")).is_empty():
+		metric(career, "Next Career Title", str(next_title.title))
+		metric(career, "Unlocks at Level", str(next_title.level))
+	else:
+		metric(career, "Progression", "Highest career title reached")
 	metric(career, "Personal Reputation", "%d / 100" % int(ceo_profile.get("personal_reputation", 0)))
-	var additional := card("Additional Information")
+	var additional := card("Career Statistics")
 	var company_records: Array = ceo_profile.get("companies", [])
 	var active_companies := 0
 	for company_record in company_records:
@@ -921,30 +958,40 @@ func profile_page() -> void:
 			active_companies += 1
 	var ceo_id := str(ceo_profile.get("ceo_id", ""))
 	var career_start := str(ceo_profile.get("career_start_date", ""))
-	metric(additional, "CEO ID", ceo_id if not ceo_id.is_empty() else "Not available")
 	metric(additional, "Career Start Date", career_start if not career_start.is_empty() else "Not available")
-	metric(additional, "Total Companies Founded", str(company_records.size()))
+	metric(additional, "Companies Founded", str(company_records.size()))
 	metric(additional, "Active Companies", str(active_companies))
+	var technical_toggle := action(additional,
+		"Hide CEO Details" if bool(profile_sections_expanded.get("technical", false)) else "Show CEO Details",
+		func():
+			profile_sections_expanded.technical = not bool(profile_sections_expanded.get("technical", false))
+			refresh_view()
+	)
+	technical_toggle.name = "ToggleTechnicalCEOProfileDetails"
+	if bool(profile_sections_expanded.get("technical", false)):
+		metric(additional, "CEO ID", ceo_id if not ceo_id.is_empty() else "Not available")
+		metric(additional, "Game ID", str(ceo_profile.get("game_id", "Not available")))
+		if not ceo_id.is_empty():
+			action(additional, "Copy CEO ID", func():
+				DisplayServer.clipboard_set(ceo_id)
+				set_notice("CEO ID copied.")
+		)
 	var achievements := card("Achievements")
 	var earned: Array = ceo_profile.get("achievements", [])
-	if earned.is_empty():
-		achievements.add_child(label("Achievements recognize career milestones.", 15, Style.MUTED))
-	for item in earned:
-		achievements.add_child(label("• %s" % _title_case(str(item.get("title", item.get("id", "Achievement")))), 15))
-	var finance_card := card("Personal Finance")
-	finance_card.add_child(label("Personal cash and net worth remain untracked. Known company-sale proceeds are recorded separately by currency.", 14, Style.MUTED))
-	var proceeds := CompanySale.known_sale_proceeds_by_currency(ceo_profile)
-	if proceeds.is_empty():
-		finance_card.add_child(label("No company sale proceeds have been recorded.", 14, Style.MUTED))
-	else:
-		var currencies: Array = proceeds.keys()
-		currencies.sort()
-		for currency in currencies:
-			metric(finance_card, "Known Sale Proceeds · %s" % str(currency), sale_money(int(proceeds[currency]), str(currency)), Style.GOLD)
-	for transaction in ceo_profile.get("personal_finance_ledger", []):
-		if transaction is Dictionary and str(transaction.get("type", "")) == "company_sale":
-			metric(finance_card, "%s · %s" % [str(transaction.get("company_name", "Company sale")), str(transaction.get("date", "Date unavailable"))], sale_money(int(transaction.get("amount", 0)), str(transaction.get("currency", ""))))
-	finance_card.add_child(label("Company funds and profit remain separate from personal finances.", 14, Style.MUTED))
+	achievements.add_child(label("%d achievements unlocked" % earned.size(), 13, Style.MUTED))
+	var achievement_toggle := action(achievements,
+		"Hide Achievements" if bool(profile_sections_expanded.get("achievements", false)) else "View Achievements",
+		func():
+			profile_sections_expanded.achievements = not bool(profile_sections_expanded.get("achievements", false))
+			refresh_view()
+	)
+	achievement_toggle.name = "ToggleAchievementDetails"
+	if bool(profile_sections_expanded.get("achievements", false)):
+		if earned.is_empty():
+			achievements.add_child(empty_state("No Achievements Yet", "Complete company and sales milestones to unlock achievements."))
+		else:
+			for item in earned:
+				achievements.add_child(label("• %s" % _achievement_summary(item), 14, Style.GOLD))
 	var companies := card("Owned Companies")
 	companies.add_child(label("Each company keeps separate operations, accounts, and save data.", 14, Style.MUTED))
 	for entry in ceo_profile.get("companies", []):
@@ -962,6 +1009,37 @@ func profile_page() -> void:
 		else:
 			action(company_row, "Switch", switch_company.bind(str(entry.get("company_id", ""))))
 	action(companies, "Start Another Company", start_new_game, true)
+
+func _achievement_summary(item: Dictionary) -> String:
+	var achievement_id := str(item.get("id", ""))
+	match achievement_id:
+		"company_registered": return "First company registered"
+		"company_expansion": return "Founded an additional company"
+		"first_sale": return "Completed first sale"
+		"market_expansion": return "Expanded into another market"
+		"bankruptcy_survivor": return "Navigated a company bankruptcy"
+	if achievement_id.begins_with("sales_"):
+		return "Lifetime sales milestone · %s threshold" % _grouped_integer(achievement_id.trim_prefix("sales_").to_int())
+	if achievement_id.begins_with("profit_"):
+		return "Lifetime profit milestone · %s threshold" % _grouped_integer(achievement_id.trim_prefix("profit_").to_int())
+	return _title_case(str(item.get("title", achievement_id if not achievement_id.is_empty() else "Achievement")))
+
+func _grouped_integer(value: int) -> String:
+	var text_value := str(absi(value))
+	var grouped := ""
+	for index in text_value.length():
+		if index > 0 and (text_value.length() - index) % 3 == 0:
+			grouped += ","
+		grouped += text_value.substr(index, 1)
+	return ("−" if value < 0 else "") + grouped
+
+func empty_state(title: String, description: String) -> VBoxContainer:
+	var state := VBoxContainer.new()
+	state.name = "EmptyState"
+	state.add_theme_constant_override("separation", 4)
+	state.add_child(label(title, 15, Style.TEXT))
+	state.add_child(label(description, 13, Style.MUTED))
+	return state
 
 func _title_case(value: String) -> String:
 	var words := value.split(" ", false)
@@ -1214,13 +1292,36 @@ func set_store_active(store_id: int, enabled: bool) -> void:
 
 func navigate(target: String) -> void:
 	# Older in-session or serialized navigation targets remain valid.
+	if target == "Company Management":
+		discard_form_then(func():
+			_reset_edit_modes()
+			page = "Business"
+			category_last_page["Business"] = "Business"
+			set_notice("")
+			render()
+		)
+		return
+	if target == "Product Catalogue":
+		discard_form_then(func():
+			_reset_edit_modes()
+			page = "Market"
+			category_last_page["Market"] = "Market"
+			show_new_store_form = false
+			set_notice("")
+			render()
+		)
+		return
 	if target == "Growth": target = "Advertising"
 	# Retain compatibility with the previous route label without changing saves.
 	if target == "Store Management": target = "Management"
 	if target == "Inventory Management": target = "My Products"
 	if target == "Company Management": target = "Business"
 	if target == "Campaign Management": target = "Campaign Manager"
+	if target == "Ads Manager": target = "Campaign Manager"
 	if target == "Ads Analytics": target = "Advertising Analytics"
+	if target == "Expenses": target = "Expense Management"
+	if target == "Statements": target = "Finance Statements"
+	if target == "Inbound Stock": target = "Inbound Stock"
 	if target == "Order": target = "Orders"
 	if target in NAV:
 		if target == primary_category(page):
@@ -1240,12 +1341,12 @@ func navigate(target: String) -> void:
 	)
 
 func primary_category(target: String) -> String:
-	if target in ["Market", "My Products", "Management", "Store Listings"]: return "Market"
+	if target in ["Market", "Inbound Stock", "Supplier Relationships", "Supplier Returns"]: return "Market"
+	if target in ["My Products", "Management", "Store Listings", "Business", "Company Sale", "Store Profitability"]: return "Business"
 	if target in ["Orders", "Pre-orders"]: return "Order"
 	if target in ["Advertising", "Campaign Manager", "Campaign Details", "Advertising Analytics"]: return "Marketing"
 	if target == "Marketing": return "Marketing"
-	if target in ["Business", "Company Sale"]: return "Business"
-	if target in ["Finance", "Expense Management", "Store Profitability"]: return "Finance"
+	if target in ["Finance", "Finance Statements", "Expense Management"]: return "Finance"
 	if target == "Profile": return "Profile"
 	return "Dashboard"
 
@@ -1275,44 +1376,89 @@ func _reset_edit_modes() -> void:
 	display_settings_editing = false
 
 func primary_navigation(parent: Node) -> Button:
+	header_mobile_layout = size.x < 600.0
 	var heading := row(parent)
 	var menu_button := action(heading, "Menu", toggle_navigation_drawer, false)
 	menu_button.name = "NavigationMenuButton"
-	menu_button.custom_minimum_size = Vector2(72 if size.x < 600.0 else 92, 48)
+	menu_button.custom_minimum_size = Vector2(52 if size.x < 600.0 else 76, 46)
 	menu_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	menu_button.tooltip_text = "Open navigation menu"
 	_apply_drawer_icon(menu_button, DRAWER_ICON_PATHS.Menu, 20)
 	navigation_toggle = menu_button
 	var viewport_width := size.x
-	var date_text := _game_date_text(viewport_width)
-	var game_date := label(date_text, 13 if viewport_width < 600.0 else 14, Style.MUTED)
-	game_date.name = "GameDate"
-	game_date.custom_minimum_size.x = 0
-	game_date.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	game_date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	game_date.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	heading.add_child(game_date)
 	var balance := label("", 12 if viewport_width < 600.0 else 14, Style.GOLD)
 	balance.name = "CompanyBankBalance"
 	balance.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	balance.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	balance.size_flags_horizontal = Control.SIZE_SHRINK_END
-	balance.custom_minimum_size.x = 152 if viewport_width < 600.0 else 245
+	balance.custom_minimum_size.x = 112 if viewport_width < 600.0 else 225
 	balance.autowrap_mode = TextServer.AUTOWRAP_OFF
 	balance.clip_text = false
 	balance.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	heading.add_child(balance)
 	bank_balance_label = balance
 	_refresh_bank_balance()
+	if viewport_width < 600.0:
+		var date_row := row(parent)
+		var mobile_date := label(_game_date_text(viewport_width), 12, Style.MUTED)
+		mobile_date.name = "GameDate"
+		mobile_date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		mobile_date.autowrap_mode = TextServer.AUTOWRAP_OFF
+		mobile_date.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		mobile_date.tooltip_text = _game_date_text(viewport_width)
+		date_row.add_child(mobile_date)
+	else:
+		var desktop_date := label(_game_date_text(viewport_width), 14, Style.MUTED)
+		desktop_date.name = "GameDate"
+		desktop_date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		desktop_date.autowrap_mode = TextServer.AUTOWRAP_OFF
+		heading.add_child(desktop_date)
+		heading.move_child(desktop_date, 1)
+		desktop_date.tooltip_text = _game_date_text(viewport_width)
 	_create_navigation_drawer()
 	return menu_button
 
 func _game_date_text(viewport_width: float) -> String:
 	var country: String = Catalog.COUNTRIES[int(sim.state.country)]
-	if viewport_width < 600.0:
-		var date := Calendar.date_at(sim.state.day)
-		return "D%d · %d %s | %s" % [sim.state.day, int(date.day), str(Calendar.MONTHS[int(date.month) - 1]), country]
-	return "%s | %s" % [Calendar.format(sim.state.day), country]
+	return "Day %d · %s | %s" % [sim.state.day, Calendar.format(sim.state.day), country]
+
+func advance_day_controls(parent: Node) -> void:
+	var controls := row(parent)
+	controls.name = "GlobalAdvanceDayControls"
+	controls.add_theme_constant_override("separation", 8)
+	var title := label("Advance Day", 13, Style.GOLD)
+	title.name = "AdvanceDayLabel"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	controls.add_child(title)
+	for days in [1, 2, 7, 30]:
+		var button := action(controls, "+%d" % days, request_advance_days.bind(days), days == 1)
+		button.name = "AdvanceDays%d" % days
+		button.custom_minimum_size = Vector2(48 if size.x < 600.0 else 64, 42)
+		button.size_flags_horizontal = Control.SIZE_SHRINK_END
+		button.disabled = day_advance_pending or day_advance_processing
+
+func request_advance_days(days: int) -> void:
+	if sim == null or day_advance_pending or day_advance_processing or days not in [1, 2, 7, 30]:
+		return
+	day_advance_pending = true
+	var current_day := int(sim.state.day)
+	var destination_day := current_day + days
+	var duration := "%d %s" % [days, "day" if days == 1 else "days"]
+	confirm_action("Advance %s?" % duration,
+		"Current day: Day %d\nDestination: Day %d\n\nAdvancing runs simulation events, including sales, orders, inventory, advertising, deliveries, and operating costs." % [current_day, destination_day],
+		"Advance Day", Callable(self, "_confirm_advance_days").bind(days),
+		Callable(self, "_cancel_advance_confirmation"))
+
+func _confirm_advance_days(days: int) -> void:
+	if day_advance_processing:
+		return
+	day_advance_pending = false
+	day_advance_processing = true
+	advance(days)
+
+func _cancel_advance_confirmation() -> void:
+	day_advance_pending = false
 
 func toggle_navigation_drawer() -> void:
 	if not is_instance_valid(navigation_overlay):
@@ -1457,11 +1603,11 @@ func secondary_navigation(parent: Node) -> void:
 	var category := primary_category(page)
 	var routes: Array = []
 	match category:
-		"Market": routes = [["Product Catalogue", "Market"], ["Inventory Management", "My Products"], ["Store Management", "Management"]]
+		"Market": routes = [["Product Catalogue", "Market"], ["Inbound Stock", "Inbound Stock"], ["Supplier Relationships", "Supplier Relationships"], ["Supplier Returns", "Supplier Returns"]]
 		"Order": routes = [["Customer Orders", "Orders"], ["Pre-orders", "Pre-orders"], ["Returns and Service", "Returns & Service"]]
-		"Business": routes = [["Company Management", "Business"]]
-		"Marketing": routes = [["Overview", "Advertising"], ["Campaign Management", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
-		"Finance": routes = [["Statements", "Finance"], ["Expense Management", "Expense Management"], ["Store Profitability", "Store Profitability"]]
+		"Business": routes = [["Company Management", "Company Management"], ["Store Management", "Management"], ["Inventory Management", "My Products"], ["Store Profitability", "Store Profitability"]]
+		"Marketing": routes = [["Overview", "Advertising"], ["Ads Manager", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
+		"Finance": routes = [["Dashboard", "Finance"], ["Statements", "Finance Statements"], ["Expenses", "Expense Management"]]
 		_: return
 	var scroller := ScrollContainer.new()
 	scroller.name = "SecondaryNavigationScroll"
@@ -1483,6 +1629,8 @@ func secondary_navigation(parent: Node) -> void:
 		elif target == "Pre-orders": selected = page == "Pre-orders"
 		elif target == "Customer Orders": selected = page == "Orders" and orders_tab != 1
 		elif target == "Store Profitability": selected = page == "Store Profitability"
+		elif target == "Finance Statements": selected = page == "Finance Statements"
+		elif target == "Company Management": selected = page == "Business"
 		else: selected = page == target
 		var tab := secondary_tab(strip, title, route_secondary.bind(target), selected)
 		tab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -1536,16 +1684,23 @@ func render() -> void:
 		masthead.add_child(label("ONLINE BUSINESS TYCOON", 13, Style.GOLD))
 	if screen == "Game":
 		primary_navigation(masthead)
+		advance_day_controls(masthead)
 		var heading := row(masthead)
 		heading.name = "PageHeading"
 		var page_title := page
 		match page:
+			"Market": page_title = "Product Catalogue"
 			"Business": page_title = "Company Management"
 			"Management": page_title = "Store Management"
 			"My Products": page_title = "Inventory Management"
 			"Advertising": page_title = "Marketing"
-			"Campaign Manager": page_title = "Campaign Management"
+			"Campaign Manager": page_title = "Ads Manager"
 			"Advertising Analytics": page_title = "Ads Analytics"
+			"Finance Statements": page_title = "Statements"
+			"Expense Management": page_title = "Expenses"
+			"Inbound Stock": page_title = "Inbound Stock"
+			"Supplier Relationships": page_title = "Supplier Relationships"
+			"Supplier Returns": page_title = "Supplier Returns"
 		var title := label(page_title, 26 if viewport_width < 600.0 else 30)
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		heading.add_child(title)
@@ -1553,7 +1708,7 @@ func render() -> void:
 		Menu.brand(self, masthead)
 	else:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
-			"Campaign Manager": "Campaign Management", "Campaign Details": "Campaign Details", "Company Selection": "Choose a Company",
+			"Campaign Manager": "Ads Manager", "Campaign Details": "Campaign Details", "Company Selection": "Choose a Company",
 			"Advertising Analytics": "Ads Analytics", "Management": "Store Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
 		"CEO identity conflict": "Identity choice", "New Game": "Create a Game"}
 		masthead.add_child(label(titles.get(screen, screen), 30))
@@ -1575,7 +1730,7 @@ func render() -> void:
 	page_wide = stack(body, 12)
 	page_wide.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_grid = GridContainer.new()
-	page_grid.columns = 2 if size.x >= 900.0 else 1
+	page_grid.columns = 2 if size.x >= 768.0 else 1
 	page_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_grid.add_theme_constant_override("h_separation", 18)
 	page_grid.add_theme_constant_override("v_separation", 18)
@@ -1609,6 +1764,7 @@ func render() -> void:
 		"Pre-orders": Operations.preorders(self)
 		"Business": business()
 		"Finance": finance()
+		"Finance Statements": finance_statements()
 		"Expense Management": expense_management()
 		"Profile": profile_page()
 		"Advertising": AdsView.overview(self)
@@ -1618,6 +1774,9 @@ func render() -> void:
 		"Management": StoresView.management(self)
 		"Store Profitability": StoresView.profitability(self)
 		"Store Listings": StoresView.listings(self)
+		"Inbound Stock": Market.inbound_stock(self)
+		"Supplier Relationships": Market.supplier_relationships(self)
+		"Supplier Returns": Market.supplier_returns_page(self)
 	_finish_responsive_content()
 
 func setup() -> void:
@@ -1670,7 +1829,7 @@ func new_game_identity() -> void:
 	action(details, "Back", func(): show_screen("Title"))
 
 func dashboard() -> void:
-	var totals := sim.report(sim.state.day)
+	var totals := sim.report_completed(maxi(1, sim.state.day - 1))
 	var overview := wide_card(sim.state.company)
 	overview.add_child(label(sim.state.owner + ", CEO", 16, Style.MUTED))
 	var active_marketplaces := 0
@@ -1688,7 +1847,6 @@ func dashboard() -> void:
 	kpis.add_theme_constant_override("v_separation", 8)
 	kpis.name = "DashboardKpis"
 	overview.add_child(kpis)
-	_add_kpi(kpis, "Bank Balance", money(totals.closing_cash), Style.GOLD)
 	_add_kpi(kpis, "Lifetime net sales", money(totals.sales - totals.refunds))
 	_add_kpi(kpis, "Lifetime net profit", money(Sim.net(totals)), profit_color(Sim.net(totals)))
 	_add_kpi(kpis, "Orders fulfilled", str(totals.channels[0].orders + totals.channels[1].orders + totals.channels[2].orders))
@@ -1697,7 +1855,28 @@ func dashboard() -> void:
 	_add_kpi(kpis, "Marketplace stores · Websites", "%d · %d" % [active_marketplaces, active_websites])
 	_add_kpi(kpis, "Active campaigns · Lifetime spend", "%d · %s" % [active_campaigns, money(totals.advertising)])
 	page_wide.add_child(InventoryOverview.build(sim, size.x < 600.0))
-	action(overview, "My Products", navigate.bind("My Products"))
+	var products_button := action(overview, "My Products   ›", navigate.bind("My Products"))
+	products_button.name = "DashboardMyProducts"
+	products_button.icon = load(NAV_ICON_PATHS.Market) as Texture2D
+	products_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var channel_grid := GridContainer.new()
+	channel_grid.name = "DashboardChannelSummaries"
+	channel_grid.columns = 2 if size.x >= 600.0 else 1
+	channel_grid.add_theme_constant_override("h_separation", 12)
+	channel_grid.add_theme_constant_override("v_separation", 12)
+	page_wide.add_child(channel_grid)
+	var store_card := _create_card(channel_grid, "Store Management")
+	store_card.name = "DashboardStoreManagement"
+	store_card.add_child(label("Create, manage and monitor your stores.", 14, Style.MUTED))
+	var store_button := action(store_card, "Manage Stores", navigate.bind("Management"), true)
+	store_button.icon = load(NAV_ICON_PATHS.Business) as Texture2D
+	store_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var sourcing_card := _create_card(channel_grid, "Product Sourcing")
+	sourcing_card.name = "DashboardProductSourcing"
+	sourcing_card.add_child(label("Discover products, compare suppliers and purchase inventory.", 14, Style.MUTED))
+	var sourcing_button := action(sourcing_card, "Browse Product Catalogue", navigate.bind("Product Catalogue"))
+	sourcing_button.icon = load(NAV_ICON_PATHS.Market) as Texture2D
+	sourcing_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	var alerts: VBoxContainer = card("Business Alerts")
 	if active_marketplaces == 0 and active_websites == 0:
 		alerts.add_child(label("Create a marketplace store or website to start selling.", 14, Style.GOLD))
@@ -1720,20 +1899,7 @@ func dashboard() -> void:
 		alerts.add_child(label("%d supplier shipments are delayed." % delayed_shipments, 14, Style.GOLD))
 	if alerts.get_child_count() == 1:
 		alerts.add_child(label("No business alerts.", 14, Style.MUTED))
-	var time := card("Advance Time")
-	time.add_child(label("Each simulated day generates orders and charges operating expenses.", 14, Style.MUTED))
-	var controls := row(time)
-	for days in [1, 2, 7, 30]:
-		action(controls, "+%d" % days, advance.bind(days), days == 1)
-	var has_listing := false
-	for item in sim.state.products.values():
-		if item.listed:
-			has_listing = true
-	if not has_listing:
-		var next := card("Open Your Store")
-		next.add_child(label("Choose a product in Market, purchase stock from a supplier, then publish your listing.", 15, Style.MUTED))
-		action(next, "Browse Product Catalogue", navigate.bind("Market"), true)
-	channel_cards(totals, "Lifetime")
+	channel_cards(totals, "Completed days · lifetime")
 
 func _add_kpi(parent: GridContainer, caption: String, value: String, color: Color = Style.TEXT) -> void:
 	var panel := PanelContainer.new()
@@ -1746,34 +1912,55 @@ func _add_kpi(parent: GridContainer, caption: String, value: String, color: Colo
 	content.add_child(label(value, 16, color))
 
 func advance(days: int) -> void:
+	if sim == null or days not in [1, 2, 7, 30]:
+		day_advance_processing = false
+		return
 	sim.advance(days)
 	report_end = 0
 	var result := sim.report(days, sim.state.day - 1)
 	var orders: int = result.channels[0].orders + result.channels[1].orders
 	var placed: int = result.channels[0].placed + result.channels[1].placed
 	persist("Advanced %d %s · %d placed · %d delivered" % [days, "day" if days == 1 else "days", placed, orders])
+	day_advance_processing = false
 	render()
 
 func channel_cards(report: Dictionary, scope: String) -> void:
 	var channels := card("Sales by Channel")
-	channels.add_child(label(scope, 14, Style.MUTED))
-	for channel in Catalog.FEES.size():
-		if channel > 0:
-			divider(channels)
-		var channel_title: String = Catalog.CHANNELS[channel]
-		channels.add_child(label(channel_title, 17, Style.GOLD))
+	channels.add_child(label(scope, 12, Style.MUTED))
+	var summaries := GridContainer.new()
+	summaries.name = "SalesChannelSummaryGrid"
+	summaries.columns = 2 if size.x >= 600.0 else 1
+	summaries.add_theme_constant_override("h_separation", 12)
+	summaries.add_theme_constant_override("v_separation", 8)
+	channels.add_child(summaries)
+	for channel in 2:
 		var totals: Dictionary = report.channels[channel]
-		if not sim.channel_enabled(channel) and totals.orders == 0 and totals.hosting == 0 and totals.shipping == 0 and totals.refunds == 0:
-			channels.add_child(label("Inactive", 14, Style.MUTED))
-			continue
-		metric(channels, "%d delivered · Net sales" % totals.orders, money(totals.sales - totals.refunds))
-		var contribution: int = totals.sales - totals.refunds - totals.cogs - totals.fees - totals.hosting - totals.shipping
-		metric(channels, "After channel costs", money(contribution), profit_color(contribution))
-	if report.channels[2].orders > 0 or report.channels[2].sales != 0:
-		divider(channels)
-		metric(channels, "Prototype combined sales", money(report.channels[2].sales))
-	if report.legacy != 0:
-		channels.add_child(label("Prototype expenses appear in the Income Statement without a channel breakdown.", 13, Style.MUTED))
+		var title := "Marketplace" if channel == 0 else "Website"
+		var summary: PanelContainer = PanelContainer.new()
+		summary.name = "SalesChannel%d" % channel
+		summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		summary.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 9, 10))
+		summaries.add_child(summary)
+		var content := stack(summary, 5)
+		var heading := row(content)
+		var icon_path: String = NAV_ICON_PATHS.Market if channel == 0 else NAV_ICON_PATHS.Business
+		var channel_icon := TextureRect.new()
+		channel_icon.texture = load(icon_path) as Texture2D
+		channel_icon.custom_minimum_size = Vector2(18, 18)
+		channel_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		channel_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		heading.add_child(channel_icon)
+		var channel_name := label(title, 16, Style.GOLD)
+		channel_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		heading.add_child(channel_name)
+		metric(content, "Orders", str(int(totals.orders)))
+		metric(content, "Net Sales", money(int(totals.sales) - int(totals.refunds)))
+		var contribution: int = int(totals.sales) - int(totals.refunds) - int(totals.cogs) - int(totals.fees) - int(totals.hosting) - int(totals.shipping)
+		metric(content, "After Channel Costs", money(contribution), profit_color(contribution))
+	if report.channels.size() > 2 and (report.channels[2].orders > 0 or report.channels[2].sales != 0):
+		metric(channels, "Historical Combined-Channel Sales", money(int(report.channels[2].sales)))
+	if int(report.get("legacy", 0)) != 0:
+		channels.add_child(label("Historical prototype costs remain in the Income Statement without a channel breakdown.", 12, Style.MUTED))
 
 func open_product(product: int) -> void:
 	discard_form_then(func():
@@ -1801,7 +1988,7 @@ func price_cents(value: String) -> int:
 	return roundi(price * 100.0)
 
 func business() -> void:
-	var profile := card("Company Management")
+	var profile := card("Company Details")
 	metric(profile, "Owned Stores", str(sim.state.stores.size()))
 	metric(profile, "Registration", "Active")
 	metric(profile, "Difficulty", Catalog.DIFFICULTIES[sim.state.difficulty])
@@ -1848,14 +2035,6 @@ func business() -> void:
 			refresh_view()
 		)
 	company_sale_panel(profile)
-	action(card("Store Management"), "Store Management", navigate.bind("Management"), true)
-	action(card("Inventory Management"), "Inventory Management", navigate.bind("My Products"))
-	action(card("Marketing"), "Marketing", navigate.bind("Marketing"))
-	var saves := card("Local Progress")
-	saves.add_child(label("Progress saves automatically when you make changes or advance time.", 14, Style.MUTED))
-	var controls := row(saves)
-	action(controls, "Manage Saves", open_screen.bind("Save"))
-	action(controls, "Load Game", open_screen.bind("Load"))
 
 func company_sale_panel(parent: Control) -> void:
 	parent.add_child(label("Sell Company", 18, Style.GOLD))
@@ -1878,36 +2057,41 @@ func company_sale_panel(parent: Control) -> void:
 	action(parent, "Sell Company", sell_current_company, true)
 
 func finance() -> void:
-	var anchor: int = report_end if report_end > 0 else sim.state.day
+	var anchor: int = report_end if report_end > 0 else maxi(1, sim.state.day - 1)
 	var boundaries := Calendar.bounds(period, anchor)
-	var report := sim.calendar_report(period, anchor)
+	var report := FinanceManagement.completed_period_report(sim, period, anchor)
 	financial_dashboard(report)
-	var controls := card("Financial Statements")
+	var controls := card("Reporting Period")
 	var selection := dropdown(controls, Calendar.PERIODS, period)
-	selection.item_selected.connect(func(index: int):
-		period = index
-		render()
-	)
-	var scope := Calendar.format_range(boundaries.x, boundaries.y)
-	controls.add_child(label(scope, 15, Style.GOLD))
-	if report.start != boundaries.x or report.end != boundaries.y or report.end == sim.state.day:
-		controls.add_child(label("Recorded: %s%s" % [Calendar.format_range(report.start, report.end),
-			" · In progress" if report.end == sim.state.day else ""], 13, Style.MUTED))
+	selection.item_selected.connect(func(index: int): period = index; render())
+	controls.add_child(label("Completed days · %s" % report_range_label(report), 13, Style.MUTED))
 	var dates := row(controls)
 	var older := action(dates, "Previous", change_report_end.bind(boundaries.x - 1))
-	older.disabled = boundaries.x <= 1
+	older.disabled = report.end <= 1
 	var newer := action(dates, "Next", change_report_end.bind(boundaries.y + 1))
-	newer.disabled = boundaries.y >= sim.state.day
+	newer.disabled = report.end >= sim.state.day - 1
+	action(controls, "View Statements", func(): navigate("Finance Statements"))
+	channel_cards(report, Calendar.format_range(report.start, report.end))
+
+func finance_statements() -> void:
+	var controls := card("Statements")
 	var selector := dropdown(controls, STATEMENTS, statement)
-	selector.item_selected.connect(func(index: int):
-		statement = index
-		render()
-	)
+	selector.item_selected.connect(func(index: int): statement = index; render())
+	var anchor: int = report_end if report_end > 0 else maxi(1, sim.state.day - 1)
+	var boundaries := Calendar.bounds(period, anchor)
+	var report := FinanceManagement.completed_period_report(sim, period, anchor)
+	var selection := dropdown(controls, Calendar.PERIODS, period)
+	selection.item_selected.connect(func(index: int): period = index; render())
+	controls.add_child(label("Completed days · %s" % report_range_label(report), 13, Style.MUTED))
+	var dates := row(controls)
+	var previous := action(dates, "Previous", change_report_end.bind(boundaries.x - 1))
+	previous.disabled = report.end <= 1
+	var next := action(dates, "Next", change_report_end.bind(boundaries.y + 1))
+	next.disabled = report.end >= sim.state.day - 1
 	match statement:
 		0: income_statement(report)
 		1: balance_sheet(report)
 		2: cash_flow(report)
-	channel_cards(report, scope)
 
 func financial_dashboard(report: Dictionary) -> void:
 	var view := card("Financial Dashboard")
@@ -1921,7 +2105,7 @@ func financial_dashboard(report: Dictionary) -> void:
 		["Company Cash", money(summary.cash)], ["Revenue", money(summary.revenue)],
 		["Expenses", money(-summary.expenses)], ["Gross Profit", money(summary.gross_profit)],
 		["Net Profit", money(summary.net_profit)],
-		["Receivables", money(summary.receivables)], ["Supplier Payables", money(summary.payables)],
+		["Overhead", money(summary.overhead)], ["Supplier Payables", money(summary.payables)],
 		["Customer Deposits Held", money(summary.customer_deposits)],
 	]:
 		var metric_card := PanelContainer.new()
@@ -1932,11 +2116,10 @@ func financial_dashboard(report: Dictionary) -> void:
 		content.add_child(label(str(item[1]), 16, Style.GOLD))
 		metric_card.add_child(content)
 		kpis.add_child(metric_card)
-	view.add_child(label("Delivered sales settle under existing revenue rules. Supplier purchases may be paid in cash or financed through trade credit, which creates a payable until repayment or return adjustment. Customer deposits remain a liability until delivery or refund.", 13, Style.MUTED))
-	var forecast := card("Known Fixed-Cost Estimate")
-	metric(forecast, "Known next-day fixed costs", money(-int(summary.known_fixed_costs)))
+	var forecast := card("Cash Forecast")
+	metric(forecast, "Known next-day fixed costs", money(-int(summary.overhead)))
 	metric(forecast, "Cash after known fixed costs", money(int(summary.cash_after_known_fixed_costs)), profit_color(int(summary.cash_after_known_fixed_costs)))
-	forecast.add_child(label("Informational estimate only. It excludes future sales, variable expenses, advertising, new supplier orders, and unsettled receipts. Forecast cash is not available cash.", 13, Style.MUTED))
+	forecast.add_child(label("Informational estimate only; it excludes future sales, variable expenses, advertising, new supplier orders, and unsettled receipts. Forecast cash is not available cash.", 13, Style.MUTED))
 	var trend := card("Financial Trends · Last 7 Recorded Days")
 	var daily := FinanceManagement.daily_totals(sim.state, maxi(1, sim.state.day - 7), sim.state.day - 1)
 	var trend_labels: Array[String] = []
@@ -1971,16 +2154,16 @@ func expense_management() -> void:
 		period = index
 		render()
 	)
-	var anchor: int = report_end if report_end > 0 else sim.state.day
+	var anchor: int = report_end if report_end > 0 else maxi(1, sim.state.day - 1)
 	var boundaries := Calendar.bounds(period, anchor)
-	var report := sim.calendar_report(period, anchor)
-	var scope := Calendar.format_range(boundaries.x, boundaries.y)
+	var report := FinanceManagement.completed_period_report(sim, period, anchor)
+	var scope := report_range_label(report)
 	controls.add_child(label(scope, 15, Style.GOLD))
 	var dates := row(controls)
 	var older := action(dates, "Previous", change_report_end.bind(boundaries.x - 1))
 	older.disabled = boundaries.x <= 1
 	var newer := action(dates, "Next", change_report_end.bind(boundaries.y + 1))
-	newer.disabled = boundaries.y >= sim.state.day
+	newer.disabled = report.end >= sim.state.day - 1
 	var categories := card("Expense Breakdown")
 	var entries := FinanceManagement.expense_categories(report)
 	if entries.is_empty():
@@ -1992,23 +2175,53 @@ func expense_management() -> void:
 	if inventory_paid_total > 0:
 		categories.add_child(label("Inventory purchase and freight cash payments are tracked separately from expenses because unsold inventory remains an asset; Cost of Goods Sold is recognized when units sell.", 13, Style.MUTED))
 		metric(categories, "Inventory and freight cash payments", money(-inventory_paid_total))
-	var history := card("Daily Ledger History")
-	var daily := FinanceManagement.daily_totals(sim.state, report.start, report.end)
-	if daily.is_empty():
-		history.add_child(label("No recorded daily entries are available for this period.", 14, Style.MUTED))
-	for entry in daily:
+	var history := card("Transactions")
+	var transactions := FinanceManagement.transaction_rows(sim.state, report.start, report.end)
+	if transactions.is_empty():
+		history.add_child(empty_state("No Transactions", "No completed-day activity is available for this period."))
+	for entry in transactions:
+		var day := int(entry.day)
 		var day_card := PanelContainer.new()
 		day_card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 8, 10))
 		var day_content := VBoxContainer.new()
-		day_content.add_child(label(Calendar.format(int(entry.day)), 15, Style.GOLD))
-		metric(day_content, "Sales · Total expenses", "%s · %s" % [money(int(entry.sales)), money(-int(entry.expenses))])
-		metric(day_content, "Net profit · Cash movement", "%s · %s" % [money(int(entry.net_profit)), money(int(entry.cash_change))])
+		var summary := row(day_content)
+		var day_label := label(Calendar.format(day), 14, Style.GOLD)
+		day_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		summary.add_child(day_label)
+		var expanded := bool(transaction_details_expanded.get(day, false))
+		var detail_button := action(summary, "Hide Details" if expanded else "Details", func():
+			transaction_details_expanded[day] = not bool(transaction_details_expanded.get(day, false))
+			render()
+		)
+		detail_button.custom_minimum_size = Vector2(78, 40)
+		for group in ["incoming", "outgoing", "other"]:
+			var records: Array = entry.get(group, [])
+			var amount := _transaction_group_total(records)
+			var caption := "Money In" if group == "incoming" else "Money Out" if group == "outgoing" else "Other"
+			metric(day_content, caption, money(amount), Style.GREEN if group == "incoming" and amount > 0 else Style.RED if amount < 0 else Style.TEXT)
+		if expanded:
+			for group in ["incoming", "outgoing", "other"]:
+				var heading := "Money In" if group == "incoming" else "Money Out" if group == "outgoing" else "Other"
+				for transaction in entry.get(group, []):
+					metric(day_content, "%s · %s" % [heading, str(transaction.label)], money(int(transaction.amount)), profit_color(int(transaction.amount)))
 		day_card.add_child(day_content)
 		history.add_child(day_card)
+
+func _transaction_group_total(records: Array) -> int:
+	var total := 0
+	for record in records:
+		if record is Dictionary:
+			total += int(record.get("amount", 0))
+	return total
 
 func change_report_end(day: int) -> void:
 	report_end = day
 	render()
+
+func report_range_label(report: Dictionary) -> String:
+	if int(report.get("end", 0)) < 1:
+		return "No completed days"
+	return Calendar.format_range(int(report.get("start", 0)), int(report.get("end", 0)))
 
 func income_statement(report: Dictionary) -> void:
 	var view := card(STATEMENTS[0])
@@ -2036,7 +2249,7 @@ func income_statement(report: Dictionary) -> void:
 
 func balance_sheet(report: Dictionary) -> void:
 	var view := card(STATEMENTS[1])
-	view.add_child(label("As of %s" % Calendar.format(report.end), 14, Style.MUTED))
+	view.add_child(label("As of %s" % Calendar.format(report.end) if int(report.end) > 0 else "No completed-day balance yet", 14, Style.MUTED))
 	metric(view, "Bank Balance", money(report.closing_cash))
 	metric(view, "Inventory at cost", money(report.inventory))
 	metric(view, "Supplier goods in transit", money(report.goods_in_transit))

@@ -7,6 +7,7 @@ const Fulfillment = preload("res://fulfillment.gd")
 const Calendar = preload("res://game_calendar.gd")
 const Style = preload("res://corporate_theme.gd")
 const Offers = preload("res://offer_view.gd")
+const Finance = preload("res://finance_management.gd")
 
 static func management(app: Control) -> void:
 	var intro: VBoxContainer = app.card("Store Management · %s" % app.sim.state.company)
@@ -108,21 +109,67 @@ static func _website_summary(store: Dictionary) -> String:
 
 static func profitability(app: Control) -> void:
 	var summary: VBoxContainer = app.card("Store Profitability")
-	summary.add_child(app.label("Lifetime results by marketplace store and website. Shared company inventory costs are assigned to the order that consumes each unit.", 14, Style.MUTED))
+	summary.add_child(app.label("Completed-day results for each marketplace store and website. Inventory costs follow the units consumed by orders.", 14, Style.MUTED))
 	if app.sim.state.stores.is_empty():
 		summary.add_child(app.label("No stores or websites have been created yet.", 14, Style.MUTED))
 		app.secondary_tab(summary, "Open Store Management", app.navigate.bind("Management"), false)
 		return
+	var selection: OptionButton = app.dropdown(summary, Calendar.PERIODS, app.period)
+	selection.item_selected.connect(func(index: int):
+		app.period = index
+		app.report_end = 0
+		app.refresh_view()
+	)
+	var anchor := int(app.report_end) if int(app.report_end) > 0 else int(app.sim.state.day)
+	var selected_bounds := Calendar.bounds(app.period, clampi(anchor, 1, int(app.sim.state.day)))
+	var period_report := Finance.completed_period_report(app.sim, app.period, anchor)
+	var start_day := int(period_report.get("start", 0))
+	var end_day := int(period_report.get("end", 0))
+	var has_completed_days := start_day > 0 and end_day >= start_day
+	if not has_completed_days:
+		start_day = int(app.sim.state.day)
+		end_day = int(app.sim.state.day) - 1
+	var date_label := Calendar.format_range(start_day, end_day) if has_completed_days else Calendar.format_range(selected_bounds.x, selected_bounds.y)
+	summary.add_child(app.label(date_label, 15, Style.GOLD))
+	var dates: HBoxContainer = app.row(summary)
+	var previous: Button = app.action(dates, "Previous", change_profitability_period.bind(app, selected_bounds.x - 1))
+	previous.disabled = selected_bounds.x <= 1
+	var next: Button = app.action(dates, "Next", change_profitability_period.bind(app, selected_bounds.y + 1))
+	next.disabled = selected_bounds.y >= int(app.sim.state.day) - 1
+	if not has_completed_days:
+		summary.add_child(app.label("No completed days are available for this period yet. Current-day activity remains live but is not included in historical reports.", 14, Style.MUTED))
+	var total_profit := 0
+	var expanded_id := int(app.get_meta("expanded_profitability_store_id", -1))
 	for store in app.sim.state.stores:
-		var result: Dictionary = Stores.report(app.sim.state, int(store.id))
+		var result: Dictionary = Stores.report(app.sim.state, int(store.id), end_day, start_day)
 		var profit := int(result.sales) - int(result.refunds) - int(result.cogs) - int(result.fees) - int(result.shipping) - int(result.advertising) - int(result.setup) - int(result.operating)
+		total_profit += profit
 		var card: VBoxContainer = app.card(str(store.name))
 		var kind: String = Stores.MARKETPLACES[int(store.platform)] if int(store.type) == 0 and int(store.get("platform", -1)) in range(Stores.MARKETPLACES.size()) else _website_summary(store)
-		app.metric(card, "Destination · Status", "%s · %s" % [kind, "Active" if store.active else "Inactive"])
-		app.metric(card, "Net sales", app.money(int(result.sales) - int(result.refunds)))
-		app.metric(card, "Product and fulfillment costs", app.money(int(result.cogs) + int(result.fees) + int(result.shipping)))
-		app.metric(card, "Advertising · Setup · Operations", "%s · %s · %s" % [app.money(result.advertising), app.money(result.setup), app.money(result.operating)])
-		app.metric(card, "Net store profit", app.money(profit), app.profit_color(profit))
+		var is_expanded := int(store.id) == expanded_id
+		var toggle: Button = app.action(card, "Hide Breakdown" if is_expanded else "Expand Breakdown", func():
+			app.set_meta("expanded_profitability_store_id", -1 if is_expanded else int(store.id))
+			app.refresh_view()
+		)
+		toggle.custom_minimum_size.y = 44
+		app.metric(card, "Platform · Status", "%s · %s" % [kind, "Active" if store.active else "Inactive"])
+		app.metric(card, "Net Sales", app.money(int(result.sales) - int(result.refunds)))
+		app.metric(card, "Net Store Profit", app.money(profit), app.profit_color(profit))
+		if is_expanded:
+			app.divider(card)
+			app.metric(card, "Product & Fulfilment Costs", app.money(-(int(result.cogs) + int(result.fees) + int(result.shipping))))
+			app.metric(card, "Product Cost", app.money(-int(result.cogs)))
+			app.metric(card, "Channel Fees", app.money(-int(result.fees)))
+			app.metric(card, "Delivery Costs", app.money(-int(result.shipping)))
+			app.metric(card, "Advertising", app.money(-int(result.advertising)))
+			app.metric(card, "Setup Costs", app.money(-int(result.setup)))
+			app.metric(card, "Operating Costs", app.money(-int(result.operating)))
+	app.divider(summary)
+	app.metric(summary, "Total Store Profitability", app.money(total_profit), app.profit_color(total_profit))
+
+static func change_profitability_period(app: Control, day: int) -> void:
+	app.report_end = day
+	app.refresh_view()
 
 static func listings(app: Control) -> void:
 	var store := Stores.get_store(app.sim.state, app.selected_store_id)

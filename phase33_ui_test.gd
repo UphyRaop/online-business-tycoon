@@ -1,5 +1,7 @@
 extends "res://phase1_ui_test.gd"
 
+const MarketView = preload("res://market_view.gd")
+
 func run() -> void:
 	if OS.get_environment("OBT_ISOLATED_TEST_PROFILE") != "1" or not Slots.latest().is_empty():
 		push_error("Run Phase 3.3 UI checks with a fresh isolated profile.")
@@ -12,6 +14,11 @@ func run() -> void:
 	var fields := controls(app, "LineEdit")
 	expect(app.sim.state.stores.is_empty(), "New company starts with no marketplace stores or websites")
 	expect(app.sim.report(app.sim.state.day).closing_cash == app.sim.state.cash, "Dashboard Bank Balance uses the reconciled cash ledger balance")
+	press("Marketing")
+	var marketing_navigation := controls(app, "Button").filter(func(button): return button.is_visible_in_tree())
+	expect(marketing_navigation.any(func(button): return button.text == "Ads Manager")
+		and not marketing_navigation.any(func(button): return button.text in ["Campaign Manager", "Campaign Management"]),
+		"Marketing navigation presents Ads Manager without the retired Campaign Manager label")
 	var primary_names := ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]
 	var menu: Button = app.find_child("NavigationMenuButton", true, false)
 	if menu != null: menu.pressed.emit()
@@ -32,35 +39,40 @@ func run() -> void:
 	press("Market")
 	await process_frame
 	await process_frame
-	expect(has_label("Product Catalogue") and controls(app, "Button").any(func(button): return button.text == "View Details" and button.is_visible_in_tree()), "Market exposes the product catalogue and compact supplier details workflow")
-	var search_panel: Control = app.find_child("ProductSearchPanel", true, false)
-	var catalogue: Control = app.find_child("ProductCataloguePanel", true, false)
-	expect(search_panel != null and catalogue != null and search_panel.get_global_rect().position.y < catalogue.get_global_rect().position.y
-		and field_for_label("Search Product") != null,
-		"Search Product is immediately above Product Catalogue")
-	expect(has_label("Return Inventory to Supplier") and has_label("No unreserved purchased stock is eligible to return."),
-		"Supplier return controls appear in inventory management with a safe empty state")
-	var category_button: OptionButton = app.find_child("ProductCategorySelection", true, false)
-	select(category_button, 1)
-	var search: LineEdit = field_for_label("Search Product")
-	search.text = "Wireless Earbuds"
-	search.text_changed.emit(search.text)
-	var product_picker: OptionButton = app.find_child("ProductSelection", true, false)
-	expect(product_picker.item_count == 1 and product_picker.get_item_text(0) == "Wireless Earbuds · Electronics",
-		"Category and text filters isolate the expected catalog product")
-	select(product_picker, 0)
-	category_button = app.find_child("ProductCategorySelection", true, false)
-	search = field_for_label("Search Product")
-	product_picker = app.find_child("ProductSelection", true, false)
-	expect(category_button.get_item_text(category_button.selected) == "Electronics" and has_label("Select Product")
-		and has_label("Electronics"), "Selected category, product selection, and product details have a clear hierarchy")
-	search.text = "no-such-product"
-	search.text_changed.emit(search.text)
-	expect(product_picker.disabled and has_label("No products match this category and search. Choose another category or clear the search."),
-		"Product catalog shows a useful empty state when filters match no products")
-	search.text = "Wireless Earbuds"
-	search.text_changed.emit(search.text)
-	await settle("phase33-mobile-market")
+	expect(has_label("Product Catalogue") and app.find_child("ProductCategoryGrid", true, false) != null,
+		"Market starts with compact selectable product category cards")
+	press("Browse Electronics")
+	await process_frame
+	var search: LineEdit = app.find_child("CatalogueProductSearch", true, false)
+	var product_card: Control = app.find_child("CatalogueProduct_1", true, false)
+	expect(search != null and product_card != null and has_label("Starting Landed Cost") and has_label("Available Suppliers"),
+		"Selecting a category shows product cards with live supplier count and landed cost")
+	if search != null:
+		search.text = "no-such-product"
+		search.text_changed.emit(search.text)
+		expect(product_card != null and not product_card.is_visible_in_tree()
+			and has_label("No products match this search. Clear the search or return to Categories."),
+			"Product search filters category results and presents a useful empty state")
+		search.text = "Wireless Earbuds"
+		search.text_changed.emit(search.text)
+	if product_card != null:
+		var choose_product: Button
+		for candidate in controls(product_card, "Button"):
+			if candidate.text == "Choose Product":
+				choose_product = candidate
+				break
+		if choose_product != null: choose_product.pressed.emit()
+	await process_frame
+	await process_frame
+	expect(app.selected_product == 1 and app.find_child("CompactSupplierList", true, false) != null,
+		"Choosing a category product opens its supplier selection stage")
+	MarketView.inbound_stock(app)
+	expect(app.find_child("InboundStockPage", true, false) != null, "Inbound Stock is available as an in-page Market workflow")
+	MarketView.supplier_returns_page(app)
+	expect(app.find_child("SupplierReturnsPage", true, false) != null and app.find_child("SupplierReturnHistory", true, false) != null,
+		"Supplier return actions and history share one Supplier Returns page")
+	MarketView.supplier_relationships(app)
+	expect(app.find_child("SupplierRelationshipsPage", true, false) != null, "Supplier trust and credit accounts are available in Market relationships")
 	press("Order")
 	expect(app.page == "Orders" and has_label("Store Operations"), "Order opens the existing fulfillment workspace")
 	press("Pre-orders")
@@ -80,15 +92,17 @@ func run() -> void:
 	expect(app.ad_platform_filter == 0, "Advertising platform filter selects Meta Ads")
 	filters = controls(app, "OptionButton")
 	select(filters[2], 4)
-	expect(app.ad_status_filter == 3 and has_label("No campaigns match these filters"), "Status filters update analytics and retain a helpful empty state")
+	expect(app.ad_status_filter == 3 and has_label("No Matching Campaigns"), "Status filters update analytics and retain a helpful empty state")
 	press("Finance")
-	expect(app.page == "Finance" and has_label("Income Statement"), "Finance opens the Income Statement")
+	press("Statements")
+	expect(app.page == "Finance Statements" and has_label("Income Statement"), "Statements opens the selected Income Statement")
 	filters = controls(app, "OptionButton")
-	select(filters[1], 1)
+	select(filters[0], 1)
 	expect(has_label("Balance Sheet"), "Finance opens the Balance Sheet")
 	filters = controls(app, "OptionButton")
-	select(filters[1], 2)
+	select(filters[0], 2)
 	expect(has_label("Cash Flow Statement"), "Finance opens the Cash Flow Statement")
+	press("Business")
 	press("Store Profitability")
 	expect(has_label("No stores or websites have been created yet"), "Store Profitability has a clear empty state")
 	print("Phase 3.3 UI: %d failures" % failures)

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<meta name="color-scheme" content="dark">
+	<title>$GODOT_PROJECT_NAME</title>
+	$GODOT_HEAD_INCLUDE
+	<style>
+		:root {
+			color-scheme: dark;
+			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			--navy-950: #070c14; --navy-900: #0c1420; --navy-800: #111e2e;
+			--gold: #d9b468; --gold-bright: #f1d394; --ivory: #f1eee5; --muted: #b0bbc9;
+		}
+		* { box-sizing: border-box; }
+		html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+		body {
+			color: var(--ivory); background:
+				radial-gradient(ellipse at 72% 55%, rgba(31, 77, 117, .22), transparent 45%),
+				radial-gradient(ellipse at 16% 7%, rgba(47, 73, 102, .2), transparent 38%),
+				linear-gradient(135deg, var(--navy-950), var(--navy-900) 54%, #0b1724);
+			touch-action: manipulation;
+		}
+		#canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: transparent; }
+		.loader {
+			position: fixed; inset: 0; z-index: 2; display: grid; place-items: center;
+			padding: max(24px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left));
+			background:
+				linear-gradient(rgba(100, 132, 160, .035) 1px, transparent 1px),
+				linear-gradient(90deg, rgba(100, 132, 160, .035) 1px, transparent 1px),
+				radial-gradient(ellipse at 75% 50%, rgba(37, 81, 119, .17), transparent 45%),
+				linear-gradient(132deg, #070c14 0%, #0b1420 58%, #0d1a28 100%);
+			background-size: 54px 54px, 54px 54px, auto, auto;
+			opacity: 1; transition: opacity .42s ease, visibility .42s ease;
+		}
+		.loader.is-ready { opacity: 0; visibility: hidden; pointer-events: none; }
+		.skyline { position: absolute; inset: auto 0 0; width: 100%; height: min(42vh, 360px); opacity: .27; pointer-events: none; }
+		.stage { position: relative; width: min(100%, 1260px); display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(300px, .95fr); align-items: center; gap: clamp(24px, 6vw, 90px); }
+		.hero-copy { grid-column: 1; grid-row: 1; z-index: 1; max-width: 650px; padding: clamp(8px, 2vh, 24px) 0; }
+		.brand { margin: 0; font-size: clamp(13px, 1.15vw, 16px); line-height: 1.25; font-weight: 700; letter-spacing: .2em; color: var(--gold-bright); }
+		.compact-tagline { display: none; }
+		.presents { margin: 7px 0 clamp(24px, 4vh, 42px); font-size: 10px; line-height: 1; letter-spacing: .38em; color: #aeb9c5; }
+		.title { margin: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .02em; font-size: clamp(44px, 6vw, 76px); line-height: .91; letter-spacing: .055em; font-weight: 750; }
+		.title span:last-child { color: var(--gold-bright); }
+		.tagline { margin: clamp(20px, 3vh, 30px) 0 0; color: #d3d9df; font-size: clamp(15px, 1.55vw, 20px); letter-spacing: .015em; }
+		.creator { margin: 10px 0 0; color: #aeb9c5; font-size: 13px; letter-spacing: .04em; }
+		.creator strong { color: var(--ivory); font-weight: 650; }
+		.growth-logo { grid-column: 2; grid-row: 1; justify-self: center; width: min(100%, clamp(250px, 34vw, 440px)); aspect-ratio: 1; filter: drop-shadow(0 0 36px rgba(217, 180, 104, .11)); }
+		.loader-footer { position: absolute; left: max(28px, env(safe-area-inset-left)); bottom: max(30px, env(safe-area-inset-bottom)); width: min(460px, calc(100% - 56px)); z-index: 1; }
+		.loading-line { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 10px; font-size: 12px; letter-spacing: .04em; }
+		#loading-status { color: #d6dce2; }
+		#loading-percent { color: var(--gold-bright); font-variant-numeric: tabular-nums; }
+		.progress-track { height: 5px; overflow: hidden; border: 1px solid rgba(217, 180, 104, .42); border-radius: 999px; background: rgba(255, 255, 255, .07); }
+		.progress-fill { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ad843e, #f1d394 72%, #fff0c7); box-shadow: 0 0 12px rgba(241, 211, 148, .28); transition: width .18s ease; }
+		.progress-track.is-indeterminate .progress-fill { width: 31%; animation: loading-sweep 1.35s ease-in-out infinite; }
+		.error-panel { display: none; margin-top: 16px; border: 1px solid rgba(231, 113, 104, .55); border-radius: 8px; padding: 14px 16px; color: #ffe2dd; background: rgba(78, 24, 28, .58); font-size: 13px; line-height: 1.45; }
+		.error-panel.is-visible { display: block; }
+		.error-panel p { margin: 0 0 12px; overflow-wrap: anywhere; }
+		.retry-button { appearance: none; border: 1px solid #dfbd76; border-radius: 6px; background: #d2aa5d; color: #14171a; font: inherit; font-weight: 700; min-height: 42px; padding: 0 20px; cursor: pointer; }
+		.retry-button:hover { background: #f0d38f; }
+		.retry-button:focus-visible { outline: 3px solid #fff0c7; outline-offset: 3px; }
+		@keyframes loading-sweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(330%); } }
+		@media (max-width: 900px) and (orientation: landscape) {
+			.stage { grid-template-columns: minmax(0, 1.1fr) minmax(230px, .8fr); gap: 24px; width: min(100%, 1020px); }
+			.growth-logo { width: min(100%, 300px); }
+			.title { font-size: clamp(42px, 7vh, 58px); }
+			.presents { margin-bottom: 18px; }
+			.tagline { margin-top: 14px; }
+			.loader-footer { bottom: max(20px, env(safe-area-inset-bottom)); }
+		}
+		@media (max-width: 760px), (orientation: portrait) and (max-width: 900px) {
+			.loader { padding: max(18px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
+			.stage { width: min(100%, 520px); display: flex; flex-direction: column; gap: clamp(12px, 2.3vh, 24px); text-align: center; }
+			.growth-logo { order: 0; width: clamp(132px, 31vh, 220px); }
+			.hero-copy { order: 1; max-width: none; padding: 0; }
+			.brand { font-size: clamp(11px, 3.4vw, 15px); letter-spacing: .19em; }
+			.presents { margin: 6px 0 17px; font-size: 9px; }
+			.title { align-items: center; gap: .04em; font-size: clamp(39px, 10.2vw, 56px); }
+			.desktop-tagline { display: none; }
+			.compact-tagline { display: inline; }
+			.tagline { margin-top: 14px; font-size: clamp(14px, 4vw, 17px); }
+			.creator { margin-top: 8px; font-size: 12px; }
+			.loader-footer { position: absolute; left: max(20px, env(safe-area-inset-left)); bottom: max(22px, env(safe-area-inset-bottom)); width: calc(100% - 40px); }
+		}
+		@media (max-width: 380px) and (orientation: portrait) {
+			.stage { gap: 8px; }
+			.growth-logo { width: clamp(108px, 25vh, 150px); }
+			.title { font-size: clamp(35px, 9.5vw, 42px); }
+			.presents { margin-bottom: 13px; }
+			.tagline { margin-top: 10px; }
+		}
+		@media (max-height: 520px) and (orientation: landscape) {
+			.loader { padding-top: 10px; padding-bottom: 10px; }
+			.stage { gap: 14px; }
+			.growth-logo { width: min(42vh, 220px); }
+			.title { font-size: min(10vh, 48px); }
+			.brand { font-size: 11px; }
+			.presents { margin: 5px 0 12px; }
+			.tagline { margin-top: 9px; font-size: 14px; }
+			.creator { margin-top: 5px; }
+			.loader-footer { bottom: 12px; }
+		}
+		@media (prefers-reduced-motion: reduce) {
+			*, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+		}
+	</style>
+</head>
+<body>
+	<canvas id="canvas" aria-label="Online Business Tycoon game">Your browser does not support the canvas tag.</canvas>
+	<noscript><p style="position:fixed;z-index:4;inset:0;background:#080d15;color:#fff;padding:2rem">Online Business Tycoon requires JavaScript to run.</p></noscript>
+	<div id="loader" class="loader" role="region" aria-label="Loading Online Business Tycoon">
+		<svg class="skyline" viewBox="0 0 1440 400" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+			<defs><linearGradient id="skylineFade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#27415a" stop-opacity=".04"/><stop offset="1" stop-color="#06101a" stop-opacity=".9"/></linearGradient></defs>
+			<path fill="url(#skylineFade)" d="M0 400V300h42v-44h58v44h22V210h38v-29h12V110h22v71h12v50h18v69h29v-88h26v-30h13v-61h11V75h25v46h10v61h15v73h30v-95h19v-51h17v51h15v110h24v-54h26v-82h14v-43h11v43h16v136h27v-97h20v-38h14v-65h10v-60h20v60h11v65h18v135h26v-78h28v-38h16v-73h18v-39h26v39h18v73h21v116h23v-62h22v-77h12v-42h12v42h18v139h24v-90h20v-37h16v-78h15v-58h23v58h15v78h22v127h26v-48h19v-86h11v-45h17v45h15v134h26v-75h24v-48h19v-68h14v-52h26v52h15v68h20v123h34v-96h29v-43h15v-62h17v62h18v139h23v-48h44v148z"/>
+			<g fill="#d9b468" opacity=".12"><path d="M183 137h4v8h-4zm7 0h4v8h-4zm58 72h4v8h-4zm15 0h4v8h-4zm81-74h4v8h-4zm8 0h4v8h-4zm94 61h4v8h-4zm16 0h4v8h-4zm97-56h4v8h-4zm10 0h4v8h-4zm90 59h4v8h-4zm16 0h4v8h-4zm105-76h4v8h-4zm12 0h4v8h-4zm102 86h4v8h-4zm11 0h4v8h-4zm97-82h4v8h-4zm12 0h4v8h-4z"/></g>
+		</svg>
+		<main class="stage" aria-label="Online Business Tycoon loading">
+			<svg class="growth-logo" viewBox="0 0 420 420" role="img" aria-label="Gold business growth bars and rising arrow">
+				<defs>
+					<linearGradient id="goldMetal" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff0c8"/><stop offset=".42" stop-color="#e7c477"/><stop offset="1" stop-color="#a9792e"/></linearGradient>
+					<radialGradient id="logoGlow"><stop stop-color="#d6ad5d" stop-opacity=".17"/><stop offset="1" stop-color="#d6ad5d" stop-opacity="0"/></radialGradient>
+					<filter id="goldGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+				</defs>
+				<circle cx="210" cy="210" r="198" fill="url(#logoGlow)"/>
+				<circle cx="210" cy="210" r="172" fill="none" stroke="url(#goldMetal)" stroke-opacity=".36" stroke-width="2"/>
+				<circle cx="210" cy="210" r="157" fill="none" stroke="#d9b468" stroke-opacity=".16" stroke-width="1"/>
+				<path d="M88 292h244" stroke="#d9b468" stroke-opacity=".26" stroke-width="2"/>
+				<g fill="url(#goldMetal)" filter="url(#goldGlow)"><rect x="105" y="245" width="42" height="47" rx="4"/><rect x="165" y="207" width="42" height="85" rx="4"/><rect x="225" y="166" width="42" height="126" rx="4"/></g>
+				<path d="M112 208 177 161l51 18 74-83" fill="none" stroke="url(#goldMetal)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" filter="url(#goldGlow)"/>
+				<path d="m279 96 25-4-3 27" fill="none" stroke="url(#goldMetal)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" filter="url(#goldGlow)"/>
+				<circle cx="112" cy="208" r="6" fill="#f3d895"/><circle cx="177" cy="161" r="6" fill="#f3d895"/>
+			</svg>
+			<section class="hero-copy">
+				<p class="brand">UR TRADE NETWORK</p>
+				<p class="presents">PRESENTS</p>
+				<h1 class="title"><span>ONLINE</span><span>BUSINESS</span><span>TYCOON</span></h1>
+				<p class="tagline"><span class="desktop-tagline">From your first sale to a global business empire.</span><span class="compact-tagline">Build. Grow. Expand.</span></p>
+				<p class="creator">A Game by <strong>UphyRaop</strong></p>
+			</section>
+		</main>
+		<footer class="loader-footer">
+			<div class="loading-line"><span id="loading-status" role="status" aria-live="polite">Initializing engine…</span><span id="loading-percent">—</span></div>
+			<div id="progress-track" class="progress-track is-indeterminate" role="progressbar" aria-label="Game loading progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Initializing engine…"><span id="progress-fill" class="progress-fill"></span></div>
+			<div id="error-panel" class="error-panel" role="alert" aria-live="assertive"><p id="error-message">The game could not be loaded.</p><button id="retry-button" class="retry-button" type="button">Retry</button></div>
+		</footer>
+	</div>
+	<script src="$GODOT_URL"></script>
+	<script>
+		'use strict';
+		const GODOT_CONFIG = $GODOT_CONFIG;
+		const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
+		const loader = document.getElementById('loader');
+		const statusText = document.getElementById('loading-status');
+		const percentText = document.getElementById('loading-percent');
+		const progressTrack = document.getElementById('progress-track');
+		const progressFill = document.getElementById('progress-fill');
+		const errorPanel = document.getElementById('error-panel');
+		const errorMessage = document.getElementById('error-message');
+		const retryButton = document.getElementById('retry-button');
+		let startAttempted = false;
+
+		function setStatus(message) {
+			statusText.textContent = message;
+			progressTrack.setAttribute('aria-valuetext', message);
+		}
+		function setProgress(current, total) {
+			if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0 || current < 0) {
+				progressTrack.classList.add('is-indeterminate');
+				progressTrack.removeAttribute('aria-valuenow');
+				progressTrack.setAttribute('aria-valuetext', statusText.textContent);
+				percentText.textContent = '—';
+				return;
+			}
+			const ratio = Math.max(0, Math.min(1, current / total));
+			const percent = Math.min(99, Math.floor(ratio * 100));
+			progressTrack.classList.remove('is-indeterminate');
+			progressTrack.setAttribute('aria-valuenow', String(percent));
+			progressTrack.setAttribute('aria-valuetext', percent + '% loaded');
+			progressFill.style.width = percent + '%';
+			percentText.textContent = percent + '%';
+			if (ratio < .08) setStatus('Initializing engine…');
+			else if (ratio < .92) setStatus('Preparing your business world…');
+			else setStatus('Finalizing game assets…');
+		}
+		function showFailure(error) {
+			console.error('Online Business Tycoon failed to initialize:', error);
+			const reason = error instanceof Error ? error.message : String(error || 'Unknown loading error.');
+			errorMessage.textContent = 'The game could not be loaded. ' + reason;
+			errorPanel.classList.add('is-visible');
+			retryButton.focus();
+			setStatus('Loading failed');
+			percentText.textContent = '';
+			progressTrack.classList.remove('is-indeterminate');
+			progressTrack.removeAttribute('aria-valuenow');
+		}
+		async function startGame() {
+			if (startAttempted) return;
+			startAttempted = true;
+			errorPanel.classList.remove('is-visible');
+			try {
+				const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+				if (missing.length) throw new Error('This browser is missing required features: ' + missing.join(', '));
+				setStatus('Initializing engine…');
+				const engine = new Engine(GODOT_CONFIG);
+				await engine.startGame({ onProgress: setProgress });
+				progressTrack.classList.remove('is-indeterminate');
+				progressFill.style.width = '100%';
+				progressTrack.setAttribute('aria-valuenow', '100');
+				progressTrack.setAttribute('aria-valuetext', '100% loaded');
+				percentText.textContent = '100%';
+				setStatus('Ready to play.');
+				requestAnimationFrame(() => requestAnimationFrame(() => loader.classList.add('is-ready')));
+			} catch (error) {
+				showFailure(error);
+			}
+		}
+		retryButton.addEventListener('click', () => window.location.reload());
+		startGame();
+	</script>
+</body>
+</html>

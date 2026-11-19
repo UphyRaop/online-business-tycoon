@@ -25,10 +25,24 @@ func run() -> void:
 	var game_date: Label = app.find_child("GameDate", true, false)
 	var menu_button: Button = app.find_child("NavigationMenuButton", true, false)
 	var bank_balance: Label = app.find_child("CompanyBankBalance", true, false)
+	var advance_controls: HBoxContainer = app.find_child("GlobalAdvanceDayControls", true, false)
 	expect(nav != null and game_date != null and menu_button != null and bank_balance != null
 		and menu_button.get_parent() == game_date.get_parent() and bank_balance.get_parent() == game_date.get_parent()
 		and menu_button.icon != null and game_date.text.contains(" | ") and bank_balance.text.contains(app.money(app.sim.state.cash)),
 		"Header groups the hamburger, date/location, and actual available company bank balance on one row")
+	expect(game_date.text.begins_with("Day 1 · ") and advance_controls != null
+		and controls(advance_controls, "Button").map(func(button): return button.text) == ["+1", "+2", "+7", "+30"],
+		"Day 1 date and all four global Advance Day controls appear below the header")
+	var advance_one: Button = advance_controls.find_child("AdvanceDays1", true, false)
+	advance_one.pressed.emit()
+	expect(app.confirmation != null and app.day_advance_pending
+		and app.confirmation.dialog_text.contains("Current day: Day 1")
+		and app.confirmation.dialog_text.contains("Destination: Day 2")
+		and app.confirmation.dialog_text.contains("simulation events"),
+		"Advance Day requires a duplicate-safe confirmation showing the destination and simulation warning")
+	if app.confirmation != null: app.confirmation.get_cancel_button().pressed.emit()
+	expect(not app.day_advance_pending and app.sim.state.day == 1,
+		"Cancelling Advance Day leaves the simulation date and state unchanged")
 	var page_heading: Control = app.find_child("PageHeading", true, false)
 	expect(page_heading != null and controls(page_heading, "Button").is_empty(),
 		"Save Game and Main Menu are not duplicated beside the page heading")
@@ -95,7 +109,7 @@ func run() -> void:
 	press("My Products")
 	expect(app.page == "My Products" and has_label("Product portfolio"), "Market secondary route opens My Products")
 	press("Management")
-	expect(app.page == "Management" and has_label("Owned stores · 0"), "Management is available under Market")
+	expect(app.page == "Management" and has_label("Owned stores · 0"), "Store Management is available under Business")
 
 	var marketplace_error := Stores.create(app.sim.state, "Harbor Marketplace", 0, "Harbor", "", 0)
 	var marketplace_id := int(app.sim.state.stores.back().id)
@@ -152,7 +166,8 @@ func run() -> void:
 		"A single desktop content card expands to the full content width")
 
 	press("Business")
-	expect(app.page == "Business" and has_label("Owned Stores"), "Business category opens Company Management")
+	expect(app.primary_category(app.page) == "Business" and app.page in ["Business", "Management"],
+		"Business category opens Company Management or its last visited management screen")
 	var company_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Company Management")[0]
 	var dashboard_primary: Button = nav.find_child("Primary_Dashboard", true, false)
 	expect(company_subtab.custom_minimum_size.y == 44 and dashboard_primary.custom_minimum_size.y >= 44
@@ -160,7 +175,7 @@ func run() -> void:
 		"Secondary navigation is visually smaller than drawer navigation while keeping a 44 px touch target")
 	press("Marketing")
 	var marketing_overview: Button = controls(app, "Button").filter(func(button): return button.text == "Overview")[0]
-	var unselected_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Campaign Management")[0]
+	var unselected_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Ads Manager")[0]
 	var selected_tab_style := company_subtab.get_theme_stylebox("normal") as StyleBoxFlat
 	var selected_marketing_style := marketing_overview.get_theme_stylebox("normal") as StyleBoxFlat
 	var unselected_tab_style := unselected_subtab.get_theme_stylebox("normal") as StyleBoxFlat
@@ -174,31 +189,33 @@ func run() -> void:
 		"Marketing secondary tabs use a gold selected underline, transparent inactive tabs, 44 px touch area, and visible keyboard focus")
 	press("Advertising")
 	expect(app.page == "Advertising" and has_label("Advertising Overview"), "Marketing Overview opens the advertising overview")
-	press("Campaign Manager")
-	expect(app.screen == "Campaign Manager" or app.page == "Campaign Manager", "Campaign Manager remains reachable")
+	press("Ads Manager")
+	expect(app.screen == "Campaign Manager" or app.page == "Campaign Manager", "Ads Manager remains reachable")
 	press("Ads Analytics")
 	expect(app.screen == "Advertising Analytics" or app.page == "Advertising Analytics", "Ads Analytics remains reachable")
 
 	press("Finance")
-	expect(app.page == "Finance" and has_label("Financial Dashboard") and has_label("Income Statement")
+	expect(app.page == "Finance" and has_label("Financial Dashboard") and not has_label("Income Statement")
 		and has_label("Company Cash") and has_label("Gross Profit") and not has_label("Operating Cash Flow")
-		and has_label("Receivables") and has_label("Supplier Payables") and has_label("Financial Trends · Last 7 Recorded Days"),
-		"Finance opens a cash, performance, liquidity, and trend dashboard above financial statements")
-	expect(has_label("Known Fixed-Cost Estimate") and has_label("Informational estimate only."),
-		"Finance clearly separates the fixed-cost forecast from available cash")
-	press("Expense Management")
-	expect(app.page == "Expense Management" and has_label("Expense Breakdown") and has_label("Daily Ledger History"),
-		"Expense Management shows period-based categories and daily ledger history")
+		and has_label("Overhead") and not has_label("Receivables") and has_label("Supplier Payables") and has_label("Financial Trends · Last 7 Recorded Days"),
+		"Finance opens a compact cash, performance, overhead, and completed-day trend dashboard without stacking statements")
+	expect(has_label("Cash Forecast") and has_label("Informational estimate only;"),
+		"Finance distinguishes forecast cash from available cash")
+	press("Expenses")
+	expect(app.page == "Expense Management" and has_label("Expense Breakdown") and has_label("Transactions"),
+		"Expenses shows period-based categories and a banking-style transaction history")
 	press("Statements")
 	var statement_controls := controls(app, "OptionButton")
-	if statement_controls.size() >= 2:
-		statement_controls[1].select(2)
-		statement_controls[1].item_selected.emit(2)
-	expect(has_label("Cash Flow Statement") and not has_label("Operating Cash Flow"),
-		"Cash Flow Statement remains available while the separate Operating Cash Flow display is removed")
+	if statement_controls.size() >= 1:
+		statement_controls[0].select(2)
+		statement_controls[0].item_selected.emit(2)
+	expect(has_label("Cash Flow Statement") and not has_label("Income Statement") and not has_label("Balance Sheet")
+		and not has_label("Operating Cash Flow"),
+		"Statements displays only the selected Cash Flow Statement")
+	press("Business")
 	press("Store Profitability")
 	expect(app.page == "Store Profitability" and has_label("Harbor Marketplace") and has_label("Harbor Website"),
-		"Finance Store Profitability reports marketplace and website results")
+		"Business Store Profitability reports marketplace and website results")
 
 	var stored := Slots.write_for_game(app.active_game_id, 1, app.sim.state, app.ceo_profile)
 	var loaded := Slots.read_for_game(app.active_game_id, 1)
@@ -210,15 +227,23 @@ func run() -> void:
 	Slots.delete_for_game(app.active_game_id, 1)
 	press("Profile")
 	expect(app.page == "Profile" and has_label("CEO Profile") and has_label("Career Progression")
-		and has_label("Owned Companies") and has_label("Additional Information") and has_label("CEO ID")
-		and has_label("Career Start Date") and has_label("Total Companies Founded") and has_label("Active Companies"),
-		"Profile category presents identity, career, company totals, and additional information with consistent title case")
-	expect(has_label("Career Title") and has_label("Aspiring Entrepreneur"),
+		and has_label("Owned Companies") and has_label("Career Statistics") and not has_label("CEO ID")
+		and has_label("Career Start Date") and has_label("Companies Founded") and has_label("Active Companies"),
+		"Profile shows compact career information and keeps technical identifiers collapsed by default")
+	expect(has_label("Career Title") and has_label("Entrepreneur"),
 		"New CEO profile displays a progression title derived from its current level")
+	expect(has_label("Current XP") and has_label("XP to Next Level") and has_label("Next Career Title")
+		and has_label("Unlocks at Level") and app.find_child("CareerXPProgress", true, false) != null,
+		"Profile shows XP progress and the next title threshold")
 	expect(not has_label("Stored in this browser only; never uploaded."),
 		"Profile no longer shows the browser storage developer message")
-	expect(has_label("Personal cash and net worth remain untracked."),
-		"Profile explains that personal finance is not tracked and separates it from company accounts")
+	expect(not has_label("Personal Finance") and not has_label("Personal cash and net worth remain untracked."),
+		"Profile omits the deferred Personal Finance placeholder while preserving ownership records")
+	press("Show CEO Details")
+	expect(has_label("CEO ID") and has_label("Game ID") and has_button("Copy CEO ID"),
+		"Technical CEO and game identifiers are available only in optional details with a Copy action")
+	press("Hide CEO Details")
+	expect(not has_label("CEO ID"), "Optional technical profile details can be collapsed again")
 	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Profile"),
 		"Profile details are read-only until editing is explicitly activated")
 	var portrait: TextureRect = app.find_child("CEOAvatar", true, false)
@@ -338,8 +363,10 @@ func run() -> void:
 		await settle("phase4-%dx%d" % [viewport.x, viewport.y])
 		var header_balance: Label = app.find_child("CompanyBankBalance", true, false)
 		var header_date: Label = app.find_child("GameDate", true, false)
+		var global_advance := app.find_child("GlobalAdvanceDayControls", true, false)
 		var header_scale: float = float(viewport.x) / app.get_viewport_rect().size.x
-		expect(header_balance != null and header_date != null and header_date.text.contains(Catalog.COUNTRIES[app.sim.state.country])
+		expect(header_balance != null and header_date != null and global_advance != null
+			and controls(global_advance, "Button").size() == 4 and header_date.text.contains(Catalog.COUNTRIES[app.sim.state.country])
 			and header_date.text.contains(" | ") and header_balance.get_global_rect().position.x * header_scale >= 0
 			and header_balance.get_global_rect().end.x * header_scale <= float(viewport.x) + 1.0,
 			"Header date, location, and bank balance remain visible at %dx%d" % [viewport.x, viewport.y])
@@ -353,9 +380,9 @@ func run() -> void:
 			app.sim.state.cash = previous_cash
 			app.set_notice("")
 		_check_primary_tabs_within_viewport(viewport)
-		expect(app.page_grid.columns == (2 if viewport.x >= 900 else 1),
-			"Page panels use the intended responsive column count at %dx%d" % [viewport.x, viewport.y])
-		var expected_grid_children: int = 0 if viewport.x >= 900 and app.page_cards.size() == 1 else (2 if viewport.x >= 900 else app.page_cards.size())
+		expect(app.page_grid.columns == (2 if app.size.x >= 768 else 1),
+			"Page panels use the intended responsive column count at %dx%d (actual: %d columns at %.1f px / viewport %.1f px)" % [viewport.x, viewport.y, app.page_grid.columns, app.size.x, app.get_viewport_rect().size.x])
+		var expected_grid_children: int = 0 if app.size.x >= 768 and app.page_cards.size() == 1 else (2 if app.size.x >= 768 else app.page_cards.size())
 		expect(app.page_grid.get_child_count() == expected_grid_children,
 			"Card layout reflows without unused columns at %dx%d" % [viewport.x, viewport.y])
 		press("Dashboard")
