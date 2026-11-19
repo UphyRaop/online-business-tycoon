@@ -65,13 +65,11 @@ static func show(app: Control) -> void:
 	app.metric(catalog, "Category · Estimated supplier cost", "%s · %s" % [Catalog.PRODUCTS[product].category, app.money(Catalog.quote(app.sim.state.country, product, int(item.supplier)))])
 	app.metric(catalog, "Demand · Competition", "%.2f · %.2f" % [Catalog.PRODUCTS[product].demand, Catalog.PRODUCTS[product].competition])
 	supplier_form(app, product, item, stock_label)
-	var listings: VBoxContainer = app.card("Store listings")
-	listings.add_child(app.label("Product listings belong to individual stores. Create a marketplace or website and manage its listings under Market / Management.", 14, Style.MUTED))
-	app.secondary_tab(listings, "Management", app.navigate.bind("Management"), false)
 
 static func supplier_form(app: Control, product: int, item: Dictionary, stock_label: Label) -> void:
 	var state: Dictionary = app.sim.state
-	var supply: VBoxContainer = app.card("Supplier quotation")
+	var supply: VBoxContainer = app.card("Suppliers and Quotations · %s" % Catalog.PRODUCTS[product].name)
+	supply.add_child(app.label("Compare sourcing terms for the selected product. Quotations remain attached to this product in your saved company.", 13, Style.MUTED))
 	var supplier_indices: Array[int] = []
 	for supplier_id in Catalog.SUPPLIER_SELECTION_INDICES:
 		supplier_indices.append(int(supplier_id))
@@ -95,6 +93,9 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 	var forecast_label: Label = app.label("", 14, Style.MUTED)
 	supply.add_child(total)
 	supply.add_child(forecast_label)
+	var quote_comparison: VBoxContainer = app.stack(supply, 8)
+	quote_comparison.name = "SupplierQuoteComparison"
+	var purchase_button: Button
 	var forecast_button: Button = app.action(supply, "Use forecast quantity", func():
 		var forecast := Supply.forecast(app.sim, product, supplier_indices[supplier.selected])
 		quantity.text = str(forecast.suggested)
@@ -127,21 +128,62 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		forecast_label.text = "Demand %.1f units/day (%s)\nTarget %d units · Restock %d" % [
 			forecast.daily, demand_source, forecast.target, forecast.suggested]
 		forecast_button.disabled = forecast.suggested == 0
+		for child in quote_comparison.get_children():
+			quote_comparison.remove_child(child)
+			child.queue_free()
+		quote_comparison.add_child(app.label("Compare Supplier Offers", 17, Style.GOLD))
+		for candidate in supplier_indices:
+			var row_supplier := int(candidate)
+			var source: Dictionary = Catalog.SUPPLIERS[row_supplier]
+			var available := Supply.supplier_unlocked(state, row_supplier)
+			var offer := Supply.quote(state, product, row_supplier)
+			var has_negotiated := int(offer.get("discount", 0)) > 0 and int(offer.get("expires", 0)) >= int(state.day)
+			var row_box: VBoxContainer = app.stack(quote_comparison, 5)
+			row_box.name = "SupplierOffer%d" % row_supplier
+			var status_text := "Level %d locked" % int(source.level) if not available else ("Negotiated · expires %s" % Calendar.format(int(offer.expires)) if has_negotiated else "Standard quotation")
+			app.metric(row_box, str(source.name), status_text, Style.GOLD if available else Style.MUTED)
+			var goods_cost := int(offer.cost) if has_negotiated else Catalog.quote(state.country, product, row_supplier)
+			var freight_cost := Catalog.inbound_freight(state.country, row_supplier)
+			app.metric(row_box, "Buying · Landed Unit Price", "%s · %s" % [app.money(goods_cost), app.money(goods_cost + freight_cost)])
+			app.metric(row_box, "MOQ · Max Per Order", "%s · %s" % [_format_quantity(int(source.minimum)), _format_quantity(Supply.maximum_order_quantity(row_supplier))])
+			app.metric(row_box, "Lead Time · Reliability · Quality", "%d days · %d%% · %d%%" % [int(source.lead), roundi(float(source.reliability) * 100.0), roundi(float(source.quality) * 100.0)])
+			if not available:
+				row_box.add_child(app.label("Unlock this supplier platform through company sales progression.", 12, Style.MUTED))
+			else:
+				var actions: HBoxContainer = app.row(row_box)
+				app.action(actions, "Request Quotation", func():
+					var result := Supply.negotiate(state, product, row_supplier, units_from(quantity.text))
+					if not result.is_empty():
+						app.set_notice(result, true)
+						return
+					app.persist("Product quotation received.")
+					app.refresh_view()
+				)
+				app.action(actions, "Accept Quotation", func():
+					app.sim.select_supplier(product, row_supplier)
+					supplier.select(supplier_indices.find(row_supplier))
+					app.set_meta("accepted_quote_supplier_%d" % product, row_supplier)
+					app.persist("Supplier quotation accepted for this product.")
+					app.refresh_view()
+				, true)
+		if is_instance_valid(purchase_button):
+			purchase_button.disabled = int(app.get_meta("accepted_quote_supplier_%d" % product, -1)) != supplier_index
 	quantity.text_changed.connect(func(_value: String): refresh.call())
 	supplier.item_selected.connect(func(index: int):
+		app.set_meta("accepted_quote_supplier_%d" % product, -1)
 		app.sim.select_supplier(product, supplier_indices[index])
 		app.persist("Supplier selected.")
 		refresh.call()
 	)
-	app.action(supply, "Negotiate quote", func():
+	app.action(supply, "Request Quotation", func():
 		var result := Supply.negotiate(state, product, supplier_indices[supplier.selected], units_from(quantity.text))
 		if not result.is_empty():
 			app.set_notice(result, true)
 			return
-		app.persist("Negotiated quote received.")
+		app.persist("Product quotation received.")
 		refresh.call()
 	)
-	app.action(supply, "Purchase stock", func():
+	purchase_button = app.action(supply, "Purchase Inventory", func():
 		var result: String = app.sim.buy(product, supplier_indices[supplier.selected], units_from(quantity.text))
 		if not result.is_empty():
 			app.set_notice(result, true)
