@@ -29,16 +29,47 @@ func press(title: String) -> void:
 			button.pressed.emit()
 			return
 	var primary := title.to_lower()
-	if primary in ["dashboard", "market", "order", "orders", "business", "finance", "profile"]:
-		var target := "Order" if primary in ["order", "orders"] else title
-		var drawer: Control = app.find_child("PrimaryNavigation", true, false)
-		var menu: Button = app.find_child("NavigationMenuButton", true, false)
-		if drawer != null and menu != null:
-			if not drawer.is_visible_in_tree():
-				menu.pressed.emit()
-			var navigation_item: Button = drawer.find_child("Primary_" + target, true, false)
-			if navigation_item != null and navigation_item.is_visible_in_tree():
-				navigation_item.pressed.emit()
+	var primary_target := ""
+	var secondary_title := title
+	var selects_secondary := false
+	if primary in ["dashboard", "market", "order", "orders", "business", "marketing", "finance", "profile"]:
+		primary_target = "Order" if primary in ["order", "orders"] else title
+	elif primary in ["advertising", "overview", "campaign manager", "campaign management", "ads analytics"]:
+		primary_target = "Marketing"
+		selects_secondary = primary != "marketing"
+		if primary in ["advertising", "overview"]: secondary_title = "Overview"
+		if primary in ["campaign manager", "campaign management"]: secondary_title = "Campaign Management"
+		if primary == "ads analytics": secondary_title = "Ads Analytics"
+	elif primary in ["my products", "inventory management", "management", "store management", "product catalogue"]:
+		primary_target = "Market"
+		if primary in ["my products", "inventory management"]: secondary_title = "Inventory Management"
+		if primary in ["management", "store management"]: secondary_title = "Store Management"
+		if primary == "product catalogue": secondary_title = "Product Catalogue"
+	elif primary in ["company profile", "company management"]:
+		primary_target = "Business"
+		secondary_title = "Company Management"
+	var drawer: Control = app.find_child("PrimaryNavigation", true, false)
+	var menu: Button = app.find_child("NavigationMenuButton", true, false)
+	if primary in ["save game", "main menu"] and drawer != null and menu != null:
+		if not drawer.is_visible_in_tree(): menu.pressed.emit()
+		var action_name := "DrawerActionSave" if primary == "save game" else "DrawerActionMainMenu"
+		var drawer_action: Button = drawer.find_child(action_name, true, false)
+		if drawer_action != null and drawer_action.is_visible_in_tree():
+			drawer_action.pressed.emit()
+			return
+	if primary_target in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"] and drawer != null and menu != null:
+		if not drawer.is_visible_in_tree(): menu.pressed.emit()
+		var navigation_item: Button = drawer.find_child("Primary_" + primary_target, true, false)
+		if navigation_item != null and navigation_item.is_visible_in_tree():
+			navigation_item.pressed.emit()
+			if secondary_title == title and not selects_secondary: return
+		else:
+			expect(false, "Missing primary route " + primary_target)
+			return
+	if not secondary_title.is_empty() and (secondary_title != title or selects_secondary):
+		for button in controls(app, "Button"):
+			if button.text.to_lower() == secondary_title.to_lower() and button.is_visible_in_tree():
+				button.pressed.emit()
 				return
 	expect(false, "Missing enabled button " + title)
 
@@ -127,7 +158,7 @@ func run() -> void:
 	app.sim.state.website_active = true
 
 	await settle("02-dashboard")
-	press("Browse product catalog")
+	press("Browse Product Catalogue")
 	choices = controls(app, "OptionButton")
 	select(choices[0], 1)
 	select(app.find_child("ProductSelection", true, false), 0)

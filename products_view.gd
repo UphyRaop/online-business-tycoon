@@ -123,8 +123,8 @@ static func product_details(app: Control, product: int, totals: Dictionary) -> v
 		store_count += 1
 		listing_editor(app, product, store)
 	if store_count == 0:
-		stores_card.add_child(app.label("Create a marketplace store or website in Management before publishing a listing.", 14, Style.MUTED))
-		app.secondary_tab(stores_card, "Open Management", app.navigate.bind("Management"), false)
+		stores_card.add_child(app.label("Create a marketplace store or website in Store Management before publishing a listing.", 14, Style.MUTED))
+		app.secondary_tab(stores_card, "Open Store Management", app.navigate.bind("Management"), false)
 
 static func listing_editor(app: Control, product: int, store: Dictionary) -> void:
 	var store_id := int(store.id)

@@ -15,7 +15,7 @@ func run() -> void:
 	press("Register company")
 	expect(app.sim.state.stores.is_empty(), "New company starts with no marketplace stores or websites")
 	expect(app.sim.report(app.sim.state.day).closing_cash == app.sim.state.cash, "Dashboard Bank Balance uses the reconciled cash ledger balance")
-	var primary_names := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
+	var primary_names := ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]
 	var menu: Button = app.find_child("NavigationMenuButton", true, false)
 	if menu != null: menu.pressed.emit()
 	await process_frame
@@ -25,7 +25,8 @@ func run() -> void:
 	if drawer != null:
 		for button in controls(drawer, "Button"):
 			if button.tooltip_text in primary_names: nav_names.append(button.tooltip_text)
-	expect(nav_names.size() == 6 and "Profile" in nav_names, "Hamburger navigation presents all six primary categories including Profile")
+	expect(nav_names.size() == 7 and "Profile" in nav_names and "Marketing" in nav_names,
+		"Hamburger navigation presents all seven primary categories including Marketing and Profile")
 	if drawer != null:
 		for button in controls(drawer, "Button"):
 			if button.tooltip_text in primary_names:

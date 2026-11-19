@@ -19,7 +19,22 @@ const FinanceManagement = preload("res://finance_management.gd")
 const FinanceChart = preload("res://ads_chart.gd")
 const ChartLegend = preload("res://chart_legend.gd")
 const CompanySale = preload("res://company_sale.gd")
-const NAV := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
+const NAV := ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]
+const NAV_ICON_PATHS := {
+	"Dashboard": "res://assets/navigation/dashboard.svg",
+	"Market": "res://assets/navigation/market.svg",
+	"Order": "res://assets/navigation/orders.svg",
+	"Business": "res://assets/navigation/business.svg",
+	"Marketing": "res://assets/navigation/marketing.svg",
+	"Finance": "res://assets/navigation/finance.svg",
+	"Profile": "res://assets/navigation/profile.svg",
+}
+const DRAWER_ICON_PATHS := {
+	"Menu": "res://assets/navigation/menu.svg",
+	"Close": "res://assets/navigation/close.svg",
+	"Save Game": "res://assets/navigation/save.svg",
+	"Main Menu": "res://assets/navigation/exit.svg",
+}
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
 const PREFERENCES := "user://display.cfg"
@@ -38,7 +53,7 @@ var error_notice := false
 var selected_product := 0
 var catalog_category := -1
 var catalog_search := ""
-var category_last_page := {"Dashboard": "Dashboard", "Market": "Market", "Order": "Orders", "Business": "Business", "Finance": "Finance"}
+var category_last_page := {"Dashboard": "Dashboard", "Market": "Market", "Order": "Orders", "Business": "Business", "Marketing": "Advertising", "Finance": "Finance"}
 var period := 0
 var statement := 0
 var report_end := 0
@@ -278,7 +293,7 @@ func _update_responsive_layout() -> void:
 		page_grid.columns = 2 if viewport_width >= 900.0 else 1
 		_reflow_page_cards()
 	if is_instance_valid(navigation_drawer):
-		var drawer_width := clampf(viewport_width * 0.82, 280.0, 340.0)
+		var drawer_width := clampf(viewport_width * 0.78, 260.0, 320.0)
 		navigation_drawer.offset_right = drawer_width
 	if is_instance_valid(bank_balance_label):
 		bank_balance_label.custom_minimum_size.x = 152 if viewport_width < 600.0 else 245
@@ -1095,10 +1110,15 @@ func navigate(target: String) -> void:
 	if target == "Growth": target = "Advertising"
 	# Retain compatibility with the previous route label without changing saves.
 	if target == "Store Management": target = "Management"
+	if target == "Inventory Management": target = "My Products"
+	if target == "Company Management": target = "Business"
+	if target == "Campaign Management": target = "Campaign Manager"
+	if target == "Ads Analytics": target = "Advertising Analytics"
 	if target == "Order": target = "Orders"
 	if target in NAV:
 		if target == primary_category(page):
-			target = "Orders" if target == "Order" else target
+			if target == "Order": target = "Orders"
+			elif target == "Marketing": target = "Advertising"
 		else:
 			target = str(category_last_page.get(target, target))
 			if target == "Store Listings": target = "My Products"
@@ -1115,7 +1135,9 @@ func navigate(target: String) -> void:
 func primary_category(target: String) -> String:
 	if target in ["Market", "My Products", "Management", "Store Listings"]: return "Market"
 	if target in ["Orders", "Pre-orders"]: return "Order"
-	if target in ["Business", "Advertising", "Campaign Manager", "Campaign Details", "Advertising Analytics"]: return "Business"
+	if target in ["Advertising", "Campaign Manager", "Campaign Details", "Advertising Analytics"]: return "Marketing"
+	if target == "Marketing": return "Marketing"
+	if target in ["Business", "Company Sale"]: return "Business"
 	if target in ["Finance", "Expense Management", "Store Profitability"]: return "Finance"
 	if target == "Profile": return "Profile"
 	return "Dashboard"
@@ -1147,11 +1169,12 @@ func _reset_edit_modes() -> void:
 
 func primary_navigation(parent: Node) -> Button:
 	var heading := row(parent)
-	var menu_button := action(heading, "☰", toggle_navigation_drawer, false)
+	var menu_button := action(heading, "Menu", toggle_navigation_drawer, false)
 	menu_button.name = "NavigationMenuButton"
-	menu_button.custom_minimum_size = Vector2(52, 48)
+	menu_button.custom_minimum_size = Vector2(92, 48)
 	menu_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	menu_button.tooltip_text = "Open navigation menu"
+	_apply_drawer_icon(menu_button, DRAWER_ICON_PATHS.Menu, 20)
 	navigation_toggle = menu_button
 	var viewport_width := size.x
 	var date_text := "%s | %s" % [Calendar.format(sim.state.day), Catalog.COUNTRIES[sim.state.country]]
@@ -1250,7 +1273,7 @@ func _create_navigation_drawer() -> void:
 	drawer.offset_left = 0
 	drawer.offset_top = 0
 	drawer.offset_bottom = 0
-	drawer.offset_right = clampf(size.x * 0.82, 280.0, 340.0)
+	drawer.offset_right = clampf(size.x * 0.78, 260.0, 320.0)
 	drawer.mouse_filter = Control.MOUSE_FILTER_STOP
 	drawer.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 0, 16))
 	overlay.add_child(drawer)
@@ -1262,6 +1285,7 @@ func _create_navigation_drawer() -> void:
 	heading.add_child(title)
 	var close_button := action(heading, "Close", close_navigation_drawer)
 	close_button.custom_minimum_size = Vector2(72, 44)
+	_apply_drawer_icon(close_button, DRAWER_ICON_PATHS.Close, 18)
 	var nav_scroll := ScrollContainer.new()
 	nav_scroll.name = "NavigationScroll"
 	nav_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1269,10 +1293,10 @@ func _create_navigation_drawer() -> void:
 	content.add_child(nav_scroll)
 	var nav_list := stack(nav_scroll, 8)
 	nav_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var icons := ["▦", "⌕", "▤", "◫", "¤", "◉"]
 	for index in NAV.size():
 		var target: String = NAV[index]
-		var item := action(nav_list, "%s  %s" % [icons[index], "Orders" if target == "Order" else target], func():
+		var display_name := "Orders" if target == "Order" else target
+		var item := action(nav_list, display_name, func():
 			close_navigation_drawer(false)
 			navigate(target)
 		)
@@ -1281,18 +1305,47 @@ func _create_navigation_drawer() -> void:
 		item.custom_minimum_size.y = 50
 		item.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		item.focus_mode = Control.FOCUS_ALL
+		_apply_drawer_icon(item, NAV_ICON_PATHS[target], 21)
 		if target == primary_category(page):
 			Style.primary(item)
+			item.add_theme_color_override("icon_normal_color", Style.INK)
 		else:
 			Style.secondary(item)
+			item.add_theme_color_override("icon_normal_color", Style.GOLD)
+	divider(content)
+	content.add_child(label("Actions", 13, Style.MUTED))
+	var save_action := action(content, "Save Game", func():
+		close_navigation_drawer(false)
+		open_screen("Save")
+	)
+	save_action.name = "DrawerActionSave"
+	save_action.custom_minimum_size.y = 46
+	_apply_drawer_icon(save_action, DRAWER_ICON_PATHS["Save Game"], 20)
+	var main_menu_action := action(content, "Main Menu", func():
+		close_navigation_drawer(false)
+		leave_game()
+	)
+	main_menu_action.name = "DrawerActionMainMenu"
+	main_menu_action.custom_minimum_size.y = 46
+	_apply_drawer_icon(main_menu_action, DRAWER_ICON_PATHS["Main Menu"], 20)
+	Style.secondary(main_menu_action)
+
+func _apply_drawer_icon(button: Button, path: String, max_width: int = 20) -> void:
+	var icon := load(path) as Texture2D
+	if icon == null:
+		push_warning("Navigation icon failed to load: " + path)
+		return
+	button.icon = icon
+	button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 func secondary_navigation(parent: Node) -> void:
 	var category := primary_category(page)
 	var routes: Array = []
 	match category:
-		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Management", "Management"]]
+		"Market": routes = [["Product Catalogue", "Market"], ["Inventory Management", "My Products"], ["Store Management", "Management"]]
 		"Order": routes = [["Customer Orders", "Orders"], ["Pre-orders", "Pre-orders"], ["Returns and Service", "Returns & Service"]]
-		"Business": routes = [["Company Management", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
+		"Business": routes = [["Company Management", "Business"]]
+		"Marketing": routes = [["Overview", "Advertising"], ["Campaign Management", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
 		"Finance": routes = [["Statements", "Finance"], ["Expense Management", "Expense Management"], ["Store Profitability", "Store Profitability"]]
 		_: return
 	var scroller := ScrollContainer.new()
@@ -1369,18 +1422,24 @@ func render() -> void:
 	if screen == "Game":
 		primary_navigation(masthead)
 		var heading := row(masthead)
-		var page_title := "Ads Analytics" if page == "Advertising Analytics" else page
+		heading.name = "PageHeading"
+		var page_title := page
+		match page:
+			"Business": page_title = "Company Management"
+			"Management": page_title = "Store Management"
+			"My Products": page_title = "Inventory Management"
+			"Advertising": page_title = "Marketing"
+			"Campaign Manager": page_title = "Campaign Management"
+			"Advertising Analytics": page_title = "Ads Analytics"
 		var title := label(page_title, 26 if viewport_width < 600.0 else 30)
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		heading.add_child(title)
-		action(heading, "Save Game", open_screen.bind("Save")).size_flags_horizontal = Control.SIZE_SHRINK_END
-		action(heading, "Menu", leave_game).size_flags_horizontal = Control.SIZE_SHRINK_END
 	elif screen == "Title":
 		Menu.brand(self, masthead)
 	else:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
-			"Campaign Manager": "Campaign Manager", "Campaign Details": "Campaign Details", "Company Selection": "Choose a Company",
-			"Advertising Analytics": "Ads Analytics", "Management": "Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
+			"Campaign Manager": "Campaign Management", "Campaign Details": "Campaign Details", "Company Selection": "Choose a Company",
+			"Advertising Analytics": "Ads Analytics", "Management": "Store Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
 			"CEO identity conflict": "Identity choice"}
 		masthead.add_child(label(titles.get(screen, screen), 30))
 	var scroll := ScrollContainer.new()
@@ -1447,7 +1506,7 @@ func render() -> void:
 
 func setup() -> void:
 	var details := card("Company registration")
-	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Management.", 15, Style.MUTED))
+	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Store Management.", 15, Style.MUTED))
 	var owner := field(details, "Entrepreneur name", str(ceo_profile.get("full_name", "")))
 	if not ceo_profile.is_empty():
 		owner.editable = false
@@ -1545,7 +1604,7 @@ func dashboard() -> void:
 	if not has_listing:
 		var next := card("Open your store")
 		next.add_child(label("Choose a product in Market, purchase stock from a supplier, then publish your listing.", 15, Style.MUTED))
-		action(next, "Browse product catalog", navigate.bind("Market"), true)
+		action(next, "Browse Product Catalogue", navigate.bind("Market"), true)
 	channel_cards(totals, "Lifetime")
 
 func _add_kpi(parent: GridContainer, caption: String, value: String, color: Color = Style.TEXT) -> void:
@@ -1661,9 +1720,9 @@ func business() -> void:
 			refresh_view()
 		)
 	company_sale_panel(profile)
-	action(card("Management"), "Management", navigate.bind("Management"), true)
-	action(card("Inventory and listings"), "My Products", navigate.bind("My Products"))
-	action(card("Business advertising"), "Advertising", navigate.bind("Advertising"))
+	action(card("Store Management"), "Store Management", navigate.bind("Management"), true)
+	action(card("Inventory Management"), "Inventory Management", navigate.bind("My Products"))
+	action(card("Marketing"), "Marketing", navigate.bind("Marketing"))
 	var saves := card("Local progress")
 	saves.add_child(label("Progress saves automatically when you make changes or advance time.", 14, Style.MUTED))
 	var controls := row(saves)

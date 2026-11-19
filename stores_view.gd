@@ -9,9 +9,8 @@ const Style = preload("res://corporate_theme.gd")
 const Offers = preload("res://offer_view.gd")
 
 static func management(app: Control) -> void:
-	var intro: VBoxContainer = app.card("Management · %s" % app.sim.state.company)
+	var intro: VBoxContainer = app.card("Store Management · %s" % app.sim.state.company)
 	intro.add_child(app.label("Manage marketplace stores and websites here. Inventory is shared, while each destination keeps its own listings, costs, sales, and campaigns.", 14, Style.MUTED))
-	app.secondary_tab(intro, "Advertising", app.navigate.bind("Advertising"), false)
 	var stores: VBoxContainer = app.card("Owned stores · %d" % app.sim.state.stores.size())
 	for store in app.sim.state.stores:
 		var id: int = store.id
@@ -29,7 +28,7 @@ static func management(app: Control) -> void:
 			app.money(result.advertising), app.money(result.setup), app.money(result.operating)], Style.MUTED)
 		app.metric(card, "Store profit", app.money(profit), app.profit_color(profit))
 		var actions: HBoxContainer = app.row(card)
-		app.action(actions, "My Products", func():
+		app.action(actions, "Inventory Management", func():
 			app.navigate("My Products")
 		)
 		var status: String = "Deactivate" if store.active else "Activate"
@@ -112,7 +111,7 @@ static func profitability(app: Control) -> void:
 	summary.add_child(app.label("Lifetime results by marketplace store and website. Shared company inventory costs are assigned to the order that consumes each unit.", 14, Style.MUTED))
 	if app.sim.state.stores.is_empty():
 		summary.add_child(app.label("No stores or websites have been created yet.", 14, Style.MUTED))
-		app.secondary_tab(summary, "Open Management", app.navigate.bind("Management"), false)
+		app.secondary_tab(summary, "Open Store Management", app.navigate.bind("Management"), false)
 		return
 	for store in app.sim.state.stores:
 		var result: Dictionary = Stores.report(app.sim.state, int(store.id))
@@ -136,7 +135,7 @@ static func listings(app: Control) -> void:
 	var website_name: String = Stores.WEBSITE_PLATFORMS[website_index].name if website_index >= 0 else "Website"
 	var subtitle: String = "Shared company inventory · Marketplace" if store.type == 0 else "Shared company inventory · %s · %s" % [website_name, store.domain]
 	heading.add_child(app.label(subtitle, 14, Style.MUTED))
-	app.secondary_tab(heading, "Management", app.navigate.bind("Management"), true)
+	app.secondary_tab(heading, "Store Management", app.navigate.bind("Management"), true)
 	var products := Catalog.PRODUCTS.map(func(item): return item.name)
 	var picker: OptionButton = app.dropdown(heading, products, app.selected_product)
 	picker.custom_minimum_size.y = 44

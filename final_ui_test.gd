@@ -99,11 +99,11 @@ func run() -> void:
 	press("Edit Company Details")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "Unapplied name"
-	press("Menu")
+	press("Main Menu")
 	resolve_dialog(false)
 	expect(app.screen == "Game" and inputs[0].text == "Unapplied name", "Cancel discard keeps unsaved edits")
 	await process_frame
-	press("Menu")
+	press("Main Menu")
 	resolve_dialog(true)
 	expect(app.screen == "Title", "Confirmed discard returns to title")
 	await process_frame
@@ -115,10 +115,10 @@ func run() -> void:
 	resolve_dialog(true)
 	register_company("Second Company")
 	expect(Slots.read(0).state.company == "Second Company" and Slots.read(1).state.company == "Aster Holdings", "New game replaces only autosave")
-	press("Menu")
+	press("Main Menu")
 	press("Continue Game")
 	expect(app.sim.state.company == "Second Company", "Continue loads the latest save")
-	press("Menu")
+	press("Main Menu")
 	press("Load Game")
 	press("Load slot 1")
 	resolve_dialog(true)
