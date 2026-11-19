@@ -1,5 +1,12 @@
 extends RefCounted
 
+class DotMarker extends Control:
+	var marker_color: Color = Color.WHITE
+
+	func _draw() -> void:
+		var diameter := minf(size.x, size.y)
+		draw_circle(size / 2.0, diameter * 0.28, marker_color)
+
 static func build(series: Array[Dictionary]) -> FlowContainer:
 	var flow := FlowContainer.new()
 	flow.add_theme_constant_override("h_separation", 14)
@@ -11,10 +18,11 @@ static func build(series: Array[Dictionary]) -> FlowContainer:
 		chip.custom_minimum_size = Vector2(maxf(90.0, 30.0 + float(name.length()) * 7.5), 26)
 		chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		chip.add_theme_constant_override("separation", 5)
-		var marker := Label.new()
-		marker.text = "●"
-		marker.custom_minimum_size.x = 16
-		marker.add_theme_color_override("font_color", item.get("color", Color.WHITE))
+		var marker := DotMarker.new()
+		marker.name = "LegendColorMarker"
+		marker.marker_color = item.get("color", Color.WHITE)
+		marker.custom_minimum_size = Vector2(16, 16)
+		marker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		chip.add_child(marker)
 		var caption := Label.new()
 		caption.text = name
