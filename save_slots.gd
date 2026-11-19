@@ -1,6 +1,7 @@
 extends RefCounted
 
 const Saves = preload("res://save_store.gd")
+const Games = preload("res://game_store.gd")
 const AUTOSAVE := 0
 const COUNT := 4
 
@@ -80,3 +81,32 @@ static func timestamp_text(saved_at: float) -> String:
 		return "Saved time unavailable"
 	var offset: int = Time.get_time_zone_from_system().bias * 60
 	return Time.get_datetime_string_from_unix_time(int(saved_at) + offset, true) + " local"
+
+## Game-scoped API. The legacy functions above remain unchanged so saved slots
+## from earlier builds can be read and migrated without being overwritten.
+static func path_for_game(game_id: String, slot: int) -> String:
+	return Games.slot_path(game_id, slot)
+
+static func read_for_game(game_id: String, slot: int) -> Dictionary:
+	return Games.read_slot(game_id, slot)
+
+static func write_for_game(game_id: String, slot: int, state: Dictionary, profile: Dictionary, timestamp: float = 0) -> Error:
+	return Games.write_slot(game_id, slot, state, profile, timestamp)
+
+static func occupied_for_game(game_id: String, slot: int) -> bool:
+	return Games.occupied(game_id, slot)
+
+static func delete_for_game(game_id: String, slot: int) -> Error:
+	return Games.delete_slot(game_id, slot)
+
+static func latest_for_game(game_id: String) -> Dictionary:
+	return Games.latest(game_id)
+
+static func summary_for_game(game_id: String, slot: int) -> Dictionary:
+	return Games.slot_summary(game_id, slot)
+
+static func label_for_game_save(record: Dictionary) -> String:
+	return Games.save_label(record)
+
+static func delete_game_data(game_id: String) -> Error:
+	return Games.delete_game_data(game_id)

@@ -2,7 +2,7 @@ extends RefCounted
 
 const Simulation = preload("res://simulation.gd")
 const PATH := "user://ceo_profile_v1.json"
-const VERSION := 2
+const VERSION := 3
 const MAX_AVATAR_BYTES := 524288
 const LEVEL_XP := 1000
 const SALES_MILESTONES := [100000, 1000000, 10000000, 100000000]
@@ -11,12 +11,14 @@ const PROFIT_MILESTONES := [100000, 1000000, 10000000]
 static func empty(owner: String = "") -> Dictionary:
 	return {
 		"schema_version": VERSION,
+		"game_id": "",
+		"game_name": "",
 		"ceo_id": "",
 		"full_name": owner.strip_edges(),
 		"avatar_data": "",
 		"avatar_mime": "",
 		"country": "",
-		"title": "Entrepreneur",
+		"title": "Aspiring Entrepreneur",
 		"career_start_date": Time.get_date_string_from_system(),
 		"xp": 0,
 		"achievements": [],
@@ -43,10 +45,32 @@ static func load_profile(path: String = PATH) -> Dictionary:
 				return upgraded
 	return {}
 
+static func path_for_game(game_id: String) -> String:
+	if not _valid_game_id(game_id): return ""
+	return "user://obt_games/%s/ceo_profile.json" % game_id
+
+static func load_game_profile(game_id: String) -> Dictionary:
+	var path := path_for_game(game_id)
+	if path.is_empty(): return {}
+	var profile := load_profile(path)
+	if profile.is_empty() or str(profile.get("game_id", "")) != game_id:
+		return {}
+	return profile
+
+static func save_game_profile(profile: Dictionary, game_id: String) -> Error:
+	var path := path_for_game(game_id)
+	if path.is_empty() or str(profile.get("game_id", "")) != game_id:
+		return ERR_INVALID_PARAMETER
+	return save_profile(profile, path)
+
 static func save_profile(profile: Dictionary, path: String = PATH) -> Error:
 	var normalized := migrate_profile(profile)
-	if not valid(normalized):
+	if path.strip_edges().is_empty() or not valid(normalized):
 		return ERR_INVALID_DATA
+	var directory_path := ProjectSettings.globalize_path(path).get_base_dir()
+	var directory_error := DirAccess.make_dir_recursive_absolute(directory_path)
+	if directory_error != OK and directory_error != ERR_ALREADY_EXISTS:
+		return directory_error
 	var temporary := path + ".tmp"
 	var file := FileAccess.open(temporary, FileAccess.WRITE)
 	if file == null:
@@ -76,6 +100,10 @@ static func valid(profile: Dictionary) -> bool:
 			return false
 	if not _whole_number(profile.get("xp")) or int(profile.xp) < 0:
 		return false
+	if not profile.get("game_id", "") is String or not profile.get("game_name", "") is String:
+		return false
+	if not str(profile.get("game_id", "")).is_empty() and not _valid_game_id(str(profile.game_id)):
+		return false
 	if not profile.get("achievements") is Array or not profile.get("awarded_events") is Array or not profile.get("companies") is Array:
 		return false
 	if not profile.get("personal_finance_ledger") is Array:
@@ -85,6 +113,8 @@ static func valid(profile: Dictionary) -> bool:
 	if not (profile.get("personal_cash") == null or _whole_number(profile.personal_cash)):
 		return false
 	if not (profile.get("personal_net_worth") == null or _whole_number(profile.personal_net_worth)):
+		return false
+	if str(profile.get("title", "")) != progression_title(profile):
 		return false
 	if profile.avatar_data.length() > int(MAX_AVATAR_BYTES * 4.0 / 3.0) + 16:
 		return false
@@ -126,8 +156,12 @@ static func valid(profile: Dictionary) -> bool:
 static func migrate_profile(profile: Dictionary) -> Dictionary:
 	var result := profile.duplicate(true)
 	var version := int(result.get("schema_version", 0))
-	if version not in [1, VERSION]:
+	if version not in [1, 2, VERSION]:
 		return {}
+	if not result.get("game_id") is String:
+		result.game_id = ""
+	if not result.get("game_name") is String:
+		result.game_name = ""
 	# A legacy personal balance was never tracked. Preserve null rather than
 	# manufacturing a starting balance when introducing the sale-proceeds ledger.
 	if not result.get("personal_finance_ledger") is Array:
@@ -142,6 +176,7 @@ static func migrate_profile(profile: Dictionary) -> Dictionary:
 			entry.ownership_status = "owned"
 		result.companies[index] = entry
 	result.schema_version = VERSION
+	result.title = progression_title(result)
 	return result
 
 static func _whole_number(value: Variant) -> bool:
@@ -156,6 +191,22 @@ static func ensure(profile: Dictionary, owner: String = "") -> Dictionary:
 		result.ceo_id = _new_id("ceo")
 	if str(result.full_name).strip_edges().is_empty() and not owner.strip_edges().is_empty():
 		result.full_name = owner.strip_edges()
+	result.title = progression_title(result)
+	return result
+
+static func ensure_for_game(profile: Dictionary, owner: String, game_id: String, game_name: String = "") -> Dictionary:
+	if not _valid_game_id(game_id): return {}
+	var migrated := migrate_profile(profile)
+	var result: Dictionary
+	if valid(migrated) and str(migrated.get("game_id", "")).is_empty():
+		result = migrated
+	elif valid(migrated) and str(migrated.game_id) == game_id:
+		result = migrated
+	else:
+		result = empty(owner)
+	result = ensure(result, owner)
+	result.game_id = game_id
+	if not game_name.strip_edges().is_empty(): result.game_name = game_name.strip_edges()
 	return result
 
 static func ensure_legacy(profile: Dictionary, owner: String = "") -> Dictionary:
@@ -171,8 +222,9 @@ static func register_company(profile: Dictionary, state: Dictionary) -> Dictiona
 		company_id = _new_id("company")
 		state.company_id = company_id
 	var index := company_index(result, company_id)
+	var archive_path := company_path_for_game(str(result.get("game_id", "")), company_id) if not str(result.get("game_id", "")).is_empty() else company_path(company_id)
 	var entry := {"company_id": company_id, "name": str(state.get("company", "Company")),
-		"country": str(state.get("country", "")), "save_path": company_path(company_id),
+		"country": str(state.get("country", "")), "save_path": archive_path,
 		"lifetime_sales": 0, "lifetime_profit": 0, "markets": 0, "bankrupt": false,
 		"ownership_status": "owned"}
 	if index >= 0:
@@ -247,6 +299,7 @@ static func award(profile: Dictionary, event_id: String, achievement_id: String,
 	if not found:
 		profile.achievements.append({"id": achievement_id, "title": title})
 	profile.xp += maxi(0, points)
+	profile.title = progression_title(profile)
 	return true
 
 static func level(profile: Dictionary) -> int:
@@ -284,6 +337,18 @@ static func owned_companies(profile: Dictionary) -> Array[Dictionary]:
 
 static func company_path(company_id: String) -> String:
 	return "user://ceo_companies/%s.save" % company_id
+
+static func company_path_for_game(game_id: String, company_id: String) -> String:
+	if not _valid_game_id(game_id) or company_id.strip_edges().is_empty(): return ""
+	return "user://obt_games/%s/companies/%s.save" % [game_id, company_id]
+
+static func _valid_game_id(game_id: String) -> bool:
+	if game_id.is_empty() or game_id.length() > 80: return false
+	for index in game_id.length():
+		var character := game_id.substr(index, 1)
+		if not ((character >= "a" and character <= "z") or (character >= "0" and character <= "9") or character == "-"):
+			return false
+	return true
 
 static func add_avatar(profile: Dictionary, mime: String, data: PackedByteArray) -> Error:
 	if mime not in ["image/jpeg", "image/png", "image/webp"] or data.is_empty() or data.size() > MAX_AVATAR_BYTES:

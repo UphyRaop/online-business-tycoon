@@ -8,7 +8,7 @@ const Stores = preload("res://store_manager.gd")
 const PATH := "user://business_phase1.save"
 const PROTOTYPE := "user://business_save.json"
 
-static func save(state: Dictionary, path: String = PATH, timestamp: float = 0) -> Error:
+static func save(state: Dictionary, path: String = PATH, timestamp: float = 0, metadata: Dictionary = {}) -> Error:
 	if not valid(state):
 		return ERR_INVALID_DATA
 	var parent_path := ProjectSettings.globalize_path(path).get_base_dir()
@@ -19,7 +19,10 @@ static func save(state: Dictionary, path: String = PATH, timestamp: float = 0) -
 	var file := FileAccess.open(pending, FileAccess.WRITE)
 	if file == null:
 		return FileAccess.get_open_error()
-	file.store_var({"state": state, "saved_at": timestamp} if timestamp > 0 else state)
+	var payload: Variant = state
+	if timestamp > 0 or not metadata.is_empty():
+		payload = {"state": state, "saved_at": timestamp, "metadata": metadata.duplicate(true)}
+	file.store_var(payload)
 	file.flush()
 	var result := file.get_error()
 	file.close()
@@ -67,7 +70,9 @@ static func read_record(path: String) -> Dictionary:
 		if data is Dictionary and (saved_at is float or saved_at is int) and is_finite(float(saved_at)) and saved_at >= 0:
 			Sim.upgrade(data)
 			if valid(data):
-				return {"state": data, "saved_at": float(saved_at)}
+				var metadata: Variant = parsed.get("metadata", {}) if parsed.has("state") else {}
+				if not metadata is Dictionary: metadata = {}
+				return {"state": data, "saved_at": float(saved_at), "metadata": metadata.duplicate(true)}
 	return {}
 
 static func valid(state: Dictionary) -> bool:
