@@ -19,7 +19,7 @@ func run() -> void:
 	expect(not app.sim.channel_enabled(0) and not app.sim.channel_enabled(1), "Legacy channel flags do not create a marketplace or website")
 	expect(has_label("Mira Founder, CEO"), "Dashboard displays the registered entrepreneur as CEO")
 	press("Business")
-	expect(has_label("Owned Stores") and not has_label("Website domain") and not has_label("Website inactive")
+	expect(has_label("Owned Stores") and not has_label("Website Domain") and not has_label("Website inactive")
 		and controls(app, "OptionButton").is_empty(), "Company Profile shows zero stores and no legacy website or channel controls")
 	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Company Details"),
 		"Saved company details are read-only until editing is explicitly activated")

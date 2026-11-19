@@ -123,7 +123,7 @@ func create_new_game_for_test(ceo_name: String, company_name: String) -> void:
 	var ceo_field := field_for_label("CEO Name")
 	if ceo_field != null: ceo_field.text = ceo_name
 	press("Continue to Company Registration")
-	var company_field := field_for_label("Company name")
+	var company_field := field_for_label("Company Name")
 	if company_field != null: company_field.text = company_name
 	press("Register company")
 
@@ -229,7 +229,7 @@ func run() -> void:
 	inputs[1].text = "Aster Holdings"
 	press("Save Changes")
 	expect(app.sim.state.owner == "Mira Founder Updated" and app.sim.state.company == "Aster Holdings"
-		and not has_label("Website domain"), "Company Profile saves identity without exposing website controls")
+		and not has_label("Website Domain"), "Company Profile saves identity without exposing website controls")
 	press("Save Game")
 	press("Save to slot 1")
 	press("Back")

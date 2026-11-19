@@ -45,6 +45,7 @@ func test_semantic_button_roles() -> void:
 
 func test_action_semantics() -> void:
 	expect(ThemeStyle.button_role_for_action("Create Campaign") == "primary", "Creation actions map to Primary")
+	expect(ThemeStyle.button_role_for_action("Save Changes") == "success", "Save actions map to Positive Success")
 	expect(ThemeStyle.button_role_for_action("Edit Profile") == "edit", "Editing actions map to Edit")
 	expect(ThemeStyle.button_role_for_action("Pause Campaign") == "warning", "Pause actions map to Warning")
 	expect(ThemeStyle.button_role_for_action("Delete Campaign") == "destructive", "Deletion actions map to Destructive")
@@ -59,6 +60,8 @@ func test_safe_text_formatting() -> void:
 		"Heading formatting capitalizes generic words and preserves branded casing")
 	expect(ThemeStyle.heading_text("CEO profile at TikTok and SHEIN") == "CEO Profile at TikTok and SHEIN",
 		"Heading formatting preserves acronyms and official proper-name casing")
+	expect(ThemeStyle.heading_text("units per bundle") == "Units per Bundle",
+		"Heading formatting keeps short prepositions lowercase in Title Case field labels")
 	expect(ThemeStyle.sentence_text("  update the store before launch.  ") == "Update the store before launch.",
 		"Sentence formatting trims spacing and uppercases only the sentence start")
 	expect(ThemeStyle.sentence_text("iPhone listings use WooCommerce.") == "iPhone listings use WooCommerce.",

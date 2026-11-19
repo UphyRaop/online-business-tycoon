@@ -140,10 +140,10 @@ static func button_role_for_action(title: String) -> String:
 		return ROLE_EDIT
 	if name.begins_with("pause") or name.begins_with("hold"):
 		return ROLE_WARNING
-	if name.begins_with("create") or name.begins_with("save") or name.begins_with("register") or name.begins_with("continue") or name.begins_with("apply") or name.begins_with("launch") or name.begins_with("publish") or name.begins_with("purchase") or name.begins_with("buy ") or name.begins_with("reactivate"):
-		return ROLE_PRIMARY
-	if name.begins_with("confirm") or name.begins_with("complete") or name.begins_with("approve") or name.contains("refund"):
+	if name.begins_with("save") or name.begins_with("confirm") or name.begins_with("complete") or name.begins_with("approve") or name.contains("refund"):
 		return ROLE_SUCCESS
+	if name.begins_with("create") or name.begins_with("register") or name.begins_with("continue") or name.begins_with("apply") or name.begins_with("launch") or name.begins_with("publish") or name.begins_with("purchase") or name.begins_with("buy ") or name.begins_with("reactivate"):
+		return ROLE_PRIMARY
 	if name == "cancel" or name == "back" or name == "close" or name == "menu" or name == "switch" or name.begins_with("discard") or name == "previous" or name == "next" or name.begins_with("open ") or name.begins_with("manage") or name.begins_with("view "):
 		return ROLE_NAVIGATION
 	return ROLE_SECONDARY
@@ -176,7 +176,7 @@ static func heading_text(value: String) -> String:
 			words[index] = prefix + str(PROPER_WORDS[key]) + suffix
 		elif word == word.to_upper() or (word != word.to_lower() and word != word.to_upper()):
 			continue
-		elif index > 0 and word.to_lower() in ["and", "or", "of", "for", "to", "in", "on", "at", "by", "from", "with"]:
+		elif index > 0 and word.to_lower() in ["and", "or", "of", "for", "to", "in", "on", "at", "by", "from", "with", "per"]:
 			words[index] = prefix + word.to_lower() + suffix
 		elif not word.is_empty():
 			words[index] = prefix + word.substr(0, 1).to_upper() + word.substr(1) + suffix

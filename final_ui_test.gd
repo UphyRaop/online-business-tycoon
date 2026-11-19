@@ -156,7 +156,7 @@ func register_company(name: String, ceo_name: String) -> void:
 	var ceo_field := field_for_label("CEO Name")
 	if ceo_field != null: ceo_field.text = ceo_name
 	press("Continue to Company Registration")
-	var company_field := field_for_label("Company name")
+	var company_field := field_for_label("Company Name")
 	if company_field != null: company_field.text = name
 	select(controls(app, "OptionButton")[1], 2)
 	press("Register company")

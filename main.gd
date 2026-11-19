@@ -146,7 +146,10 @@ func action(parent: Node, title: String, callback: Callable, accent: bool = fals
 	node.custom_minimum_size.y = TOUCH_HEIGHT
 	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	node.pressed.connect(callback)
-	Style.apply_button_role(node, Style.ROLE_PRIMARY if accent else Style.button_role_for_action(title))
+	var semantic_role := Style.button_role_for_action(title)
+	if accent and semantic_role == Style.ROLE_SECONDARY:
+		semantic_role = Style.ROLE_PRIMARY
+	Style.apply_button_role(node, semantic_role)
 	parent.add_child(node)
 	return node
 
@@ -216,7 +219,7 @@ func dropdown(parent: Node, choices: Array, selected: int) -> OptionButton:
 	return node
 
 func field(parent: Node, caption: String, value: String, max_length: int = 48) -> LineEdit:
-	parent.add_child(label(caption, 14, Style.MUTED))
+	parent.add_child(label(Style.heading_text(caption), 14, Style.MUTED))
 	var input := LineEdit.new()
 	input.text = value
 	input.max_length = max_length

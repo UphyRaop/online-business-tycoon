@@ -48,7 +48,7 @@ func test_legacy_game_is_visible() -> void:
 	if app.confirmation != null: app.confirmation.confirmed.emit()
 	expect(app.screen == "Entrepreneur name" and has_label("Enter your entrepreneur name to continue this saved company."),
 		"Legacy save without an entrepreneur name prompts for identity before loading")
-	var legacy_name_field := field_for_label("Entrepreneur name")
+	var legacy_name_field := field_for_label("Entrepreneur Name")
 	if legacy_name_field != null: legacy_name_field.text = "Different Legacy Name"
 	press("Save and continue")
 	expect(app.screen == "CEO identity conflict", "Conflicting legacy name requires an explicit migration choice")
@@ -74,7 +74,7 @@ func test_required_new_game_identity() -> void:
 	first_game_id = app.active_game_id
 	press("Register company")
 	expect(app.screen == "Setup" and app.sim == null, "Company name remains required after CEO identity is saved")
-	var company_field := field_for_label("Company name")
+	var company_field := field_for_label("Company Name")
 	if company_field == null:
 		expect(false, "Company registration displays a Company name field")
 		return
@@ -105,7 +105,7 @@ func test_independent_game_saves_and_profiles() -> void:
 		return
 	name_field.text = "Riley Founder"
 	press("Continue to Company Registration")
-	var company_field := field_for_label("Company name")
+	var company_field := field_for_label("Company Name")
 	if company_field == null:
 		expect(false, "Second game reaches company registration")
 		return
