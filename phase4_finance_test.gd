@@ -18,6 +18,22 @@ func _initialize() -> void:
 	expect(opening_dashboard.revenue == 0 and opening_dashboard.expenses == 0 and opening_dashboard.net_profit == 0,
 		"New company overview derives zero activity from the opening ledger")
 	expect(state.stores.is_empty(), "Financial reporting does not create stores")
+	var boundary_state := Sim.register("Report CEO", "Report Co", "", 0, 1, 0, 911)
+	var boundary_sim := Sim.new(boundary_state)
+	boundary_state.ledger[0].sales = 500
+	boundary_state.ledger[0].channels[0].sales = 500
+	var day_one_history := boundary_sim.report_completed(30)
+	expect(day_one_history.end == 0 and day_one_history.sales == 0,
+		"Day 1 unfinished ledger activity is excluded from completed historical reports")
+	boundary_state.day = 2
+	boundary_state.ledger.append(Sim.entry())
+	boundary_state.ledger[1].sales = 900
+	var daily_history := boundary_sim.calendar_report_completed(0, 2)
+	expect(daily_history.end == 1 and daily_history.sales == 500,
+		"Daily reports anchored to the current day stop at the last completed day")
+	var future_history := boundary_sim.report_completed(30, 999)
+	expect(future_history.end == 1 and future_history.sales == 500,
+		"Historical reports cap future anchors before current unfinished ledger entries")
 
 	var marketplace_error := Stores.create(state, "Ledger Market", 0, "Ledger", "", 0)
 	var website_index := Stores.website_platform_index("shopify")
