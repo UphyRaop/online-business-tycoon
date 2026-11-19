@@ -146,9 +146,12 @@ func run() -> void:
 	inputs = controls(app, "LineEdit")
 	if not inputs.is_empty(): inputs[0].text = "Mira Restored"
 	press("Save and continue")
-	expect(app.sim.state.owner == "Mira Restored" and app.sim.state.company == "Aster Labs"
+	expect(app.screen == "CEO identity conflict" and has_label("CEO identity needs your choice"),
+		"A legacy name that conflicts with the global CEO profile requires an explicit migration choice")
+	press("Use Current CEO Profile")
+	expect(app.sim.state.owner == "Mira Rouf Kalil" and app.sim.state.company == "Aster Labs"
 		and app.sim.state.stores == preserved_stores and app.sim.state.products == preserved_products
 		and app.sim.state.advertising.campaigns == preserved_campaigns,
-		"Entering the missing name resumes the same saved company and progress")
+		"Explicit identity migration resumes the same company and preserves progress")
 	print("Phase 3 UI (390 × 844): %d failures" % failures)
 	quit(0 if failures == 0 else 1)

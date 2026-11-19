@@ -1,5 +1,8 @@
 extends "res://phase1_ui_test.gd"
 
+const CEO = preload("res://ceo_profile.gd")
+const Sim = preload("res://simulation.gd")
+
 func run() -> void:
 	if OS.get_environment("OBT_ISOLATED_TEST_PROFILE") != "1" or not Slots.latest().is_empty():
 		push_error("Run Phase 4 navigation checks with a fresh isolated profile.")
@@ -20,9 +23,10 @@ func run() -> void:
 		and nav.get_index() == game_date.get_index() + 1,
 		"Primary navigation sits immediately after the game date in the masthead")
 	_check_primary_tabs_within_viewport(Vector2i(1280, 720))
-	for tab in ["Dashboard", "Market", "Order", "Business", "Finance"]:
+	for tab in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
 		expect(nav != null and controls(nav, "Button").any(func(button): return button.text == tab), "%s is present in the top navigation" % tab)
-	expect(controls(app, "Button").filter(func(button): return button.text in ["Dashboard", "Market", "Order", "Business", "Finance"]).size() == 5,
+	expect(nav != null and nav.columns == 6, "Desktop shows all six primary categories in one row")
+	expect(controls(app, "Button").filter(func(button): return button.text in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]).size() == 6,
 		"There is one primary navigation set; no bottom duplicate remains")
 
 	press("Dashboard")
@@ -111,11 +115,40 @@ func run() -> void:
 		and int(loaded_stores[1].id) == website_id and str(loaded_stores[1].domain) == "harbor.example.test",
 		"Save/load preserves marketplace and website IDs and website details")
 	Slots.delete_slot(1)
+	press("Profile")
+	expect(app.page == "Profile" and has_label("CEO identity") and has_label("Career progression")
+		and has_label("Owned companies"), "Profile category presents CEO identity, career, and owned companies")
+	expect(has_label("Personal cash: Unavailable") and has_label("Personal net worth: Unavailable"),
+		"Unsupported personal finance is clearly unavailable and separated from company accounts")
+	var profile_fields := controls(app, "LineEdit")
+	profile_fields[0].text = "Kai Global CEO"
+	press("Save Profile")
+	expect(app.ceo_profile.full_name == "Kai Global CEO" and app.sim.state.owner == "Kai Global CEO"
+		and CEO.load_profile().full_name == "Kai Global CEO", "Profile editing persists the shared CEO identity")
+	var first_company_id := str(app.sim.state.company_id)
+	var second_company := Sim.register("Kai Global CEO", "Harbor Digital", "", 1, 1, 0, 9123)
+	app.ceo_profile = CEO.register_company(app.ceo_profile, second_company)
+	expect(Saves.save(second_company, CEO.company_path(second_company.company_id), 2.0) == OK
+		and CEO.save_profile(app.ceo_profile) == OK, "Second company save is linked without changing the current business")
+	app.navigate("Profile")
+	var switch_buttons := controls(app, "Button").filter(func(button): return button.text == "Switch")
+	expect(switch_buttons.size() == 1, "Profile offers company switching for the other owned company")
+	if switch_buttons.size() == 1:
+		switch_buttons[0].pressed.emit()
+		expect(str(app.sim.state.company_id) == str(second_company.company_id)
+			and app.sim.state.company == "Harbor Digital" and app.ceo_profile.full_name == "Kai Global CEO",
+			"Company switching restores a separate save and keeps CEO progression linked")
+		app.navigate("Profile")
+		switch_buttons = controls(app, "Button").filter(func(button): return button.text == "Switch")
+		if switch_buttons.size() == 1:
+			switch_buttons[0].pressed.emit()
+		expect(str(app.sim.state.company_id) == first_company_id and app.sim.state.company == "Harbor Works",
+			"Switching back restores the original company and its store history")
 
 	root.size = Vector2i(390, 844)
 	await process_frame
 	await process_frame
-	for target in ["Dashboard", "Market", "Order", "Business", "Finance"]:
+	for target in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
 		press(target)
 		expect(app.primary_category(app.page) == target or (target == "Order" and app.primary_category(app.page) == "Order"),
 			"Mobile navigation opens %s" % target)
@@ -153,4 +186,4 @@ func _check_primary_tabs_within_viewport(viewport: Vector2i) -> void:
 		button_count += 1
 		expect(button_bounds.position.x * scale_x >= 0 and button_bounds.end.x * scale_x <= float(viewport.x) + 1.0,
 			"%s remains reachable within the viewport" % button.text)
-	expect(button_count == 5, "All five primary tabs remain present without requiring horizontal scrolling")
+	expect(button_count == 6, "All six primary tabs remain present without requiring horizontal scrolling")

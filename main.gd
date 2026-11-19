@@ -12,7 +12,9 @@ const Calendar = preload("res://game_calendar.gd")
 const AdsView = preload("res://advertising_view.gd")
 const StoresView = preload("res://stores_view.gd")
 const StoreManager = preload("res://store_manager.gd")
-const NAV := ["Dashboard", "Market", "Order", "Business", "Finance"]
+const CEOProfile = preload("res://ceo_profile.gd")
+const Saves = preload("res://save_store.gd")
+const NAV := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
 const PREFERENCES := "user://display.cfg"
@@ -56,9 +58,18 @@ var ad_status_filter := -1
 var ads_tab := "Overview"
 var stores_tab := "Stores"
 var show_new_store_form := false
+var ceo_profile: Dictionary = {}
+var ceo_profile_corrupt := false
+var identity_conflict_record: Dictionary = {}
+var avatar_picker_callback: JavaScriptObject
 
 func _ready() -> void:
 	theme = Style.build()
+	ceo_profile = CEOProfile.load_profile()
+	ceo_profile_corrupt = (FileAccess.file_exists(CEOProfile.PATH) or FileAccess.file_exists(CEOProfile.PATH + ".bak")) and ceo_profile.is_empty()
+	if ceo_profile_corrupt:
+		notice = "The CEO profile could not be read. Company saves remain available; profile data was not overwritten."
+		error_notice = true
 	get_viewport().size_changed.connect(_update_responsive_layout)
 	var settings := ConfigFile.new()
 	if settings.load(PREFERENCES) == OK:
@@ -207,10 +218,10 @@ func _update_responsive_layout() -> void:
 		_reflow_page_cards()
 	var nav := find_child("PrimaryNavigation", true, false) as GridContainer
 	if nav != null:
-		nav.columns = 3 if viewport_width < 600.0 else 5
+		nav.columns = 3 if viewport_width < 1024.0 else 6
 		for item in nav.get_children():
 			if item is Button:
-				item.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 180)
+				item.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 145)
 				item.add_theme_font_size_override("font_size", 12 if viewport_width < 600.0 else 13)
 	var kpis := find_child("DashboardKpis", true, false) as GridContainer
 	if kpis != null:
@@ -266,17 +277,29 @@ func set_notice(message: String, error: bool = false) -> void:
 		status.add_theme_color_override("font_color", Style.RED if error else Style.GREEN)
 
 func persist(message: String) -> void:
+	_sync_ceo_profile()
 	write_progress(Slots.AUTOSAVE, message)
 
-func write_progress(slot: int, message: String) -> void:
+func write_progress(slot: int, message: String) -> bool:
+	_sync_ceo_profile()
+	var archive_path := CEOProfile.company_path(str(sim.state.get("company_id", "")))
+	var archive_result := Saves.save(sim.state, archive_path, Time.get_unix_time_from_system())
 	var result := Slots.write(slot, sim.state)
 	if result != OK:
 		dirty = dirty or slot == Slots.AUTOSAVE
 		var reason := "Game data failed validation." if result == ERR_INVALID_DATA else error_string(result)
 		set_notice("%s save failed. Progress is still in memory. %s" % [Slots.name_for(slot), reason], true)
-		return
+		return false
+	if archive_result != OK:
+		set_notice("%s saved, but the CEO company recovery copy failed. %s" % [Slots.name_for(slot), error_string(archive_result)], true)
+		return false
+	var profile_result := ERR_FILE_CORRUPT if ceo_profile_corrupt else CEOProfile.save_profile(ceo_profile)
+	if profile_result != OK:
+		set_notice("%s saved, but the global CEO profile could not be saved. %s" % [Slots.name_for(slot), error_string(profile_result)], true)
+		return false
 	dirty = OS.has_feature("web") and not OS.is_userfs_persistent()
 	set_notice(message + " Browser storage is unavailable. Progress may be lost on reload." if dirty else message, dirty)
+	return true
 
 func watch_edits(nodes: Array) -> Callable:
 	var values := func() -> Array:
@@ -330,8 +353,29 @@ func show_screen(target: String) -> void:
 	render()
 
 func start_new_game() -> void:
+	if ceo_profile_corrupt:
+		set_notice("Starting another company is disabled until the damaged CEO profile is recovered. Existing saves are untouched.", true)
+		return
 	if Slots.occupied(Slots.AUTOSAVE):
-		confirm_action("Start a new game?", "Registration will replace the current autosave. Manual slots retain their saved games.", "New Game", func(): show_screen("Setup"))
+		var latest := Slots.latest()
+		if not latest.is_empty():
+			var preserved: Dictionary = latest.state.duplicate(true)
+			if not ceo_profile.is_empty() and str(ceo_profile.get("full_name", "")).strip_edges().to_lower() != str(preserved.get("owner", "")).strip_edges().to_lower():
+				identity_conflict_record = latest.duplicate(true)
+				identity_conflict_record.context = "new_company"
+				show_screen("CEO identity conflict")
+				return
+			if ceo_profile.is_empty():
+				ceo_profile = CEOProfile.ensure({}, str(preserved.get("owner", "")))
+			ceo_profile = CEOProfile.sync_company(ceo_profile, preserved)
+			var archive_result := Saves.save(preserved, CEOProfile.company_path(str(preserved.company_id)), float(latest.get("saved_at", 0)))
+			if archive_result != OK:
+				set_notice("Could not preserve the current company before starting another. " + error_string(archive_result), true)
+				return
+			if CEOProfile.save_profile(ceo_profile) != OK:
+				set_notice("Could not save the CEO company list. Existing game was not changed.", true)
+				return
+		confirm_action("Start another company?", "The current company will remain in the CEO profile. Its autosave and manual slots are preserved.", "New Company", func(): show_screen("Setup"))
 	else:
 		show_screen("Setup")
 
@@ -350,6 +394,10 @@ func request_load(record: Dictionary) -> void:
 		if str(record.state.get("owner", "")).strip_edges().is_empty():
 			identity_record = record
 			show_screen("Entrepreneur name")
+			return
+		if not ceo_profile.is_empty() and str(ceo_profile.get("full_name", "")).strip_edges().to_lower() != str(record.state.owner).strip_edges().to_lower():
+			identity_conflict_record = record
+			show_screen("CEO identity conflict")
 			return
 		enter_game(record.state)
 		set_notice("Loaded %s%s." % [Slots.name_for(record.slot), " from backup" if record.get("recovered", false) else ""])
@@ -377,6 +425,12 @@ func complete_identity() -> void:
 			return
 		var updated: Dictionary = identity_record.state.duplicate(true)
 		updated.owner = name
+		if not ceo_profile.is_empty() and str(ceo_profile.get("full_name", "")).strip_edges().to_lower() != name.to_lower():
+			identity_record.state = updated
+			identity_record.owner_candidate = name
+			identity_conflict_record = identity_record.duplicate(true)
+			show_screen("CEO identity conflict")
+			return
 		var result := Slots.write(identity_record.slot, updated, identity_record.saved_at)
 		if result != OK:
 			set_notice("Could not update this save. " + error_string(result), true)
@@ -389,8 +443,208 @@ func complete_identity() -> void:
 		show_screen("Load")
 	)
 
+func resolve_identity_conflict(use_existing_identity: bool) -> void:
+	if identity_conflict_record.is_empty():
+		show_screen("Title")
+		return
+	if not use_existing_identity:
+		identity_conflict_record.clear()
+		show_screen("Title")
+		return
+	var state: Dictionary = identity_conflict_record.state.duplicate(true)
+	state.owner = str(ceo_profile.get("full_name", ""))
+	var slot := int(identity_conflict_record.get("slot", Slots.AUTOSAVE))
+	var result := Slots.write(slot, state, float(identity_conflict_record.get("saved_at", 0)))
+	if result != OK:
+		set_notice("Could not apply the identity choice. " + error_string(result), true)
+		return
+	var context := str(identity_conflict_record.get("context", ""))
+	identity_conflict_record.clear()
+	identity_record.clear()
+	ceo_profile = CEOProfile.sync_company(ceo_profile, state)
+	var archive_error := Saves.save(state, CEOProfile.company_path(str(state.company_id)), Time.get_unix_time_from_system())
+	if archive_error != OK or CEOProfile.save_profile(ceo_profile) != OK:
+		set_notice("The save was migrated, but its CEO profile copy could not be confirmed.", true)
+		return
+	if context == "new_company":
+		show_screen("Setup")
+	else:
+		enter_game(state)
+
+func identity_conflict_screen() -> void:
+	var view := card("CEO identity needs your choice")
+	view.add_child(label("This older company save names %s, while this browser profile is linked to %s. The two identities will not be merged silently." % [str(identity_conflict_record.get("state", {}).get("owner", "an earlier entrepreneur")), str(ceo_profile.get("full_name", "the current CEO"))], 15, Style.MUTED))
+	view.add_child(label("You can associate this company with the current CEO profile. Company accounts and operations stay separate. Cancel leaves the save unchanged.", 14, Style.MUTED))
+	action(view, "Use Current CEO Profile", func(): resolve_identity_conflict(true), true)
+	action(view, "Cancel", func(): resolve_identity_conflict(false))
+
+func _sync_ceo_profile() -> void:
+	if sim == null or ceo_profile_corrupt:
+		return
+	if ceo_profile.is_empty():
+		ceo_profile = CEOProfile.ensure({}, str(sim.state.get("owner", "")))
+	if str(ceo_profile.get("full_name", "")).strip_edges().is_empty():
+		ceo_profile.full_name = str(sim.state.get("owner", ""))
+	sim.state.owner = str(ceo_profile.get("full_name", sim.state.get("owner", "")))
+	ceo_profile = CEOProfile.sync_company(ceo_profile, sim.state)
+
+func switch_company(company_id: String) -> void:
+	var index := CEOProfile.company_index(ceo_profile, company_id)
+	if index < 0:
+		set_notice("That company is no longer in this CEO profile.", true)
+		return
+	var entry: Dictionary = ceo_profile.companies[index]
+	var state := Saves.load_state(str(entry.get("save_path", CEOProfile.company_path(company_id))))
+	if state.is_empty() or str(state.get("company_id", "")) != company_id:
+		set_notice("The saved company could not be recovered. Other companies were left untouched.", true)
+		return
+	var change := func():
+		var archive_result := Saves.save(state, CEOProfile.company_path(company_id), Time.get_unix_time_from_system())
+		if archive_result != OK:
+			set_notice("Could not preserve the selected company. " + error_string(archive_result), true)
+			return
+		enter_game(state)
+	if dirty:
+		confirm_action("Switch company?", "Save the current company before switching to %s?" % str(entry.get("name", "Company")), "Switch Company", func():
+			if write_progress(Slots.AUTOSAVE, "Current company preserved."):
+				change.call()
+		)
+	else:
+		change.call()
+
+func profile_page() -> void:
+	if ceo_profile_corrupt:
+		var damaged := card("CEO profile unavailable")
+		damaged.add_child(label("The profile file and its backup are unreadable. Company saves remain intact. Recover the browser profile data before editing the CEO identity or switching companies.", 15, Style.RED))
+		damaged.add_child(label("The game will not replace these files with a new profile automatically.", 14, Style.MUTED))
+		return
+	var info := card("CEO identity")
+	var avatar := TextureRect.new()
+	avatar.name = "CEOAvatar"
+	avatar.custom_minimum_size = Vector2(128, 128)
+	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	avatar.texture = _profile_avatar_texture()
+	info.add_child(avatar)
+	var full_name := field(info, "Full name", str(ceo_profile.get("full_name", sim.state.get("owner", ""))))
+	var residence := field(info, "Country of residence", str(ceo_profile.get("country", "")))
+	var title := field(info, "Entrepreneur title", str(ceo_profile.get("title", "Entrepreneur")))
+	watch_edits([full_name, residence, title])
+	var save_identity := func():
+		if full_name.text.strip_edges().is_empty() or title.text.strip_edges().is_empty():
+			set_notice("Enter a name and entrepreneur title.", true)
+			return
+		ceo_profile.full_name = full_name.text.strip_edges()
+		ceo_profile.country = residence.text.strip_edges()
+		ceo_profile.title = title.text.strip_edges()
+		sim.state.owner = ceo_profile.full_name
+		_sync_ceo_profile()
+		var result := CEOProfile.save_profile(ceo_profile)
+		if result != OK:
+			set_notice("The CEO profile could not be saved. " + error_string(result), true)
+			return
+		write_progress(Slots.AUTOSAVE, "CEO profile updated.")
+		refresh_view()
+	action(info, "Save Profile", save_identity, true)
+	action(info, "Choose Photo", open_avatar_picker)
+	if not str(ceo_profile.get("avatar_data", "")).is_empty():
+		action(info, "Remove Photo", func():
+			CEOProfile.clear_avatar(ceo_profile)
+			if write_progress(Slots.AUTOSAVE, "Profile photo removed."):
+				set_notice("Profile photo removed.")
+			refresh_view()
+		)
+	info.add_child(label("Photo stays in this browser profile. Clearing browser data or using private browsing may remove it; it is never uploaded.", 14, Style.MUTED))
+	var career := card("Career progression")
+	career.add_child(label("Level %d · %d XP" % [CEOProfile.level(ceo_profile), int(ceo_profile.get("xp", 0))], 20, Style.GOLD))
+	career.add_child(label("%d XP to the next level" % CEOProfile.xp_to_next_level(ceo_profile), 15, Style.MUTED))
+	career.add_child(label("Personal reputation: %d / 100" % int(ceo_profile.get("personal_reputation", 0)), 15, Style.MUTED))
+	var achievements := card("Achievements")
+	var earned: Array = ceo_profile.get("achievements", [])
+	if earned.is_empty():
+		achievements.add_child(label("Achievements are awarded for career milestones.", 15, Style.MUTED))
+	for item in earned:
+		achievements.add_child(label("• %s" % str(item.get("title", item.get("id", "Achievement"))), 15))
+	var finance_card := card("Personal finance")
+	finance_card.add_child(label("Personal cash: Unavailable · personal compensation accounting is not implemented.", 14, Style.MUTED))
+	finance_card.add_child(label("Personal net worth: Unavailable · company assets are excluded.", 14, Style.MUTED))
+	finance_card.add_child(label("Company funds and profits are separate from your personal finances.", 14, Style.MUTED))
+	var companies := card("Owned companies")
+	companies.add_child(label("Each company keeps its own save, operations, and accounts.", 14, Style.MUTED))
+	for entry in ceo_profile.get("companies", []):
+		var company_row := row(companies)
+		var description := label("%s · %s" % [str(entry.get("name", "Company")), str(entry.get("country", ""))], 15, Style.GOLD)
+		description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		company_row.add_child(description)
+		if str(entry.get("company_id", "")) == str(sim.state.get("company_id", "")):
+			company_row.add_child(label("Current", 14, Style.GREEN))
+		else:
+			action(company_row, "Switch", switch_company.bind(str(entry.get("company_id", ""))))
+	action(companies, "Start Another Company", start_new_game, true)
+
+func _profile_avatar_texture() -> Texture2D:
+	var encoded := str(ceo_profile.get("avatar_data", ""))
+	if encoded.is_empty():
+		return load("res://icon.svg")
+	var bytes := Marshalls.base64_to_raw(encoded)
+	var image := Image.new()
+	if image.load_jpg_from_buffer(bytes) != OK:
+		return load("res://icon.svg")
+	return ImageTexture.create_from_image(image)
+
+func open_avatar_picker() -> void:
+	if OS.has_feature("web"):
+		avatar_picker_callback = JavaScriptBridge.create_callback(_on_web_avatar_selected)
+		JavaScriptBridge.get_interface("window").obtAvatarSelected = avatar_picker_callback
+		JavaScriptBridge.eval("(function(){const i=document.createElement('input');i.type='file';i.accept='image/jpeg,image/png,image/webp';i.onchange=function(){const f=i.files&&i.files[0];if(!f)return;if(f.size>8388608){window.obtAvatarSelected('error:Photo must be 8 MB or smaller.');return;}if(!['image/jpeg','image/png','image/webp'].includes(f.type)){window.obtAvatarSelected('error:Choose a JPEG, PNG, or WebP image.');return;}const r=new FileReader();r.onerror=function(){window.obtAvatarSelected('error:The selected image could not be read.');};r.onload=function(){const im=new Image();im.onerror=function(){window.obtAvatarSelected('error:The selected image is invalid.');};im.onload=function(){const n=256,c=document.createElement('canvas');c.width=n;c.height=n;const x=c.getContext('2d'),s=Math.min(im.width,im.height),l=(im.width-s)/2,t=(im.height-s)/2;x.drawImage(im,l,t,s,s,0,0,n,n);window.obtAvatarSelected(c.toDataURL('image/jpeg',0.82));};im.src=r.result;};r.readAsDataURL(f);};i.click();})();")
+		return
+	var dialog := FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.add_filter("*.jpg, *.jpeg, *.png, *.webp", "Images")
+	add_child(dialog)
+	dialog.file_selected.connect(func(path: String):
+		var image := Image.new()
+		var error := image.load(path)
+		if error != OK:
+			set_notice("Could not read the selected image.", true)
+		else:
+			var data := image.save_png_to_buffer()
+			error = CEOProfile.add_avatar(ceo_profile, "image/png", data)
+			if error != OK:
+				set_notice("Could not store this photo. Try an image under 512 KB.", true)
+			else:
+				write_progress(Slots.AUTOSAVE, "Profile photo saved locally.")
+				refresh_view()
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.popup_centered_ratio(0.8)
+
+func _on_web_avatar_selected(args: Array) -> void:
+	if args.is_empty():
+		return
+	var value := str(args[0])
+	if value.begins_with("error:"):
+		set_notice(value.trim_prefix("error:"), true)
+		return
+	var parts := value.split(",", false, 1)
+	if parts.size() != 2:
+		set_notice("The selected image could not be decoded.", true)
+		return
+	var mime := parts[0].trim_prefix("data:").get_slice(";", 0)
+	var result := CEOProfile.add_avatar(ceo_profile, mime, Marshalls.base64_to_raw(parts[1]))
+	if result != OK:
+		set_notice("Could not store the selected image. Choose another photo.", true)
+		return
+	write_progress(Slots.AUTOSAVE, "Profile photo saved locally.")
+	refresh_view()
+
 func enter_game(data: Dictionary) -> void:
 	sim = Sim.new(data)
+	_sync_ceo_profile()
+	var profile_error := ERR_FILE_CORRUPT if ceo_profile_corrupt else CEOProfile.save_profile(ceo_profile)
+	var archive_error := Saves.save(sim.state, CEOProfile.company_path(str(sim.state.company_id)), Time.get_unix_time_from_system())
 	dirty = false
 	screen = "Game"
 	page = "Dashboard"
@@ -398,6 +652,8 @@ func enter_game(data: Dictionary) -> void:
 	report_end = 0
 	order_page = 0
 	set_notice("")
+	if profile_error != OK or archive_error != OK:
+		set_notice("Company loaded, but its CEO profile recovery copy could not be saved.", true)
 	render()
 
 func save_to_slot(slot: int) -> void:
@@ -472,6 +728,7 @@ func primary_category(target: String) -> String:
 	if target in ["Orders", "Pre-orders"]: return "Order"
 	if target in ["Business", "Advertising", "Campaign Manager", "Campaign Details", "Advertising Analytics"]: return "Business"
 	if target in ["Finance", "Store Profitability"]: return "Finance"
+	if target == "Profile": return "Profile"
 	return "Dashboard"
 
 func route_secondary(target: String) -> void:
@@ -493,7 +750,7 @@ func primary_navigation(parent: Node) -> void:
 	var nav := GridContainer.new()
 	nav.name = "PrimaryNavigation"
 	nav.size_flags_horizontal = Control.SIZE_FILL
-	nav.columns = 3 if viewport_width < 600.0 else 5
+	nav.columns = 3 if viewport_width < 1024.0 else 6
 	nav.add_theme_constant_override("h_separation", 6)
 	nav.add_theme_constant_override("v_separation", 6)
 	parent.add_child(nav)
@@ -501,7 +758,7 @@ func primary_navigation(parent: Node) -> void:
 		var tab := action(nav, target, navigate.bind(target), target == primary_category(page))
 		tab.add_theme_font_size_override("font_size", 12 if viewport_width < 600.0 else 13)
 		tab.clip_text = true
-		tab.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 180)
+		tab.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 145)
 		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		for button_state in ["normal", "hover", "pressed", "focus", "disabled"]:
 			var style: StyleBox = tab.get_theme_stylebox(button_state).duplicate()
@@ -594,7 +851,8 @@ func render() -> void:
 	else:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
 			"Campaign Manager": "Campaign Manager", "Campaign Details": "Campaign Details",
-			"Advertising Analytics": "Advertising Analytics", "Management": "Management", "Store Listings": "Store Listings"}
+			"Advertising Analytics": "Advertising Analytics", "Management": "Management", "Store Listings": "Store Listings",
+			"CEO identity conflict": "Identity choice"}
 		masthead.add_child(label(titles.get(screen, screen), 30))
 	if screen == "Game":
 		secondary_navigation(shell)
@@ -623,6 +881,7 @@ func render() -> void:
 			"Title": Menu.title(self)
 			"Setup": setup()
 			"Entrepreneur name": complete_identity()
+			"CEO identity conflict": identity_conflict_screen()
 			"Load": Menu.slots(self, false)
 			"Save": Menu.slots(self, true)
 			"Settings": Menu.settings(self)
@@ -641,6 +900,7 @@ func render() -> void:
 		"Pre-orders": Operations.preorders(self)
 		"Business": business()
 		"Finance": finance()
+		"Profile": profile_page()
 		"Advertising": AdsView.overview(self)
 		"Campaign Manager": AdsView.manager(self)
 		"Campaign Details": AdsView.details(self)
@@ -653,7 +913,10 @@ func render() -> void:
 func setup() -> void:
 	var details := card("Company registration")
 	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Management.", 15, Style.MUTED))
-	var owner := field(details, "Entrepreneur name", "")
+	var owner := field(details, "Entrepreneur name", str(ceo_profile.get("full_name", "")))
+	if not ceo_profile.is_empty():
+		owner.editable = false
+		details.add_child(label("This company will belong to your existing CEO profile.", 14, Style.MUTED))
 	var company := field(details, "Company name", "")
 	details.add_child(label("Starting country", 14, Style.MUTED))
 	var country := dropdown(details, Catalog.COUNTRIES, 0)
@@ -674,6 +937,8 @@ func setup() -> void:
 		if owner_name.is_empty() or company_name.is_empty():
 			set_notice("Enter an entrepreneur name and a company name.", true)
 			return
+		if not ceo_profile.is_empty():
+			owner_name = str(ceo_profile.get("full_name", owner_name))
 		var new_state := Sim.register(owner_name, company_name, "",
 			country.selected, difficulty.selected, 0, randi())
 		enter_game(new_state)
@@ -816,7 +1081,7 @@ func business() -> void:
 	metric(profile, "Owned stores", str(sim.state.stores.size()))
 	metric(profile, "Registration", "Active")
 	metric(profile, "Difficulty", Catalog.DIFFICULTIES[sim.state.difficulty])
-	var owner := field(profile, "Entrepreneur / CEO", sim.state.owner)
+	var owner := field(profile, "Entrepreneur / CEO", str(ceo_profile.get("full_name", sim.state.owner)))
 	var company := field(profile, "Company name", sim.state.company)
 	var names_saved := watch_edits([owner, company])
 	action(profile, "Save company profile", func():
@@ -825,8 +1090,10 @@ func business() -> void:
 		if owner_name.is_empty() or company_name.is_empty():
 			set_notice("Enter an entrepreneur name and company name.", true)
 			return
+		ceo_profile.full_name = owner_name
 		sim.state.owner = owner_name
 		sim.state.company = company_name
+		_sync_ceo_profile()
 		names_saved.call()
 		persist("Company profile saved.")
 	)
