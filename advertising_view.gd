@@ -20,7 +20,7 @@ static func overview(app: Control) -> void:
 	var totals := Ads.empty_metrics()
 	for id in campaigns:
 		var campaign: Dictionary = campaigns[id]
-		if campaign.status == "active": active += 1
+		if campaign.status == "active" and not bool(campaign.get("deleted", false)): active += 1
 		var metric: Dictionary = _lifetime(app.sim.state, id)
 		for field in Ads.METRIC_FIELDS + ["estimated_profit"]: totals[field] += int(metric.get(field, 0))
 	app.metric(view, "Active campaigns", str(active), Style.GOLD)
@@ -34,7 +34,8 @@ static func overview(app: Control) -> void:
 	view.add_child(app.label("Standard order attribution is recorded at checkout. Pre-order revenue attribution waits until delivery; the Income Statement recognizes all sales on delivery.", 13, Style.MUTED))
 	var platform_card: VBoxContainer = app.card("Platforms")
 	for platform in Ads.PLATFORMS:
-		platform_card.add_child(app.label("%s · $%.2f CPM · %.1f%% baseline CTR" % [platform.name, platform.cpm, platform.ctr], 14, Style.MUTED))
+		var baseline_cpm: String = app.money(Catalog.local_cents(int(app.sim.state.country), float(platform.cpm)))
+		platform_card.add_child(app.label("%s · %s CPM · %.1f%% baseline CTR" % [platform.name, baseline_cpm, platform.ctr], 14, Style.MUTED))
 
 static func manager(app: Control) -> void:
 	var view: VBoxContainer = app.card("Campaign Manager")
@@ -47,10 +48,11 @@ static func manager(app: Control) -> void:
 	, true)
 	var ids: Array = app.sim.state.advertising.campaigns.keys()
 	ids.sort()
-	if ids.is_empty():
-		view.add_child(app.label("No campaigns yet. Promote a published product in an active store.", 14, Style.MUTED))
+	var visible_campaigns := 0
 	for id in ids:
 		var campaign: Dictionary = app.sim.state.advertising.campaigns[id]
+		if bool(campaign.get("deleted", false)): continue
+		visible_campaigns += 1
 		var store := Stores.get_store(app.sim.state, campaign.store_id)
 		var detail: VBoxContainer = app.stack(view, 6)
 		app.divider(detail)
@@ -63,12 +65,14 @@ static func manager(app: Control) -> void:
 			app.navigate("Campaign Details")
 		)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if visible_campaigns == 0:
+		view.add_child(app.label("No campaigns are available in Campaign Manager. Create a campaign to promote a published product in an active store.", 14, Style.MUTED))
 
 static func details(app: Control) -> void:
 	var state: Dictionary = app.sim.state
 	var creating: bool = app.campaign_id == 0
 	var existing: Dictionary = state.advertising.campaigns.get(app.campaign_id, {})
-	if not creating and existing.is_empty():
+	if not creating and (existing.is_empty() or bool(existing.get("deleted", false))):
 		app.set_notice("Campaign not found.", true)
 		app.navigate("Campaign Manager")
 		return
@@ -76,21 +80,6 @@ static func details(app: Control) -> void:
 	app.secondary_tab(view, "Campaign Manager", app.navigate.bind("Campaign Manager"), true)
 	if not creating and not app.campaign_editing:
 		_campaign_summary(app, view, state, existing)
-		return
-	if not creating and existing.status == "stopped":
-		view.add_child(app.label("Stopped campaigns are read-only. Duplicate this campaign to create a new Draft.", 14, Style.MUTED))
-		var stopped_metrics: Dictionary = _lifetime(state, app.campaign_id)
-		app.metric(view, "Lifetime ad spend", app.money(stopped_metrics.spend))
-		app.metric(view, "Attributed purchases · revenue", "%d · %s" % [stopped_metrics.purchases, app.money(stopped_metrics.attributed_revenue - stopped_metrics.attributed_refunds)])
-		app.action(view, "Duplicate", func():
-			var error := Ads.duplicate_stopped(state, app.campaign_id)
-			if not error.is_empty():
-				app.set_notice(error, true)
-				return
-			app.campaign_id = state.advertising.next_campaign - 1
-			app.persist("Campaign duplicated as a draft.")
-			app.refresh_view()
-		)
 		return
 	var store_ids: Array[int] = []
 	var store_names: Array[String] = []
@@ -245,8 +234,10 @@ static func _campaign_summary(app: Control, view: VBoxContainer, state: Dictiona
 	app.metric(view, "Bid Limit", app.money(int(existing.bid)))
 	app.metric(view, "Creative Format", Ads.CREATIVES[int(existing.creative)])
 	app.metric(view, "Campaign Schedule", "Day %d%s" % [int(existing.start_day), " · End day %d" % int(existing.end_day) if int(existing.end_day) > 0 else " · No end date"])
-	if existing.status == "stopped":
-		view.add_child(app.label("This campaign has ended. Its history is retained.", 14, Style.MUTED))
+	if existing.status in ["stopped", "completed"]:
+		var stopped_schedule_expired: bool = existing.status == "stopped" and int(existing.get("end_day", 0)) > 0 and int(existing.end_day) < state.day
+		var explanation := "This campaign's scheduled end date has passed. Duplicate it to create a new campaign; its history is retained." if stopped_schedule_expired else ("This campaign was stopped. It can be reactivated while its schedule remains valid; its history is retained." if existing.status == "stopped" else "This campaign's schedule is complete. Its history is retained.")
+		view.add_child(app.label(explanation, 14, Style.MUTED))
 		app.action(view, "Duplicate", func():
 			var error := Ads.duplicate_stopped(state, app.campaign_id)
 			if not error.is_empty():
@@ -265,27 +256,45 @@ static func _campaign_summary(app: Control, view: VBoxContainer, state: Dictiona
 	_campaign_controls(app, view, state, existing)
 	var metrics: Dictionary = _lifetime(state, app.campaign_id)
 	app.metric(view, "Lifetime Ad Spend", app.money(metrics.spend))
-	app.metric(view, "Attributed Purchases · Revenue", "%d · %s" % [metrics.purchases, app.money(metrics.attributed_revenue - metrics.attributed_refunds)])
+	app.metric(view, "Attributed Purchases · Revenue", "%s · %s" % [_count(metrics.purchases), app.money(metrics.attributed_revenue - metrics.attributed_refunds)])
 	app.metric(view, "ROAS · CPA", "%.2f× · %s" % [metrics.roas, _average_cost(app, metrics.spend, metrics.purchases)])
 	app.secondary_tab(view, "Ads Analytics", app.navigate.bind("Advertising Analytics"), false)
 
 static func _campaign_controls(app: Control, view: VBoxContainer, state: Dictionary, existing: Dictionary) -> void:
-	if existing.status == "stopped":
-		return
-	var control_row: HBoxContainer = app.row(view)
-	var next_status: String = "Pause" if existing.status == "active" else ("Launch" if existing.status == "draft" else "Resume")
-	app.action(control_row, next_status, func():
-		Ads.set_status(state, app.campaign_id, "paused" if existing.status == "active" else "active")
-		app.campaign_editing = false
-		app.persist("Campaign %s." % ("paused" if existing.status == "active" else "resumed"))
-		app.refresh_view()
-	)
-	app.action(control_row, "Stop", func():
-		app.confirm_action("Stop campaign?", "This campaign cannot be resumed. Its history will be retained.", "Stop Campaign", func():
-			Ads.set_status(state, app.campaign_id, "stopped")
+	var schedule_expired: bool = int(existing.get("end_day", 0)) > 0 and int(existing.end_day) < state.day
+	if existing.status != "completed" and not (existing.status == "stopped" and schedule_expired):
+		var control_row: HBoxContainer = app.row(view)
+		var next_status := "Pause" if existing.status == "active" else ("Launch" if existing.status == "draft" else ("Reactivate Campaign" if existing.status == "stopped" else "Resume"))
+		app.action(control_row, next_status, func():
+			var error := Ads.set_status(state, app.campaign_id, "paused" if existing.status == "active" else "active")
+			if not error.is_empty():
+				app.set_notice(error, true)
+				return
 			app.campaign_editing = false
-			app.persist("Campaign stopped.")
+			app.persist("Campaign %s." % ("paused" if existing.status == "active" else ("reactivated" if existing.status == "stopped" else "resumed")))
 			app.refresh_view()
+		)
+		if existing.status != "stopped":
+			app.action(control_row, "Stop", func():
+				app.confirm_action("Stop campaign?", "You can reactivate it before its schedule ends. Its history remains available.", "Stop Campaign", func():
+					var error := Ads.set_status(state, app.campaign_id, "stopped")
+					if not error.is_empty():
+						app.set_notice(error, true)
+						return
+					app.campaign_editing = false
+					app.persist("Campaign stopped.")
+					app.refresh_view()
+				)
+			)
+	app.action(view, "Delete Campaign", func():
+		app.confirm_action("Archive this campaign?", "It will stop spending and disappear from Campaign Manager. Its ad spend, attributed sales and analytics history will remain available.", "Archive Campaign", func():
+			var error := Ads.archive(state, app.campaign_id)
+			if not error.is_empty():
+				app.set_notice(error, true)
+				return
+			app.campaign_editing = false
+			app.persist("Campaign archived. Historical reporting is preserved.")
+			app.navigate("Campaign Manager")
 		)
 	)
 
@@ -312,7 +321,8 @@ static func analytics(app: Control) -> void:
 	filters.add_child(app.label("Advertising Platform", 13, Style.MUTED))
 	var platform_filter: OptionButton = app.dropdown(filters, platform_choices, app.ad_platform_filter + 1)
 	platform_filter.item_selected.connect(func(index: int): app.ad_platform_filter = index - 1; app.render())
-	var status_choices := ["All Status", "Draft", "Active", "Paused", "Stopped"]
+	var campaign_statuses := ["draft", "active", "paused", "stopped", "completed"]
+	var status_choices := ["All Status", "Draft", "Active", "Paused", "Stopped", "Completed", "Archived"]
 	filters.add_child(app.label("Campaign Status", 13, Style.MUTED))
 	var status_filter: OptionButton = app.dropdown(filters, status_choices, app.ad_status_filter + 1)
 	status_filter.item_selected.connect(func(index: int): app.ad_status_filter = index - 1; app.render())
@@ -330,12 +340,14 @@ static func analytics(app: Control) -> void:
 		var id := int(raw_id)
 		var campaign: Dictionary = campaigns[id]
 		if app.ad_platform_filter >= 0 and int(campaign.platform) != app.ad_platform_filter: continue
-		if app.ad_status_filter >= 0 and campaign.status != ["draft", "active", "paused", "stopped"][app.ad_status_filter]: continue
+		if app.ad_status_filter == campaign_statuses.size():
+			if not bool(campaign.get("deleted", false)): continue
+		elif app.ad_status_filter >= 0:
+			if bool(campaign.get("deleted", false)) or campaign.status != campaign_statuses[app.ad_status_filter]: continue
 		if app.ad_store_filter >= 0 and int(campaign.store_id) != app.ad_store_filter: continue
 		matched.append(id)
 		var metrics := Ads.aggregate_range(state, id, first_day, last_day)
 		for field in Ads.METRIC_FIELDS: totals[field] += int(metrics.get(field, 0))
-	var conversions: int = maxi(0, totals.purchases + totals.preorders - totals.preorders_cancelled)
 	var roas := "%.2f×" % (float(totals.attributed_revenue) / totals.spend) if totals.spend > 0 else "Unavailable"
 	var ctr := "%.2f%%" % Ads.ctr_percent(totals.clicks, totals.impressions) if totals.impressions > 0 else "Unavailable"
 	var cpm: String = app.money(roundi(Ads.cpm_cents(totals.spend, totals.impressions))) if totals.impressions > 0 else "Unavailable"
@@ -349,14 +361,14 @@ static func analytics(app: Control) -> void:
 	_analytics_kpi(app, kpis, "ROAS", roas)
 	_analytics_kpi(app, kpis, "Impressions", _count(totals.impressions))
 	_analytics_kpi(app, kpis, "Clicks", _count(totals.clicks))
-	_analytics_kpi(app, kpis, "Conversions", str(conversions))
+	_analytics_kpi(app, kpis, "Purchases", _count(totals.purchases))
 	_analytics_kpi(app, kpis, "CTR", ctr)
 	_analytics_kpi(app, kpis, "CPM", cpm)
 	var daily_spend: Array[float] = []
 	var daily_revenue: Array[float] = []
 	var daily_roas: Array[float] = []
 	var daily_clicks: Array[float] = []
-	var daily_conversions: Array[float] = []
+	var daily_purchases: Array[float] = []
 	var bucket_labels: Array[String] = []
 	for bucket in buckets:
 		var summary := Ads.empty_metrics()
@@ -367,15 +379,15 @@ static func analytics(app: Control) -> void:
 		daily_revenue.append(float(summary.attributed_revenue - summary.attributed_refunds))
 		daily_roas.append(float(summary.attributed_revenue) / float(summary.spend) if summary.spend > 0 else 0.0)
 		daily_clicks.append(float(summary.clicks))
-		daily_conversions.append(float(maxi(0, summary.purchases + summary.preorders - summary.preorders_cancelled)))
+		daily_purchases.append(float(summary.purchases))
 		bucket_labels.append(str(bucket.label))
 	_add_analytics_chart(app, view, "Ad Spend vs. Attributed Revenue", bucket_labels, [
 		{"name": "Ad Spend", "values": daily_spend, "color": Style.GOLD},
 		{"name": "Revenue", "values": daily_revenue, "color": Style.GREEN}])
 	_add_analytics_chart(app, view, "ROAS Trend", bucket_labels, [{"name": "ROAS", "values": daily_roas, "color": Color("#83b7ff")}])
-	_add_analytics_chart(app, view, "Clicks and Conversions", bucket_labels, [
+	_add_analytics_chart(app, view, "Clicks and Purchases", bucket_labels, [
 		{"name": "Clicks", "values": daily_clicks, "color": Color("#83b7ff")},
-		{"name": "Conversions", "values": daily_conversions, "color": Style.GREEN}])
+		{"name": "Purchases", "values": daily_purchases, "color": Style.GREEN}])
 	view.add_child(app.label("Revenue follows existing campaign attribution and refund records. Pre-order revenue is counted when delivery recognizes the sale; unavailable activity is shown as zero for recorded periods.", 13, Style.MUTED))
 	var by_platform: VBoxContainer = _analytics_card(app, view, "Performance by Platform")
 	for platform_id in Ads.PLATFORMS.size():
@@ -410,14 +422,15 @@ static func analytics(app: Control) -> void:
 		var headers := GridContainer.new()
 		headers.columns = 10
 		table.add_child(headers)
-		for heading in ["Campaign", "Platform", "Spend", "Revenue", "ROAS", "Clicks", "Conversions", "CTR", "CPM", "Status"]:
+		for heading in ["Campaign", "Platform", "Spend", "Revenue", "ROAS", "Clicks", "Purchases", "CTR", "CPM", "Status"]:
 			headers.add_child(app.label(heading, 12, Style.GOLD))
 	for campaign_id in matched:
 		var campaign: Dictionary = campaigns[campaign_id]
 		var metrics := Ads.aggregate_range(state, campaign_id, first_day, last_day)
 		var campaign_ctr := "%.2f%%" % Ads.ctr_percent(metrics.clicks, metrics.impressions) if metrics.impressions > 0 else "Unavailable"
 		var campaign_cpm: String = app.money(roundi(Ads.cpm_cents(metrics.spend, metrics.impressions))) if metrics.impressions > 0 else "Unavailable"
-		var row_values := [str(campaign.name), str(Ads.PLATFORMS[int(campaign.platform)].name), app.money(metrics.spend), app.money(metrics.attributed_revenue - metrics.attributed_refunds), "%.2f×" % metrics.roas if metrics.spend > 0 else "Unavailable", _count(metrics.clicks), str(maxi(0, metrics.purchases + metrics.preorders - metrics.preorders_cancelled)), campaign_ctr, campaign_cpm, str(campaign.status).capitalize()]
+		var campaign_status := "Archived" if bool(campaign.get("deleted", false)) else str(campaign.status).capitalize()
+		var row_values := [str(campaign.name), str(Ads.PLATFORMS[int(campaign.platform)].name), app.money(metrics.spend), app.money(metrics.attributed_revenue - metrics.attributed_refunds), "%.2f×" % metrics.roas if metrics.spend > 0 else "Unavailable", _count(metrics.clicks), _count(metrics.purchases), campaign_ctr, campaign_cpm, campaign_status]
 		if app.size.x >= 850.0:
 			var cells := GridContainer.new()
 			cells.columns = 10
@@ -425,7 +438,7 @@ static func analytics(app: Control) -> void:
 			for value in row_values: cells.add_child(app.label(value, 12))
 		else:
 			var detail: VBoxContainer = _analytics_card(app, table, str(campaign.name))
-			for index in range(1, row_values.size()): app.metric(detail, ["Platform", "Spend", "Revenue", "ROAS", "Clicks", "Conversions", "CTR", "CPM", "Status"][index - 1], str(row_values[index]))
+			for index in range(1, row_values.size()): app.metric(detail, ["Platform", "Spend", "Revenue", "ROAS", "Clicks", "Purchases", "CTR", "CPM", "Status"][index - 1], str(row_values[index]))
 
 static func _analytics_kpi(app: Control, parent: Control, title: String, value: String) -> void:
 	var panel := PanelContainer.new()
@@ -569,4 +582,9 @@ static func _store_index(state: Dictionary, store_id: int) -> int:
 	return -1
 
 static func _count(value: int) -> String:
-	return str(value)
+	var absolute := str(absi(value))
+	var grouped := ""
+	for index in absolute.length():
+		if index > 0 and (absolute.length() - index) % 3 == 0: grouped += ","
+		grouped += absolute.substr(index, 1)
+	return ("−" if value < 0 else "") + grouped
