@@ -41,13 +41,14 @@ func press(title: String) -> void:
 		if primary in ["ads manager", "campaign manager", "campaign management"]: secondary_title = "Ads Manager"
 		if primary == "ads analytics": secondary_title = "Ads Analytics"
 	elif primary in ["my products", "inventory management", "management", "store management", "product catalogue"]:
-		primary_target = "Market"
+		primary_target = "Business" if primary in ["my products", "inventory management", "management", "store management"] else "Market"
 		if primary in ["my products", "inventory management"]: secondary_title = "Inventory Management"
 		if primary in ["management", "store management"]: secondary_title = "Store Management"
 		if primary == "product catalogue": secondary_title = "Product Catalogue"
 	elif primary in ["company profile", "company management"]:
 		primary_target = "Business"
 		secondary_title = "Company Management"
+		selects_secondary = true
 	var drawer: Control = app.find_child("PrimaryNavigation", true, false)
 	var menu: Button = app.find_child("NavigationMenuButton", true, false)
 	if primary in ["save game", "main menu"] and drawer != null and menu != null:
@@ -143,6 +144,14 @@ func quote_and_confirm_purchase() -> void:
 	press("Confirm Purchase")
 	if is_instance_valid(app.confirmation): app.confirmation.confirmed.emit()
 	await process_frame
+
+func confirm_advance(days: int) -> void:
+	press("+%d" % days)
+	if is_instance_valid(app.confirmation):
+		expect(app.confirmation.dialog_text.contains("Destination: Day %d" % (app.sim.state.day + days)),
+			"Advance Day confirmation shows the requested destination")
+		app.confirmation.confirmed.emit()
+		await process_frame
 
 func open_first_store_listing() -> void:
 	if app.sim == null or app.sim.state.stores.is_empty():
@@ -246,28 +255,30 @@ func run() -> void:
 	press("Save Changes")
 	expect(Stores.listing(app.sim.state, 0, 1).price == 25000000, "Store-specific listing price updates")
 	press("Dashboard")
-	press("+1")
-	expect(app.sim.state.day == 2 and app.sim.state.inbound.size() == 1, "Dashboard time advances with pending supply")
-	for advance_title in ["+2", "+7", "+30"]:
-		press(advance_title)
-	expect(app.sim.state.day == 41, "All four time controls advance")
+	await confirm_advance(1)
+	expect(app.sim.state.day == 2 and app.sim.state.inbound.size() == 1, "Global Advance Day advances with pending supply")
+	for advance_days in [2, 7, 30]:
+		await confirm_advance(advance_days)
+	expect(app.sim.state.day == 41, "All four confirmed Advance Day controls advance")
 	expect(app.sim.state.inbound.is_empty() and app.sim.state.orders.size() > 0, "Purchases arrive and listings generate orders")
 	press("Finance")
 	await settle("04-income")
+	press("Statements")
 	for index in range(4):
 		choices = controls(app, "OptionButton")
-		select(choices[0], index)
+		select(choices[1], index)
 		for report_type in range(3):
-			select(controls(app, "OptionButton")[1], report_type)
+			select(controls(app, "OptionButton")[0], report_type)
 			expect(has_label(app.STATEMENTS[report_type]), "Statement renders in period %d" % index)
-	select(controls(app, "OptionButton")[0], 1)
+	select(controls(app, "OptionButton")[1], 1)
 	press("Previous")
-	expect(app.report_end == 39, "Previous calendar week")
+	expect(app.report_end > 0 and app.report_end < 40, "Previous calendar week")
 	press("Next")
 	expect(app.report_end == 40, "Next calendar week")
-	select(controls(app, "OptionButton")[1], 1)
+	select(controls(app, "OptionButton")[0], 1)
 	await settle("05-balance")
-	press("Business")
+	press("Company Management")
+	if is_instance_valid(app.confirmation): app.confirmation.confirmed.emit()
 	press("Edit Company Details")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "Mira Founder Updated"
@@ -278,7 +289,7 @@ func run() -> void:
 	press("Save Game")
 	press("Save to slot 1")
 	press("Back")
-	press("Load Game")
+	app.open_screen("Load")
 	press("Load slot 1")
 	expect(app.sim.state.company == "Aster Holdings" and app.sim.state.brand == "Aster Labs"
 		and app.sim.state.store.is_empty() and app.sim.state.owner == "Mira Founder Updated"

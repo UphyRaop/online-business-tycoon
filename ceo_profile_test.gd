@@ -33,16 +33,43 @@ func test_progression_titles() -> void:
 	expect(not str(profile.get("career_start_date", "")).is_empty(),
 		"New CEO profiles record their actual registration date")
 	var cases := [
-		[0, "Aspiring Entrepreneur"], [3, "Aspiring Entrepreneur"], [4, "Startup Founder"],
-		[8, "Startup Founder"], [9, "Business Owner"], [18, "Business Owner"],
-		[19, "Managing Director"], [28, "Managing Director"], [29, "Chief Executive Officer"],
-		[38, "Chief Executive Officer"], [39, "Business Magnate"], [48, "Business Magnate"],
-		[49, "Business Tycoon"], [74, "Business Tycoon"],
+		[0, "Entrepreneur"], [3, "Entrepreneur"], [4, "Startup Founder"], [8, "Startup Founder"],
+		[9, "Small Business Owner"], [13, "Small Business Owner"], [14, "Established Entrepreneur"],
+		[18, "Established Entrepreneur"], [19, "Business Strategist"], [23, "Business Strategist"],
+		[24, "Successful Entrepreneur"], [28, "Successful Entrepreneur"], [29, "Business Executive"],
+		[33, "Business Executive"], [34, "Corporate Leader"], [38, "Corporate Leader"],
+		[39, "Business Mogul"], [43, "Business Mogul"], [44, "Industry Leader"], [48, "Industry Leader"],
+		[49, "Business Tycoon"], [58, "Business Tycoon"], [59, "Business Magnate"],
+		[68, "Business Magnate"], [69, "Industry Titan"], [78, "Industry Titan"],
+		[79, "Global Business Leader"], [88, "Global Business Leader"], [89, "Global Business Titan"],
+		[98, "Global Business Titan"], [99, "Business Legend"], [150, "Business Legend"],
 	]
 	for test_case in cases:
 		profile.xp = int(test_case[0]) * CEO.LEVEL_XP
 		expect(CEO.progression_title(profile) == str(test_case[1]),
 			"CEO level %d receives the approved %s progression title" % [int(test_case[0]) + 1, str(test_case[1])])
+	var first_level := CEO.empty("Career")
+	first_level.xp = 0
+	var first_next := CEO.next_title(first_level)
+	expect(first_next.title == "Startup Founder" and first_next.level == 5,
+		"Level 1 profile shows the next career title and its unlock level")
+	first_level.xp = 4 * CEO.LEVEL_XP
+	expect(CEO.next_title(first_level).title == "Small Business Owner" and CEO.next_title(first_level).level == 10,
+		"Level 5 profile skips its current title band and shows the next title threshold")
+	var crossing := CEO.empty("Career")
+	crossing.xp = 5 * CEO.LEVEL_XP - 1
+	CEO.award(crossing, "test:career_level_5", "test_milestone", 1, "Test milestone")
+	expect(CEO.level(crossing) == 6 and crossing.title == "Startup Founder",
+		"Career title updates automatically when earned XP crosses a title threshold")
+	var legend := CEO.empty("Career")
+	legend.xp = 98 * CEO.LEVEL_XP
+	expect(CEO.next_title(legend).title == "Business Legend" and CEO.next_title(legend).level == 100,
+		"Level 99 profile shows the final title and its level 100 unlock")
+	legend.xp = 99 * CEO.LEVEL_XP
+	expect(CEO.progression_title(legend) == "Business Legend", "Level 100 unlocks Business Legend")
+	expect(CEO.next_title(legend).title.is_empty(), "Business Legend has no fabricated next title")
+	legend.xp = 150 * CEO.LEVEL_XP
+	expect(CEO.progression_title(legend) == "Business Legend", "Business Legend remains correct above level 100")
 
 func test_global_profile_and_achievements() -> void:
 	var profile := CEO.ensure({}, "Kai Founder")

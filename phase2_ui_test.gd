@@ -1,6 +1,7 @@
 extends "res://phase1_ui_test.gd"
 
 const Storefront = preload("res://storefront.gd")
+const Calendar = preload("res://game_calendar.gd")
 
 
 func run() -> void:
@@ -105,8 +106,8 @@ func run() -> void:
 	expect(app.sim.state.shipping == 0 and not app.sim.state.auto_dispatch, "Fulfillment saves method and processing mode")
 	select(choices[0], 0)
 	press("Dashboard")
-	press("+7")
-	press("+7")
+	await confirm_advance(7)
+	await confirm_advance(7)
 	press("Order")
 	expect(has_label("Awaiting dispatch"), "Manual orders appear in the tracking queue")
 	select(controls(app, "OptionButton")[1], 1)
@@ -132,7 +133,7 @@ func run() -> void:
 		return
 	var tracked: Dictionary = app.sim.state.orders[shipped]
 	press("Dashboard")
-	press("+7")
+	await confirm_advance(7)
 	press("Order")
 	var tabs := controls(app, "OptionButton")
 	select(tabs[0], 1)
@@ -145,7 +146,8 @@ func run() -> void:
 	select(controls(app, "OptionButton")[0], 2)
 	expect(has_label("Checkout conversion") and has_label("Abandoned checkouts"), "Sales analytics opens")
 	select(controls(app, "OptionButton")[1], 0)
-	expect(has_label("Fri, 16 Jan 2026"), "Analytics window updates")
+	var completed_report: Dictionary = app.sim.report_completed(7)
+	expect(has_label(Calendar.format(int(completed_report.start))), "Analytics window updates to completed-day dates")
 	await settle("phase2-analytics")
 	print("Phase 2 UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)

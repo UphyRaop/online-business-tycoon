@@ -10,7 +10,6 @@ const ChartLegend = preload("res://chart_legend.gd")
 
 static func overview(app: Control) -> void:
 	var view: VBoxContainer = app.card("Advertising Overview")
-	view.add_child(app.label("Simulated platforms · Local budgets · Campaign-attributed orders", 14, Style.MUTED))
 	var campaigns: Dictionary = app.sim.state.advertising.campaigns
 	var active := 0
 	var totals := Ads.empty_metrics()
@@ -19,22 +18,28 @@ static func overview(app: Control) -> void:
 		if campaign.status == "active" and not bool(campaign.get("deleted", false)): active += 1
 		var metric: Dictionary = _lifetime(app.sim.state, id)
 		for field in Ads.METRIC_FIELDS + ["estimated_profit"]: totals[field] += int(metric.get(field, 0))
-	app.metric(view, "Active campaigns", str(active), Style.GOLD)
-	app.metric(view, "Lifetime ad spend", app.money(totals.spend))
-	app.metric(view, "Attributed revenue · net of refunds", app.money(totals.attributed_revenue - totals.attributed_refunds))
+	var kpis := GridContainer.new()
+	kpis.columns = 3 if app.size.x >= 900.0 else 2
+	kpis.add_theme_constant_override("h_separation", 8)
+	kpis.add_theme_constant_override("v_separation", 8)
+	view.add_child(kpis)
+	_analytics_kpi(app, kpis, "Active Campaigns", str(active))
+	_analytics_kpi(app, kpis, "Ad Spend", app.money(totals.spend))
+	_analytics_kpi(app, kpis, "Attributed Revenue", app.money(totals.attributed_revenue - totals.attributed_refunds))
 	var roas: String = "%.2f×" % (float(totals.attributed_revenue) / totals.spend) if totals.spend > 0 else "—"
 	var lifetime_conversions: int = maxi(0, totals.purchases + totals.preorders - totals.preorders_cancelled)
-	app.metric(view, "ROAS · CPA", "%s · %s" % [roas, _unit_cost(app, totals.spend, lifetime_conversions)])
-	view.add_child(app.label("ROAS uses gross attributed revenue divided by ad spend. Refunds are reported separately.", 13, Style.MUTED))
-	app.metric(view, "Estimated advertising profit", app.money(totals.attributed_revenue - totals.attributed_refunds - totals.estimated_costs + totals.estimated_costs_reversed - totals.spend), app.profit_color(totals.attributed_revenue - totals.attributed_refunds - totals.estimated_costs + totals.estimated_costs_reversed - totals.spend))
-	view.add_child(app.label("Standard order attribution is recorded at checkout. Pre-order revenue attribution waits until delivery; the Income Statement recognizes all sales on delivery.", 13, Style.MUTED))
+	_analytics_kpi(app, kpis, "ROAS · CPA", "%s · %s" % [roas, _unit_cost(app, totals.spend, lifetime_conversions)])
+	_analytics_kpi(app, kpis, "Purchases", _count(totals.purchases))
+	_analytics_kpi(app, kpis, "CTR · CPM", "%.2f%% · %s" % [Ads.ctr_percent(totals.clicks, totals.impressions), app.money(roundi(Ads.cpm_cents(totals.spend, totals.impressions)))])
+	var profit: int = int(totals.attributed_revenue) - int(totals.attributed_refunds) - int(totals.estimated_costs) + int(totals.estimated_costs_reversed) - int(totals.spend)
+	app.metric(view, "Estimated Advertising Profit", app.money(profit), app.profit_color(profit))
 	var platform_card: VBoxContainer = app.card("Platforms")
 	for platform in Ads.PLATFORMS:
 		var baseline_cpm: String = app.money(Catalog.local_cents(int(app.sim.state.country), float(platform.cpm)))
 		platform_card.add_child(app.label("%s · %s CPM · %.1f%% baseline CTR" % [platform.name, baseline_cpm, platform.ctr], 14, Style.MUTED))
 
 static func manager(app: Control) -> void:
-	var view: VBoxContainer = app.card("Campaign Manager")
+	var view: VBoxContainer = app.card("Ads Manager")
 	app.action(view, "Create campaign", func():
 		app.campaign_id = 0
 		app.navigate("Campaign Details")
@@ -59,7 +64,7 @@ static func manager(app: Control) -> void:
 		)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if visible_campaigns == 0:
-		view.add_child(app.label("No campaigns are available in Campaign Manager. Create a campaign to promote a published product in an active store.", 14, Style.MUTED))
+		view.add_child(app.label("No campaigns are available in Ads Manager. Create a campaign to promote a published product in an active store.", 14, Style.MUTED))
 
 static func details(app: Control) -> void:
 	var state: Dictionary = app.sim.state
@@ -276,7 +281,7 @@ static func _campaign_controls(app: Control, view: VBoxContainer, state: Diction
 				)
 			)
 	app.action(view, "Delete Campaign", func():
-		app.confirm_action("Archive this campaign?", "It will stop spending and disappear from Campaign Manager. Its ad spend, attributed sales and analytics history will remain available.", "Archive Campaign", func():
+		app.confirm_action("Archive This Campaign?", "It will stop spending and disappear from Ads Manager. Its ad spend, attributed sales and analytics history will remain available.", "Archive Campaign", func():
 			var error := Ads.archive(state, app.campaign_id)
 			if not error.is_empty():
 				app.set_notice(error, true)
@@ -299,8 +304,8 @@ static func analytics(app: Control) -> void:
 	periods.item_selected.connect(func(index: int): app.ad_period = index; app.render())
 	var buckets: Array[Dictionary] = _analytics_buckets(state, app.ad_period)
 	var first_day := int(buckets.front().start) if not buckets.is_empty() else 1
-	var last_day: int = int(buckets.back().end) if not buckets.is_empty() else state.day
-	view.add_child(app.label(Calendar.format_range(first_day, last_day), 14, Style.GOLD))
+	var last_day: int = int(buckets.back().end) if not buckets.is_empty() else 0
+	view.add_child(app.label("No completed days" if last_day == 0 else Calendar.format_range(first_day, last_day), 14, Style.GOLD))
 	var filters: VBoxContainer = _analytics_card(app, view, "Filters")
 	var platform_choices := ["All Platforms"]
 	for platform in Ads.PLATFORMS: platform_choices.append(platform.name)
@@ -402,29 +407,39 @@ static func analytics(app: Control) -> void:
 	view.add_child(app.label("ROAS uses gross attributed revenue divided by ad spend. Revenue shown in KPIs and store breakdowns deducts recorded refunds.", 13, Style.MUTED))
 	var table: VBoxContainer = _analytics_card(app, view, "Campaign Performance")
 	if matched.is_empty():
-		table.add_child(app.label("No campaigns match these filters.", 14, Style.MUTED))
+		table.add_child(app.empty_state("No Matching Campaigns", "Change the filters to view campaign activity."))
 		return
-	if app.size.x >= 850.0:
-		var headers := GridContainer.new()
-		headers.columns = 10
-		table.add_child(headers)
-		for heading in ["Campaign", "Platform", "Spend", "Revenue", "ROAS", "Clicks", "Purchases", "CTR", "CPM", "Status"]:
-			headers.add_child(app.label(heading, 12, Style.GOLD))
 	for campaign_id in matched:
 		var campaign: Dictionary = campaigns[campaign_id]
 		var metrics := Ads.aggregate_range(state, campaign_id, first_day, last_day)
 		var campaign_ctr := "%.2f%%" % Ads.ctr_percent(metrics.clicks, metrics.impressions) if metrics.impressions > 0 else "Unavailable"
 		var campaign_cpm: String = app.money(roundi(Ads.cpm_cents(metrics.spend, metrics.impressions))) if metrics.impressions > 0 else "Unavailable"
+		var campaign_cpc: String = app.money(roundi(metrics.cpc)) if metrics.clicks > 0 else "Unavailable"
+		var conversions: int = maxi(0, int(metrics.purchases) + int(metrics.preorders) - int(metrics.preorders_cancelled))
+		var campaign_cpa: String = app.money(roundi(float(metrics.spend) / conversions)) if conversions > 0 else "Unavailable"
 		var campaign_status := "Archived" if bool(campaign.get("deleted", false)) else str(campaign.status).capitalize()
-		var row_values := [str(campaign.name), str(Ads.PLATFORMS[int(campaign.platform)].name), app.money(metrics.spend), app.money(metrics.attributed_revenue - metrics.attributed_refunds), "%.2f×" % metrics.roas if metrics.spend > 0 else "Unavailable", _count(metrics.clicks), _count(metrics.purchases), campaign_ctr, campaign_cpm, campaign_status]
-		if app.size.x >= 850.0:
-			var cells := GridContainer.new()
-			cells.columns = 10
-			table.add_child(cells)
-			for value in row_values: cells.add_child(app.label(value, 12))
-		else:
-			var detail: VBoxContainer = _analytics_card(app, table, str(campaign.name))
-			for index in range(1, row_values.size()): app.metric(detail, ["Platform", "Spend", "Revenue", "ROAS", "Clicks", "Purchases", "CTR", "CPM", "Status"][index - 1], str(row_values[index]))
+		var detail: VBoxContainer = _analytics_card(app, table, str(campaign.name))
+		var summary: HBoxContainer = app.row(detail)
+		var summary_label: Label = app.label("%s · %s" % [str(Ads.PLATFORMS[int(campaign.platform)].name), campaign_status], 13, Style.MUTED)
+		summary_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		summary.add_child(summary_label)
+		var expanded := bool(app.ad_expanded_campaigns.get(campaign_id, false))
+		app.action(summary, "Hide Metrics" if expanded else "Metrics", func():
+			app.ad_expanded_campaigns[campaign_id] = not bool(app.ad_expanded_campaigns.get(campaign_id, false))
+			app.render()
+		)
+		app.metric(detail, "Spend", app.money(int(metrics.spend)))
+		app.metric(detail, "Net Attributed Revenue", app.money(int(metrics.attributed_revenue) - int(metrics.attributed_refunds)))
+		app.metric(detail, "ROAS", "%.2f×" % float(metrics.roas) if metrics.spend > 0 else "Unavailable")
+		if expanded:
+			for data in [
+				["Impressions", _count(metrics.impressions)], ["Reach", _count(metrics.reach)],
+				["Clicks", _count(metrics.clicks)], ["CTR", campaign_ctr], ["CPC", campaign_cpc], ["CPM", campaign_cpm],
+				["Add to Cart", _count(metrics.add_to_cart)], ["Checkouts", _count(metrics.checkouts)],
+				["Purchases", _count(metrics.purchases)], ["Conversions", _count(conversions)], ["CPA", campaign_cpa],
+				["Status", campaign_status],
+			]:
+				app.metric(detail, str(data[0]), str(data[1]))
 
 static func _analytics_kpi(app: Control, parent: Control, title: String, value: String) -> void:
 	var panel := PanelContainer.new()
@@ -457,18 +472,19 @@ static func _add_analytics_chart(app: Control, parent: Control, title: String, l
 
 static func _analytics_buckets(state: Dictionary, selected_period: int) -> Array[Dictionary]:
 	var buckets: Array[Dictionary] = []
-	if state.day <= 0: return buckets
+	var last_completed := int(state.get("day", 1)) - 1
+	if last_completed <= 0: return buckets
 	if selected_period == 0:
-		for day in range(maxi(1, state.day - 6), state.day + 1): buckets.append({"start": day, "end": day, "label": "D%d" % day})
+		for day in range(maxi(1, last_completed - 6), last_completed + 1): buckets.append({"start": day, "end": day, "label": "Day %d" % day})
 	elif selected_period == 1:
-		var first := maxi(1, state.day - 55)
+		var first := maxi(1, last_completed - 55)
 		var cursor := first
-		while cursor <= state.day:
-			var last := mini(state.day, cursor + 6)
+		while cursor <= last_completed:
+			var last := mini(last_completed, cursor + 6)
 			buckets.append({"start": cursor, "end": last, "label": "W%d" % (buckets.size() + 1)})
 			cursor = last + 1
 	elif selected_period == 2:
-		var current := Calendar.date_at(state.day)
+		var current := Calendar.date_at(last_completed)
 		var year := int(current.year)
 		var month := int(current.month) - 11
 		while month <= 0:
@@ -478,15 +494,15 @@ static func _analytics_buckets(state: Dictionary, selected_period: int) -> Array
 			var start := maxi(1, Calendar.day_at(year, month, 1))
 			var next_year := year + (1 if month == 12 else 0)
 			var next_month := 1 if month == 12 else month + 1
-			var finish := mini(state.day, Calendar.day_at(next_year, next_month, 1) - 1)
-			if start <= state.day: buckets.append({"start": start, "end": maxi(start, finish), "label": "%s %02d" % [Calendar.MONTHS[month - 1], year % 100]})
+			var finish := mini(last_completed, Calendar.day_at(next_year, next_month, 1) - 1)
+			if start <= last_completed: buckets.append({"start": start, "end": maxi(start, finish), "label": "%s %02d" % [Calendar.MONTHS[month - 1], year % 100]})
 			month += 1
 			if month > 12:
 				month = 1
 				year += 1
 	else:
 		var first_month := Calendar.date_at(1)
-		var last_month := Calendar.date_at(state.day)
+		var last_month := Calendar.date_at(last_completed)
 		var month_count := (int(last_month.year) - int(first_month.year)) * 12 + int(last_month.month) - int(first_month.month) + 1
 		var year := int(first_month.year)
 		var month := int(first_month.month)
@@ -494,7 +510,7 @@ static func _analytics_buckets(state: Dictionary, selected_period: int) -> Array
 			var start := maxi(1, Calendar.day_at(year, month, 1))
 			var next_year := year + (1 if month == 12 else 0)
 			var next_month := 1 if month == 12 else month + 1
-			var finish := mini(state.day, Calendar.day_at(next_year, next_month, 1) - 1)
+			var finish := mini(last_completed, Calendar.day_at(next_year, next_month, 1) - 1)
 			buckets.append({"start": start, "end": finish, "label": "%s %02d" % [Calendar.MONTHS[month - 1], year % 100]})
 			month += 1
 			if month > 12:
@@ -522,13 +538,7 @@ static func _fill_store_choices(state: Dictionary, store_id: int, product_ids: A
 			platform_names.append(Ads.PLATFORMS[id].name)
 
 static func _lifetime(state: Dictionary, campaign_id: int) -> Dictionary:
-	var result := Ads.empty_metrics()
-	for record in state.advertising.history:
-		if record.campaign_id != campaign_id: continue
-		for field in Ads.METRIC_FIELDS: result[field] += int(record.get(field, 0))
-	result.roas = float(result.attributed_revenue) / result.spend if result.spend > 0 else 0.0
-	result.estimated_profit = result.attributed_revenue - result.attributed_refunds - result.estimated_costs + result.estimated_costs_reversed - result.spend
-	return result
+	return Ads.aggregate_range(state, campaign_id, 1, int(state.get("day", 1)) - 1)
 
 static func _seven_day_trend(state: Dictionary, campaign_id: int) -> Dictionary:
 	var spend := [0, 0, 0, 0, 0, 0, 0]

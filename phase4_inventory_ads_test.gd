@@ -8,6 +8,7 @@ const Saves = preload("res://save_store.gd")
 const Stores = preload("res://store_manager.gd")
 const Ads = preload("res://advertising.gd")
 const Storefront = preload("res://storefront.gd")
+const AdvertisingView = preload("res://advertising_view.gd")
 
 var failures := 0
 
@@ -16,6 +17,7 @@ func _initialize() -> void:
 	test_preorder_fifo_and_dispatch()
 	test_store_specific_offers()
 	test_ad_rates()
+	test_ad_reporting_excludes_unfinished_day()
 	print("Phase 4 inventory and ads: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 
@@ -132,6 +134,17 @@ func test_ad_rates() -> void:
 		"CTR and CPM derive from aggregate clicks, impressions, and spend rather than average campaign rates")
 	expect(Ads.ctr_percent(0, 0) == 0.0 and Ads.cpm_cents(0, 0) == 0.0,
 		"CTR and CPM safely return zero when there are no impressions")
+
+func test_ad_reporting_excludes_unfinished_day() -> void:
+	var empty := AdvertisingView._analytics_buckets({"day": 1}, 0)
+	expect(empty.is_empty(), "Ads Analytics reports no completed days on a new Day 1 company")
+	var buckets := AdvertisingView._analytics_buckets({"day": 10}, 0)
+	expect(not buckets.is_empty() and int(buckets.back().end) == 9
+		and int(buckets.front().start) >= 1,
+		"Daily Ads Analytics ends on Day 9 while Day 10 is still in progress")
+	var weekly := AdvertisingView._analytics_buckets({"day": 10}, 1)
+	expect(not weekly.is_empty() and int(weekly.back().end) <= 9,
+		"Weekly Ads Analytics does not include the unfinished simulation day")
 
 func test_store_specific_offers() -> void:
 	var sim := new_game()

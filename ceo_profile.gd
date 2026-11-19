@@ -18,7 +18,7 @@ static func empty(owner: String = "") -> Dictionary:
 		"avatar_data": "",
 		"avatar_mime": "",
 		"country": "",
-		"title": "Aspiring Entrepreneur",
+		"title": "Entrepreneur",
 		"career_start_date": Time.get_date_string_from_system(),
 		"xp": 0,
 		"achievements": [],
@@ -310,13 +310,33 @@ static func xp_to_next_level(profile: Dictionary) -> int:
 
 static func progression_title(profile: Dictionary) -> String:
 	var current := level(profile)
+	if current >= 100: return "Business Legend"
+	if current >= 90: return "Global Business Titan"
+	if current >= 80: return "Global Business Leader"
+	if current >= 70: return "Industry Titan"
+	if current >= 60: return "Business Magnate"
 	if current >= 50: return "Business Tycoon"
-	if current >= 40: return "Business Magnate"
-	if current >= 30: return "Chief Executive Officer"
-	if current >= 20: return "Managing Director"
-	if current >= 10: return "Business Owner"
+	if current >= 45: return "Industry Leader"
+	if current >= 40: return "Business Mogul"
+	if current >= 35: return "Corporate Leader"
+	if current >= 30: return "Business Executive"
+	if current >= 25: return "Successful Entrepreneur"
+	if current >= 20: return "Business Strategist"
+	if current >= 15: return "Established Entrepreneur"
+	if current >= 10: return "Small Business Owner"
 	if current >= 5: return "Startup Founder"
-	return "Aspiring Entrepreneur"
+	return "Entrepreneur"
+
+static func next_title(profile: Dictionary) -> Dictionary:
+	var current := level(profile)
+	if current >= 100:
+		return {"title": "", "level": 0}
+	var current_title := progression_title(profile)
+	for unlock_level in range(current + 1, 101):
+		var candidate := progression_title({"xp": (unlock_level - 1) * LEVEL_XP})
+		if candidate != current_title:
+			return {"title": candidate, "level": unlock_level}
+	return {"title": "", "level": 0}
 
 static func company_index(profile: Dictionary, company_id: String) -> int:
 	for index in profile.get("companies", []).size():

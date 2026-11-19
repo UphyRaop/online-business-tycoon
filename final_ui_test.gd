@@ -65,7 +65,7 @@ func run() -> void:
 	select(controls(app, "OptionButton")[1], 0)
 	press("Save Changes")
 	press("Dashboard")
-	press("+7")
+	await confirm_advance(7)
 	press("My Products")
 	press("Manage Portable Blender")
 	open_first_store_listing()
@@ -78,7 +78,7 @@ func run() -> void:
 		"A published product with stock shows as Active (count %d, listing %s, stock %d)" % [
 		app.sim.active_product_count(), str(Stores.listing(app.sim.state, first_store_id(), 0)), app.sim.stock(0)])
 	press("Dashboard")
-	press("+7")
+	await confirm_advance(7)
 	press("My Products")
 	expect(has_label("Units sold · Net revenue") and has_label("Product Profit"), "Product portfolio shows sales and profit")
 	await settle("final-products")
@@ -143,7 +143,8 @@ func run() -> void:
 	expect(Slots.occupied_for_game(first_game_id, 1) and Slots.occupied_for_game(second_game_id, 0), "Other game slots survive deletion")
 	press("Back")
 	press("Finance")
-	expect(has_label("Cash Flow Statement") or has_label("Income Statement"), "Dated financial statements remain available after load")
+	press("Statements")
+	expect(has_label("Income Statement"), "Dated financial statements remain available after load")
 	await settle("corrective-finance")
 	app.queue_free()
 	await process_frame
