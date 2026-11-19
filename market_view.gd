@@ -586,17 +586,22 @@ static func supplier_relationships(app: Control) -> void:
 			suppliers.append(supplier)
 	for supplier in suppliers:
 		var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+		var active_platform := supplier in Catalog.SUPPLIER_SELECTION_INDICES
 		var unlocked := Supply.supplier_unlocked(state, supplier)
 		var eligibility := SupplierCredit.eligibility(state, supplier)
 		var relation: Dictionary = SupplierCredit.relationship(state, supplier)
-		var title := "%s · %s" % [str(provider.name), "Available" if unlocked else "Level %d Locked" % int(provider.level)]
+		var status := ("Available" if unlocked else "Level %d Locked" % int(provider.level)) if active_platform else "Historical"
+		var title := "%s · %s" % [str(provider.name), status]
 		var card: VBoxContainer = app.card(title)
 		card.name = "SupplierRelationship%d" % supplier
 		app.metric(card, "Trust · Settled Purchases", "%d / 100 · %d" % [int(relation.trust), int(relation.settled_purchase_count)])
 		app.metric(card, "Open Payables", app.money(SupplierCredit.open_payables(state, supplier)))
-		app.metric(card, "Credit Limit · Available", "%s · %s" % [app.money(int(eligibility.credit_limit)), app.money(int(eligibility.available))])
-		if not bool(eligibility.eligible): card.add_child(app.label(str(eligibility.reason), 12, Style.MUTED))
-		if not unlocked: card.add_child(app.label("Unlocks at supplier progression level %d." % int(provider.level), 12, Style.MUTED))
+		if active_platform:
+			app.metric(card, "Credit Limit · Available", "%s · %s" % [app.money(int(eligibility.credit_limit)), app.money(int(eligibility.available))])
+			if not bool(eligibility.eligible): card.add_child(app.label(str(eligibility.reason), 12, Style.MUTED))
+			if not unlocked: card.add_child(app.label("Unlocks at supplier progression level %d." % int(provider.level), 12, Style.MUTED))
+		else:
+			card.add_child(app.label("Historical relationship. New sourcing is unavailable from this platform; existing balances and records are retained.", 12, Style.MUTED))
 	supplier_credit_payables(app)
 
 static func refresh_inbound(app: Control, product: int, inbound: VBoxContainer, shipments: VBoxContainer) -> void:
