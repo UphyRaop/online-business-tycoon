@@ -118,6 +118,15 @@ func has_label(prefix: String) -> bool:
 func has_button(title: String) -> bool:
 	return controls(app, "Button").any(func(button): return button.text.to_lower() == title.to_lower() and button.is_visible_in_tree())
 
+func create_new_game_for_test(ceo_name: String, company_name: String) -> void:
+	if app.screen != "New Game": press("New Game")
+	var ceo_field := field_for_label("CEO Name")
+	if ceo_field != null: ceo_field.text = ceo_name
+	press("Continue to Company Registration")
+	var company_field := field_for_label("Company name")
+	if company_field != null: company_field.text = company_name
+	press("Register company")
+
 func settle(name: String) -> void:
 	await process_frame
 	await process_frame
@@ -143,11 +152,15 @@ func run() -> void:
 	root.add_child(app)
 	press("New Game")
 	await settle("01-registration")
-	press("Register company")
-	expect(has_label("Enter an entrepreneur"), "Registration validates required names")
+	press("Continue to Company Registration")
+	expect(app.notice.to_lower().contains("ceo name"), "New Game requires a CEO name before company registration")
 	var inputs := controls(app, "LineEdit")
 	inputs[0].text = "Mira Founder"
-	inputs[1].text = "Aster Labs"
+	press("Continue to Company Registration")
+	press("Register company")
+	expect(app.notice.to_lower().contains("company name"), "Company registration independently requires a company name")
+	inputs = controls(app, "LineEdit")
+	inputs[0].text = "Aster Labs"
 	var choices := controls(app, "OptionButton")
 	select(choices[0], 4)
 	select(choices[1], 2)
@@ -251,7 +264,7 @@ func run() -> void:
 	else:
 		expect(false, "Store-specific listing editor remains visible after opening")
 	expect(not Stores.listing(app.sim.state, test_store_id, 1).listed, "Store listing pause action")
-	var saved := Slots.read(Slots.AUTOSAVE)
+	var saved := Slots.read_for_game(app.active_game_id, Slots.AUTOSAVE)
 	expect(saved.state.day == 41 and not Stores.listing(saved.state, test_store_id, 1).listed, "Mutations autosave")
 	app.queue_free()
 	await process_frame

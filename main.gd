@@ -21,6 +21,7 @@ const ChartLegend = preload("res://chart_legend.gd")
 const CompanySale = preload("res://company_sale.gd")
 const InventoryOverview = preload("res://dashboard_inventory.gd")
 const PortraitFrame = preload("res://portrait_frame.gd")
+const GameStore = preload("res://game_store.gd")
 const NAV := ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]
 const NAV_ICON_PATHS := {
 	"Dashboard": "res://assets/navigation/dashboard.svg",
@@ -82,6 +83,8 @@ var stores_tab := "Stores"
 var show_new_store_form := false
 var ceo_profile: Dictionary = {}
 var ceo_profile_corrupt := false
+var active_game_id := ""
+var pending_ceo_name := ""
 var identity_conflict_record: Dictionary = {}
 var avatar_picker_callback: JavaScriptObject
 var profile_editing := false
@@ -100,10 +103,9 @@ var bank_balance_label: Label
 
 func _ready() -> void:
 	theme = Style.build()
-	ceo_profile = CEOProfile.load_profile()
-	ceo_profile_corrupt = (FileAccess.file_exists(CEOProfile.PATH) or FileAccess.file_exists(CEOProfile.PATH + ".bak")) and ceo_profile.is_empty()
-	if ceo_profile_corrupt:
-		notice = "The CEO profile could not be read. Company saves remain available; profile data was not overwritten."
+	var migration := GameStore.migrate_legacy()
+	if not str(migration.get("error", "")).is_empty():
+		notice = "Some older saves could not be migrated yet. Their original files remain available. " + str(migration.error)
 		error_notice = true
 	get_viewport().size_changed.connect(_update_responsive_layout)
 	var settings := ConfigFile.new()
@@ -375,9 +377,9 @@ func persist(message: String) -> void:
 
 func write_progress(slot: int, message: String) -> bool:
 	_sync_ceo_profile()
-	var archive_path := CEOProfile.company_path(str(sim.state.get("company_id", "")))
+	var archive_path := CEOProfile.company_path_for_game(active_game_id, str(sim.state.get("company_id", "")))
 	var archive_result := Saves.save(sim.state, archive_path, Time.get_unix_time_from_system())
-	var result := Slots.write(slot, sim.state)
+	var result := Slots.write_for_game(active_game_id, slot, sim.state, ceo_profile)
 	if result != OK:
 		dirty = dirty or slot == Slots.AUTOSAVE
 		var reason := "Game data failed validation." if result == ERR_INVALID_DATA else error_string(result)
@@ -386,9 +388,9 @@ func write_progress(slot: int, message: String) -> bool:
 	if archive_result != OK:
 		set_notice("%s saved, but the CEO company recovery copy failed. %s" % [Slots.name_for(slot), error_string(archive_result)], true)
 		return false
-	var profile_result := ERR_FILE_CORRUPT if ceo_profile_corrupt else CEOProfile.save_profile(ceo_profile)
+	var profile_result := ERR_FILE_CORRUPT if ceo_profile_corrupt else GameStore.update_game_profile(active_game_id, ceo_profile)
 	if profile_result != OK:
-		set_notice("%s saved, but the global CEO profile could not be saved. %s" % [Slots.name_for(slot), error_string(profile_result)], true)
+		set_notice("%s saved, but this game's CEO profile could not be saved. %s" % [Slots.name_for(slot), error_string(profile_result)], true)
 		return false
 	dirty = OS.has_feature("web") and not OS.is_userfs_persistent()
 	set_notice(message + " Browser storage is unavailable. Progress may be lost on reload." if dirty else message, dirty)
@@ -447,37 +449,112 @@ func show_screen(target: String) -> void:
 	render()
 
 func start_new_game() -> void:
-	if ceo_profile_corrupt:
-		set_notice("Starting another company is disabled until the damaged CEO profile is recovered. Existing saves are untouched.", true)
+	active_game_id = ""
+	ceo_profile = {}
+	pending_ceo_name = ""
+	show_screen("New Game")
+
+func create_game_for_ceo(name: String) -> void:
+	var ceo_name := name.strip_edges()
+	if not _valid_ceo_name(ceo_name):
+		set_notice("Enter a CEO name of 1–48 characters without control characters.", true)
 		return
-	if Slots.occupied(Slots.AUTOSAVE):
-		var latest := Slots.latest()
-		if not latest.is_empty():
-			var preserved: Dictionary = latest.state.duplicate(true)
-			if not ceo_profile.is_empty() and str(ceo_profile.get("full_name", "")).strip_edges().to_lower() != str(preserved.get("owner", "")).strip_edges().to_lower():
-				identity_conflict_record = latest.duplicate(true)
-				identity_conflict_record.context = "new_company"
-				show_screen("CEO identity conflict")
+	var created := GameStore.create_game(ceo_name)
+	if not str(created.get("error", "")).is_empty():
+		set_notice(str(created.error), true)
+		return
+	active_game_id = str(created.game.game_id)
+	ceo_profile = created.profile
+	ceo_profile_corrupt = false
+	pending_ceo_name = ceo_name
+	show_screen("Setup")
+
+func resume_game(game_id: String) -> void:
+	if not _select_game(game_id): return
+	var latest := Slots.latest_for_game(game_id)
+	if latest.is_empty():
+		if ceo_profile.get("companies", []).is_empty(): show_screen("Setup")
+		else: show_company_selection("No slot save was found; choose an owned company archive.")
+		return
+	request_load(latest)
+
+func resume_setup(game_id: String) -> void:
+	if _select_game(game_id): show_screen("Setup")
+
+func choose_company_in_game(game_id: String) -> void:
+	if _select_game(game_id): show_company_selection()
+
+func open_game_slots(game_id: String) -> void:
+	if not _select_game(game_id): return
+	open_screen("Load")
+
+func _select_game(game_id: String) -> bool:
+	var game := GameStore.get_game(game_id)
+	var profile := CEOProfile.load_game_profile(game_id)
+	if game.is_empty() or profile.is_empty():
+		set_notice("This game's saved profile is unavailable. Other games remain untouched.", true)
+		return false
+	active_game_id = game_id
+	ceo_profile = profile
+	ceo_profile_corrupt = false
+	return true
+
+func delete_game(game_id: String) -> void:
+	var game := GameStore.get_game(game_id)
+	if game.is_empty(): return
+	confirm_action("Delete %s?" % str(game.get("game_name", "Game")),
+		"Permanently remove this game's profile, companies, autosave and manual saves. Other games and retained legacy source files remain untouched.",
+		"Delete Game", func():
+			var result := GameStore.delete_game_data(game_id)
+			if result != OK:
+				set_notice("Could not delete this game. " + error_string(result), true)
 				return
-			if ceo_profile.is_empty():
-				ceo_profile = CEOProfile.ensure_legacy({}, str(preserved.get("owner", "")))
-			ceo_profile = CEOProfile.sync_company(ceo_profile, preserved)
-			var archive_result := Saves.save(preserved, CEOProfile.company_path(str(preserved.company_id)), float(latest.get("saved_at", 0)))
-			if archive_result != OK:
-				set_notice("Could not preserve the current company before starting another. " + error_string(archive_result), true)
+			if active_game_id == game_id:
+				active_game_id = ""
+				ceo_profile = {}
+				sim = null
+				dirty = false
+				profile_editing = false
+				profile_edit_snapshot.clear()
+			show_screen("Title")
+	)
+
+func delete_company(company_id: String) -> void:
+	if active_game_id.is_empty() or sim != null:
+		set_notice("Open company selection before removing a company from this game.", true)
+		return
+	var index := CEOProfile.company_index(ceo_profile, company_id)
+	if index < 0 or str(ceo_profile.companies[index].get("ownership_status", "owned")) != "owned":
+		set_notice("Only an owned company in this game can be deleted. Sold company history is retained.", true)
+		return
+	var name := str(ceo_profile.companies[index].get("name", "Company"))
+	confirm_action("Delete %s?" % name,
+		"Permanently remove this owned company's game-scoped save slots and recovery archive. The CEO profile, career progress, other companies in this game, and all other games will remain. Sold company history is kept in the CEO career record.",
+		"Delete Company", func():
+			var result := GameStore.delete_company_data(active_game_id, company_id)
+			if result.has("profile"): ceo_profile = result.profile
+			if not str(result.get("error", "")).is_empty():
+				set_notice(str(result.error), true)
 				return
-			if CEOProfile.save_profile(ceo_profile) != OK:
-				set_notice("Could not save the CEO company list. Existing game was not changed.", true)
-				return
-		confirm_action("Start another company?", "The current company will remain in the CEO profile. Its autosave and manual slots are preserved.", "New Company", func(): show_screen("Setup"))
-	else:
-		show_screen("Setup")
+			ceo_profile = result.profile
+			show_company_selection("%s and only its company-specific saves were deleted. CEO career progress and other games were preserved." % name)
+	)
+
+func _valid_ceo_name(value: String) -> bool:
+	if value.strip_edges().is_empty() or value.length() > 48:
+		return false
+	for index in value.length():
+		var codepoint := value.unicode_at(index)
+		if codepoint < 32 or codepoint == 127:
+			return false
+	return true
 
 func continue_game() -> void:
-	request_load(Slots.latest())
+	if active_game_id.is_empty(): return
+	request_load(Slots.latest_for_game(active_game_id))
 
 func load_slot(slot: int) -> void:
-	request_load(Slots.read(slot))
+	request_load(Slots.read_for_game(active_game_id, slot))
 
 func request_load(record: Dictionary) -> void:
 	if record.is_empty():
@@ -488,7 +565,7 @@ func request_load(record: Dictionary) -> void:
 	if owned_index >= 0 and str(ceo_profile.companies[owned_index].get("ownership_status", "owned")) == "sold":
 		show_company_selection("This company has been sold. Its saved history remains available in the CEO profile.")
 		return
-	var autosave := Slots.read(Slots.AUTOSAVE)
+	var autosave := Slots.read_for_game(active_game_id, Slots.AUTOSAVE)
 	var load := func():
 		if str(record.state.get("owner", "")).strip_edges().is_empty():
 			identity_record = record
@@ -524,13 +601,22 @@ func complete_identity() -> void:
 			return
 		var updated: Dictionary = identity_record.state.duplicate(true)
 		updated.owner = name
+		if ceo_profile.is_empty() or str(ceo_profile.get("full_name", "")).strip_edges().is_empty():
+			ceo_profile = CEOProfile.ensure_for_game(ceo_profile, name, active_game_id,
+				str(GameStore.get_game(active_game_id).get("game_name", "")))
+			ceo_profile.full_name = name
+			ceo_profile.title = CEOProfile.progression_title(ceo_profile)
+			var profile_result := GameStore.update_game_profile(active_game_id, ceo_profile)
+			if profile_result != OK:
+				set_notice("Could not save this game's CEO name. " + error_string(profile_result), true)
+				return
 		if not ceo_profile.is_empty() and str(ceo_profile.get("full_name", "")).strip_edges().to_lower() != name.to_lower():
 			identity_record.state = updated
 			identity_record.owner_candidate = name
 			identity_conflict_record = identity_record.duplicate(true)
 			show_screen("CEO identity conflict")
 			return
-		var result := Slots.write(identity_record.slot, updated, identity_record.saved_at)
+		var result := Slots.write_for_game(active_game_id, identity_record.slot, updated, ceo_profile, identity_record.saved_at)
 		if result != OK:
 			set_notice("Could not update this save. " + error_string(result), true)
 			return
@@ -553,7 +639,7 @@ func resolve_identity_conflict(use_existing_identity: bool) -> void:
 	var state: Dictionary = identity_conflict_record.state.duplicate(true)
 	state.owner = str(ceo_profile.get("full_name", ""))
 	var slot := int(identity_conflict_record.get("slot", Slots.AUTOSAVE))
-	var result := Slots.write(slot, state, float(identity_conflict_record.get("saved_at", 0)))
+	var result := Slots.write_for_game(active_game_id, slot, state, ceo_profile, float(identity_conflict_record.get("saved_at", 0)))
 	if result != OK:
 		set_notice("Could not apply the identity choice. " + error_string(result), true)
 		return
@@ -561,8 +647,8 @@ func resolve_identity_conflict(use_existing_identity: bool) -> void:
 	identity_conflict_record.clear()
 	identity_record.clear()
 	ceo_profile = CEOProfile.sync_company(ceo_profile, state)
-	var archive_error := Saves.save(state, CEOProfile.company_path(str(state.company_id)), Time.get_unix_time_from_system())
-	if archive_error != OK or CEOProfile.save_profile(ceo_profile) != OK:
+	var archive_error := Saves.save(state, CEOProfile.company_path_for_game(active_game_id, str(state.company_id)), Time.get_unix_time_from_system())
+	if archive_error != OK or GameStore.update_game_profile(active_game_id, ceo_profile) != OK:
 		set_notice("The save was migrated, but its CEO profile copy could not be confirmed.", true)
 		return
 	if context == "new_company":
@@ -581,7 +667,7 @@ func _sync_ceo_profile() -> void:
 	if sim == null or ceo_profile_corrupt:
 		return
 	if ceo_profile.is_empty():
-		ceo_profile = CEOProfile.ensure_legacy({}, str(sim.state.get("owner", "")))
+		ceo_profile = CEOProfile.ensure_for_game({}, str(sim.state.get("owner", "")), active_game_id, str(GameStore.get_game(active_game_id).get("game_name", "")))
 	if str(ceo_profile.get("full_name", "")).strip_edges().is_empty():
 		ceo_profile.full_name = str(sim.state.get("owner", ""))
 	sim.state.owner = str(ceo_profile.get("full_name", sim.state.get("owner", "")))
@@ -596,16 +682,17 @@ func switch_company(company_id: String) -> void:
 	if str(entry.get("ownership_status", "owned")) != "owned":
 		set_notice("This company has been sold and cannot be reopened for management.", true)
 		return
-	var state := Saves.load_state(str(entry.get("save_path", CEOProfile.company_path(company_id))))
+	var state := Saves.load_state(str(entry.get("save_path", CEOProfile.company_path_for_game(active_game_id, company_id))))
 	if state.is_empty() or str(state.get("company_id", "")) != company_id:
 		set_notice("The saved company could not be recovered. Other companies were left untouched.", true)
 		return
 	var change := func():
-		var archive_result := Saves.save(state, CEOProfile.company_path(company_id), Time.get_unix_time_from_system())
+		var archive_result := Saves.save(state, CEOProfile.company_path_for_game(active_game_id, company_id), Time.get_unix_time_from_system())
 		if archive_result != OK:
 			set_notice("Could not preserve the selected company. " + error_string(archive_result), true)
 			return
 		enter_game(state)
+		if sim != null: write_progress(Slots.AUTOSAVE, "Switched company and updated this game's autosave.")
 	if dirty:
 		confirm_action("Switch company?", "Save the current company before switching to %s?" % str(entry.get("name", "Company")), "Switch Company", func():
 			if write_progress(Slots.AUTOSAVE, "Current company preserved."):
@@ -645,7 +732,7 @@ func _complete_company_sale() -> void:
 	if not CEOProfile.owns_company(ceo_profile, company_id):
 		set_notice("This company has already been sold or is no longer owned.", true)
 		return
-	var archive_error := Saves.save(company_state, CEOProfile.company_path(company_id), Time.get_unix_time_from_system())
+	var archive_error := Saves.save(company_state, CEOProfile.company_path_for_game(active_game_id, company_id), Time.get_unix_time_from_system())
 	if archive_error != OK:
 		set_notice("The company history could not be archived. The sale was not completed. " + error_string(archive_error), true)
 		return
@@ -653,12 +740,12 @@ func _complete_company_sale() -> void:
 	if not str(sale.get("error", "")).is_empty():
 		set_notice(str(sale.error), true)
 		return
-	var profile_error := CEOProfile.save_profile(sale.profile)
+	var profile_error := GameStore.update_game_profile(active_game_id, sale.profile)
 	if profile_error != OK:
 		set_notice("The sale could not be recorded in the CEO profile. The company remains owned. " + error_string(profile_error), true)
 		return
 	ceo_profile = sale.profile
-	var autosave_error := Slots.delete_slot(Slots.AUTOSAVE)
+	var autosave_error := Slots.delete_for_game(active_game_id, Slots.AUTOSAVE)
 	sim = null
 	dirty = false
 	screen = "Company Selection"
@@ -696,13 +783,14 @@ func company_selection() -> void:
 			metric(row, "Lifetime net sales", sale_money(int(entry.get("lifetime_sales", 0)), company_entry_currency(entry)))
 			metric(row, "Lifetime net profit", sale_money(int(entry.get("lifetime_profit", 0)), company_entry_currency(entry)))
 			action(row, "Open Company", switch_company.bind(str(entry.get("company_id", ""))), true)
+			action(row, "Delete Company", delete_company.bind(str(entry.get("company_id", ""))))
 		action(view, "Start Another Company", func(): show_screen("Setup"))
 	var sold: Array[Dictionary] = []
 	for entry in ceo_profile.get("companies", []):
 		if entry is Dictionary and str(entry.get("ownership_status", "owned")) == "sold": sold.append(entry)
 	if not sold.is_empty():
 		var archive := card("Sold Company Records")
-		archive.add_child(label("Sold businesses remain in your career history and cannot be reopened for management.", 13, Style.MUTED))
+		archive.add_child(label("Sold businesses remain in your career history and cannot be reopened or deleted.", 13, Style.MUTED))
 		for entry in sold:
 			var sale: Dictionary = entry.get("sale_record", {})
 			archive.add_child(label("%s · Sold for %s · %s" % [str(entry.get("name", "Company")), sale_money(int(sale.get("amount", 0)), str(sale.get("currency", ""))), str(sale.get("date", "Date unavailable"))], 14, Style.GOLD))
@@ -734,11 +822,9 @@ func profile_page() -> void:
 	if profile_editing:
 		var full_name := field(details, "Full Name", str(ceo_profile.get("full_name", sim.state.get("owner", ""))))
 		var residence := field(details, "Country of Residence", str(ceo_profile.get("country", "")))
-		var title := field(details, "Professional Title", str(ceo_profile.get("title", "Entrepreneur")))
 		full_name.text_changed.connect(func(value: String): ceo_profile.full_name = value)
 		residence.text_changed.connect(func(value: String): ceo_profile.country = value)
-		title.text_changed.connect(func(value: String): ceo_profile.title = value)
-		watch_edits([full_name, residence, title])
+		watch_edits([full_name, residence])
 		var photo_actions := row(details)
 		action(photo_actions, "Change Photo", open_avatar_picker)
 		if not str(ceo_profile.get("avatar_data", "")).is_empty():
@@ -748,17 +834,17 @@ func profile_page() -> void:
 				refresh_view()
 			)
 		action(details, "Save Changes", func():
-			if full_name.text.strip_edges().is_empty() or title.text.strip_edges().is_empty():
-				set_notice("Enter a name and professional title.", true)
+			if not _valid_ceo_name(full_name.text.strip_edges()):
+				set_notice("Enter a CEO name of 1–48 characters without control characters.", true)
 				return
 			var previous := ceo_profile.duplicate(true)
 			var previous_owner: String = sim.state.owner
 			ceo_profile.full_name = full_name.text.strip_edges()
 			ceo_profile.country = residence.text.strip_edges()
-			ceo_profile.title = title.text.strip_edges()
+			ceo_profile.title = CEOProfile.progression_title(ceo_profile)
 			sim.state.owner = ceo_profile.full_name
 			_sync_ceo_profile()
-			var result := CEOProfile.save_profile(ceo_profile)
+			var result := GameStore.update_game_profile(active_game_id, ceo_profile)
 			if result != OK:
 				ceo_profile = previous
 				sim.state.owner = previous_owner
@@ -769,7 +855,7 @@ func profile_page() -> void:
 			if not write_progress(Slots.AUTOSAVE, "CEO profile updated."):
 				ceo_profile = previous
 				sim.state.owner = previous_owner
-				CEOProfile.save_profile(ceo_profile)
+				GameStore.update_game_profile(active_game_id, ceo_profile)
 				profile_editing = true
 				profile_edit_snapshot = previous.duplicate(true)
 				return
@@ -788,8 +874,7 @@ func profile_page() -> void:
 	else:
 		var country_name := str(ceo_profile.get("country", "")).strip_edges()
 		if country_name.is_empty(): country_name = "Not provided"
-		var professional_title := str(ceo_profile.get("title", "Entrepreneur")).strip_edges()
-		if professional_title.is_empty(): professional_title = "Entrepreneur"
+		var professional_title := CEOProfile.progression_title(ceo_profile)
 		metric(details, "Full Name", str(ceo_profile.get("full_name", sim.state.get("owner", ""))), Style.GOLD)
 		metric(details, "Country of Residence", country_name)
 		metric(details, "Professional Title", professional_title)
@@ -1029,14 +1114,18 @@ func _on_web_avatar_selected(args: Array) -> void:
 	open_avatar_crop(image)
 
 func enter_game(data: Dictionary) -> void:
+	if active_game_id.is_empty():
+		set_notice("Choose or create a game before loading a company.", true)
+		return
 	sim = Sim.new(data)
 	_sync_ceo_profile()
 	if not CEOProfile.owns_company(ceo_profile, str(sim.state.get("company_id", ""))):
 		sim = null
 		show_company_selection("This company is no longer owned. Choose another company or start a new one.")
 		return
-	var profile_error := ERR_FILE_CORRUPT if ceo_profile_corrupt else CEOProfile.save_profile(ceo_profile)
-	var archive_error := Saves.save(sim.state, CEOProfile.company_path(str(sim.state.company_id)), Time.get_unix_time_from_system())
+	var profile_error := ERR_FILE_CORRUPT if ceo_profile_corrupt else GameStore.update_game_profile(active_game_id, ceo_profile)
+	var archive_error := Saves.save(sim.state, CEOProfile.company_path_for_game(active_game_id, str(sim.state.company_id)), Time.get_unix_time_from_system())
+	var slot_error := Slots.write_for_game(active_game_id, Slots.AUTOSAVE, sim.state, ceo_profile)
 	dirty = false
 	screen = "Game"
 	page = "Dashboard"
@@ -1044,15 +1133,15 @@ func enter_game(data: Dictionary) -> void:
 	report_end = 0
 	order_page = 0
 	set_notice("")
-	if profile_error != OK or archive_error != OK:
-		set_notice("Company loaded, but its CEO profile recovery copy could not be saved.", true)
+	if profile_error != OK or archive_error != OK or slot_error != OK:
+		set_notice("Company loaded, but its game-scoped profile or save recovery copy could not be saved.", true)
 	render()
 
 func save_to_slot(slot: int) -> void:
 	var write := func():
 		write_progress(slot, "Saved to manual slot %d." % slot)
 		refresh_view()
-	if Slots.occupied(slot):
+	if Slots.occupied_for_game(active_game_id, slot):
 		confirm_action("Overwrite manual slot %d?" % slot, "Replace the saved snapshot in this slot with your current game?", "Overwrite", write)
 	else:
 		write.call()
@@ -1060,7 +1149,7 @@ func save_to_slot(slot: int) -> void:
 func delete_save(slot: int) -> void:
 	confirm_action("Delete %s?" % Slots.name_for(slot).to_lower(),
 		"Delete this save and its recovery copy?", "Delete", func():
-		var error := Slots.delete_slot(slot)
+		var error := Slots.delete_for_game(active_game_id, slot)
 		if error == OK:
 			set_notice("%s deleted." % Slots.name_for(slot))
 		else:
@@ -1072,6 +1161,8 @@ func leave_game() -> void:
 	var exit_to_title := func():
 		sim = null
 		dirty = false
+		active_game_id = ""
+		ceo_profile = {}
 		show_screen("Title")
 	if dirty or has_form_edits():
 		confirm_action("Discard unsaved progress?", "Returning to the main menu will discard your unsaved progress or edits.", "Main Menu", exit_to_title)
@@ -1432,7 +1523,7 @@ func render() -> void:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
 			"Campaign Manager": "Campaign Management", "Campaign Details": "Campaign Details", "Company Selection": "Choose a Company",
 			"Advertising Analytics": "Ads Analytics", "Management": "Store Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
-			"CEO identity conflict": "Identity choice"}
+		"CEO identity conflict": "Identity choice", "New Game": "Create a Game"}
 		masthead.add_child(label(titles.get(screen, screen), 30))
 	var scroll := ScrollContainer.new()
 	scroll.name = "GameContentScroll"
@@ -1463,6 +1554,7 @@ func render() -> void:
 	if screen != "Game":
 		match screen:
 			"Title": Menu.title(self)
+			"New Game": new_game_identity()
 			"Setup": setup()
 			"Company Selection": company_selection()
 			"Entrepreneur name": complete_identity()
@@ -1499,10 +1591,12 @@ func render() -> void:
 func setup() -> void:
 	var details := card("Company Registration")
 	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Store Management.", 15, Style.MUTED))
-	var owner := field(details, "Entrepreneur name", str(ceo_profile.get("full_name", "")))
-	if not ceo_profile.is_empty():
-		owner.editable = false
-		details.add_child(label("This company will belong to your existing CEO profile.", 14, Style.MUTED))
+	if active_game_id.is_empty() or ceo_profile.is_empty():
+		details.add_child(label("Choose or create a game and CEO identity before registering a company.", 15, Style.RED))
+		action(details, "Back to Games", func(): show_screen("Title"))
+		return
+	metric(details, "Game", str(ceo_profile.get("game_name", "Game")), Style.GOLD)
+	metric(details, "Entrepreneur / CEO", str(ceo_profile.get("full_name", "")))
 	var company := field(details, "Company name", "")
 	details.add_child(label("Starting country", 14, Style.MUTED))
 	var country := dropdown(details, Catalog.COUNTRIES, 0)
@@ -1516,23 +1610,32 @@ func setup() -> void:
 	country.item_selected.connect(update_capital)
 	difficulty.item_selected.connect(update_capital)
 	update_capital.call(0)
-	watch_edits([owner, company, country, difficulty])
+	watch_edits([company, country, difficulty])
 	action(details, "Register company", func():
-		var owner_name := owner.text.strip_edges()
+		var owner_name := str(ceo_profile.get("full_name", "")).strip_edges()
 		var company_name := company.text.strip_edges()
 		if owner_name.is_empty() or company_name.is_empty():
-			set_notice("Enter an entrepreneur name and a company name.", true)
+			set_notice("Enter a company name. The CEO name is saved with this game.", true)
 			return
-		if not ceo_profile.is_empty():
-			owner_name = str(ceo_profile.get("full_name", owner_name))
 		var new_state := Sim.register(owner_name, company_name, "",
 			country.selected, difficulty.selected, 0, randi())
-		if ceo_profile.is_empty():
-			ceo_profile = CEOProfile.ensure({}, owner_name)
+		ceo_profile = CEOProfile.register_company(ceo_profile, new_state)
+		var profile_result := GameStore.update_game_profile(active_game_id, ceo_profile)
+		if profile_result != OK:
+			set_notice("Could not save this game's company ownership. " + error_string(profile_result), true)
+			return
 		enter_game(new_state)
 		persist("Company registered.")
 	, true)
-	action(details, "Back", open_screen.bind("Title"))
+	action(details, "Back to Games", open_screen.bind("Title"))
+
+func new_game_identity() -> void:
+	var details := card("New Game · CEO Identity")
+	details.add_child(label("Each game keeps its own CEO career, companies, and save slots. Enter the CEO name before registering a company.", 15, Style.MUTED))
+	var owner := field(details, "CEO Name", pending_ceo_name)
+	watch_edits([owner])
+	action(details, "Continue to Company Registration", func(): create_game_for_ceo(owner.text), true)
+	action(details, "Back", func(): show_screen("Title"))
 
 func dashboard() -> void:
 	var totals := sim.report(sim.state.day)
@@ -1687,7 +1790,7 @@ func business() -> void:
 			sim.state.owner = owner_name
 			sim.state.company = company_name
 			_sync_ceo_profile()
-			var result := CEOProfile.save_profile(ceo_profile)
+			var result := GameStore.update_game_profile(active_game_id, ceo_profile)
 			if result != OK:
 				ceo_profile = previous_profile
 				sim.state.owner = previous_owner

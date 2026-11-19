@@ -11,11 +11,7 @@ func run() -> void:
 	root.size = Vector2i(390, 844)
 	app = Main.instantiate()
 	root.add_child(app)
-	press("New Game")
-	var inputs := controls(app, "LineEdit")
-	inputs[0].text = "Mira Founder"
-	inputs[1].text = "Aster Labs"
-	press("Register company")
+	create_new_game_for_test("Mira Founder", "Aster Labs")
 	app.sim.state.stores = Stores.migration_defaults(app.sim.state)
 	app.sim.state.website_active = true
 	app.sim.state.seed = 153
@@ -152,7 +148,7 @@ func run() -> void:
 	await settle("phase2-service")
 	press("Approve return and refund" if tracked.return_requested else "Issue refund")
 	expect(tracked.refunded, "Service control completes the refund")
-	expect(Slots.read(Slots.AUTOSAVE).state.orders[shipped].refunded, "Fulfillment and refunds persist across saves")
+	expect(Slots.read_for_game(app.active_game_id, Slots.AUTOSAVE).state.orders[shipped].refunded, "Fulfillment and refunds persist across saves")
 	select(controls(app, "OptionButton")[0], 2)
 	expect(has_label("Checkout conversion") and has_label("Abandoned checkouts"), "Sales analytics opens")
 	select(controls(app, "OptionButton")[1], 0)

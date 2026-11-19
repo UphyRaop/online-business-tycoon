@@ -1,6 +1,10 @@
 extends "res://phase1_ui_test.gd"
 
 const Catalog = preload("res://catalog.gd")
+const Games = preload("res://game_store.gd")
+
+var first_game_id := ""
+var second_game_id := ""
 
 func first_store_id() -> int:
 	return int(app.sim.state.stores.front().id)
@@ -24,9 +28,10 @@ func run() -> void:
 	expect(app.large_text, "Settings changes text size")
 	press("Back")
 	press("New Game")
-	register_company("Aster Holdings")
+	register_company("Aster Holdings", "Mira Founder")
+	first_game_id = app.active_game_id
 	app.sim.state.seed = 153
-	expect(Slots.read(0).state.company == "Aster Holdings", "Registration writes autosave")
+	expect(Slots.read_for_game(first_game_id, 0).state.company == "Aster Holdings", "Registration writes autosave")
 	press("My Products")
 	expect(has_label("Active products") and has_label("Your product portfolio is empty"), "Empty product portfolio is usable")
 	press("Product Catalogue")
@@ -86,7 +91,7 @@ func run() -> void:
 	press("Business")
 	press("Save Game")
 	press("Save to slot 1")
-	expect(Slots.read(1).state.company == "Aster Holdings", "An empty manual slot saves without confirmation")
+	expect(Slots.read_for_game(first_game_id, 1).state.company == "Aster Holdings", "An empty manual slot saves without confirmation")
 	press("Save to slot 1")
 	await settle("final-overwrite")
 	resolve_dialog(false)
@@ -108,34 +113,32 @@ func run() -> void:
 	expect(app.screen == "Title", "Confirmed discard returns to title")
 	await process_frame
 	press("New Game")
-	resolve_dialog(false)
-	expect(app.screen == "Title", "Cancel autosave replacement stays at title")
-	await process_frame
-	press("New Game")
-	resolve_dialog(true)
-	register_company("Second Company")
-	expect(Slots.read(0).state.company == "Second Company" and Slots.read(1).state.company == "Aster Holdings", "New game replaces only autosave")
+	register_company("Second Company", "Nora Founder")
+	second_game_id = app.active_game_id
+	expect(second_game_id != first_game_id and Slots.read_for_game(second_game_id, 0).state.company == "Second Company"
+		and Slots.read_for_game(first_game_id, 1).state.company == "Aster Holdings", "New game creates independent autosave and preserves the first game's slots")
 	press("Main Menu")
-	press("Continue Game")
+	app.resume_game(second_game_id)
 	expect(app.sim.state.company == "Second Company", "Continue loads the latest save")
 	press("Main Menu")
 	press("Load Game")
-	press("Load slot 1")
-	resolve_dialog(true)
+	app.open_game_slots(first_game_id)
+	app.load_slot(1)
+	expect(app.confirmation == null, "Loading the unchanged game-scoped manual snapshot needs no replacement warning")
 	expect(app.sim.state.company == "Aster Holdings" and Stores.listing(app.sim.state, first_store_id(), 0).price == 8300,
 		"Load restores a specific company and its store-specific product listing")
-	expect(Slots.read(0).state.company == "Second Company", "Loading alone does not overwrite autosave")
+	expect(Slots.read_for_game(second_game_id, 0).state.company == "Second Company", "Loading alone does not overwrite another game's autosave")
 	press("Save Game")
 	press("Save to slot 2")
-	expect(Slots.read(2).state.company == "Aster Holdings" and has_label("Saved to manual slot 2."), "Manual save works directly after loading")
+	expect(Slots.read_for_game(first_game_id, 2).state.company == "Aster Holdings" and has_label("Saved to manual slot 2."), "Manual save works directly after loading")
 	press("Delete slot 2")
 	resolve_dialog(false)
 	await process_frame
-	expect(Slots.occupied(2), "Cancel deletion preserves manual save")
+	expect(Slots.occupied_for_game(first_game_id, 2), "Cancel deletion preserves manual save")
 	press("Delete slot 2")
 	resolve_dialog(true)
-	expect(not Slots.occupied(2) and has_label("Manual slot 2 deleted."), "Confirmed deletion clears only that slot")
-	expect(Slots.occupied(1) and Slots.occupied(0), "Other slots survive deletion")
+	expect(not Slots.occupied_for_game(first_game_id, 2) and has_label("Manual slot 2 deleted."), "Confirmed deletion clears only that slot")
+	expect(Slots.occupied_for_game(first_game_id, 1) and Slots.occupied_for_game(second_game_id, 0), "Other game slots survive deletion")
 	press("Back")
 	press("Finance")
 	expect(has_label("Cash Flow Statement") or has_label("Income Statement"), "Dated financial statements remain available after load")
@@ -148,10 +151,12 @@ func run() -> void:
 	print("Phase 2 final UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 
-func register_company(name: String) -> void:
-	var inputs := controls(app, "LineEdit")
-	inputs[0].text = "Mira"
-	inputs[1].text = name
+func register_company(name: String, ceo_name: String) -> void:
+	var ceo_field := field_for_label("CEO Name")
+	if ceo_field != null: ceo_field.text = ceo_name
+	press("Continue to Company Registration")
+	var company_field := field_for_label("Company name")
+	if company_field != null: company_field.text = name
 	select(controls(app, "OptionButton")[1], 2)
 	press("Register company")
 	expect(app.sim.state.stores.is_empty() and not app.sim.channel_enabled(0) and not app.sim.channel_enabled(1),
@@ -159,7 +164,7 @@ func register_company(name: String) -> void:
 	press("Business")
 	press("Management")
 	press("Open New Store")
-	inputs = controls(app, "LineEdit")
+	var inputs := controls(app, "LineEdit")
 	inputs[0].text = name + " Market"
 	inputs[1].text = name + " Brand"
 	press("Create store")

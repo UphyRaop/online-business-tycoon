@@ -165,6 +165,69 @@ static func delete_game_data(game_id: String) -> Error:
 	registry.games.remove_at(game_index)
 	return _save_registry(registry)
 
+static func delete_company_data(game_id: String, company_id: String) -> Dictionary:
+	if not _valid_game_id(game_id) or company_id.strip_edges().is_empty() or company_id.contains("/") or company_id.contains("\\") or company_id in [".", ".."]:
+		return {"error": "Invalid game or company identity."}
+	if _game_index(_load_registry(), game_id) < 0:
+		return {"error": "This game could not be found."}
+	var profile := CEOProfile.load_game_profile(game_id)
+	if profile.is_empty(): return {"error": "This game's CEO profile could not be read."}
+	var company_index := CEOProfile.company_index(profile, company_id)
+	if company_index < 0: return {"error": "This company is not in the selected game."}
+	var company: Dictionary = profile.companies[company_index]
+	if str(company.get("ownership_status", "owned")) != "owned":
+		return {"error": "Sold company records are retained in career history and cannot be deleted."}
+	var transaction_id := "company-delete-%d-%d" % [Time.get_ticks_usec(), randi()]
+	var staged_paths: Array[Dictionary] = []
+	for slot in SLOT_COUNT:
+		var record := read_slot(game_id, slot)
+		if not record.is_empty() and str(record.state.get("company_id", "")) == company_id:
+			var slot_path := slot_path_for_game_delete(game_id, slot)
+			if not _stage_file_family(slot_path, transaction_id, staged_paths):
+				_restore_staged_files(staged_paths)
+				return {"error": "Could not stage this company's save slots. No company data was deleted."}
+	var archive_path := CEOProfile.company_path_for_game(game_id, company_id)
+	if archive_path.is_empty() or not _stage_file_family(archive_path, transaction_id, staged_paths):
+		_restore_staged_files(staged_paths)
+		return {"error": "Could not stage this company's recovery archive. No company data was deleted."}
+	profile.companies.remove_at(company_index)
+	var profile_error := CEOProfile.save_game_profile(profile, game_id)
+	if profile_error != OK:
+		_restore_staged_files(staged_paths)
+		return {"error": "Could not update the CEO profile. No company data was deleted. " + error_string(profile_error)}
+	var cleanup_error := _delete_staged_files(staged_paths)
+	if cleanup_error != OK:
+		return {"error": "Company was removed from the active portfolio, but secure cleanup of its staged save data needs attention. " + error_string(cleanup_error), "profile": profile}
+	return {"error": "", "profile": profile}
+
+static func slot_path_for_game_delete(game_id: String, slot: int) -> String:
+	return slot_path(game_id, slot)
+
+static func _stage_file_family(path: String, transaction_id: String, staged_paths: Array[Dictionary]) -> bool:
+	if path.is_empty(): return false
+	for suffix in [".tmp", ".bak", ""]:
+		var source: String = path + str(suffix)
+		if not FileAccess.file_exists(source): continue
+		var staged: String = source + "." + transaction_id
+		var result := DirAccess.rename_absolute(ProjectSettings.globalize_path(source), ProjectSettings.globalize_path(staged))
+		if result != OK: return false
+		staged_paths.append({"source": source, "staged": staged})
+	return true
+
+static func _restore_staged_files(staged_paths: Array[Dictionary]) -> void:
+	for index in range(staged_paths.size() - 1, -1, -1):
+		var entry: Dictionary = staged_paths[index]
+		if FileAccess.file_exists(str(entry.staged)):
+			DirAccess.rename_absolute(ProjectSettings.globalize_path(str(entry.staged)), ProjectSettings.globalize_path(str(entry.source)))
+
+static func _delete_staged_files(staged_paths: Array[Dictionary]) -> Error:
+	for entry in staged_paths:
+		var staged := str(entry.staged)
+		if not FileAccess.file_exists(staged): continue
+		var result := DirAccess.remove_absolute(ProjectSettings.globalize_path(staged))
+		if result != OK: return result
+	return OK
+
 static func migrate_legacy() -> Dictionary:
 	var registry := _load_registry()
 	if registry.is_empty(): registry = _empty_registry()

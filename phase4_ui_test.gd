@@ -1,6 +1,7 @@
 extends "res://phase1_ui_test.gd"
 
 const CEO = preload("res://ceo_profile.gd")
+const Games = preload("res://game_store.gd")
 const Sim = preload("res://simulation.gd")
 const Catalog = preload("res://catalog.gd")
 const Style = preload("res://corporate_theme.gd")
@@ -13,11 +14,7 @@ func run() -> void:
 	root.size = Vector2i(1280, 720)
 	app = Main.instantiate()
 	root.add_child(app)
-	press("New Game")
-	var fields := controls(app, "LineEdit")
-	fields[0].text = "Kai Founder"
-	fields[1].text = "Harbor Works"
-	press("Register company")
+	create_new_game_for_test("Kai Founder", "Harbor Works")
 	await process_frame
 	var nav: PanelContainer = app.find_child("PrimaryNavigation", true, false)
 	var game_date: Label = app.find_child("GameDate", true, false)
@@ -198,14 +195,14 @@ func run() -> void:
 	expect(app.page == "Store Profitability" and has_label("Harbor Marketplace") and has_label("Harbor Website"),
 		"Finance Store Profitability reports marketplace and website results")
 
-	var stored := Slots.write(1, app.sim.state)
-	var loaded := Slots.read(1)
+	var stored := Slots.write_for_game(app.active_game_id, 1, app.sim.state, app.ceo_profile)
+	var loaded := Slots.read_for_game(app.active_game_id, 1)
 	expect(stored == OK and Saves.valid(loaded.get("state", {})), "Save/load remains valid with both destination types")
 	var loaded_stores: Array = loaded.get("state", {}).get("stores", [])
 	expect(loaded_stores.size() == 2 and int(loaded_stores[0].id) == marketplace_id
 		and int(loaded_stores[1].id) == website_id and str(loaded_stores[1].domain) == "harbor.example.test",
 		"Save/load preserves marketplace and website IDs and website details")
-	Slots.delete_slot(1)
+	Slots.delete_for_game(app.active_game_id, 1)
 	press("Profile")
 	expect(app.page == "Profile" and has_label("CEO Profile") and has_label("Career Progression")
 		and has_label("Owned Companies") and has_label("Additional Information") and has_label("CEO ID")
@@ -225,7 +222,7 @@ func run() -> void:
 	var existing_photo := Image.create(48, 64, false, Image.FORMAT_RGBA8)
 	existing_photo.fill(Color("#dfb777"))
 	CEO.add_avatar(app.ceo_profile, "image/png", existing_photo.save_png_to_buffer())
-	CEO.save_profile(app.ceo_profile)
+	Games.update_game_profile(app.active_game_id, app.ceo_profile)
 	app.refresh_view()
 	expect(not has_button("Change Photo") and not has_button("Remove Photo"),
 		"Saved Profile hides photo actions until Edit Profile is selected")
@@ -252,10 +249,10 @@ func run() -> void:
 	press("Apply Crop")
 	await process_frame
 	var staged_photo := str(app.ceo_profile.avatar_data)
-	expect(staged_photo != "" and staged_photo != CEO.load_profile().avatar_data,
+	expect(staged_photo != "" and staged_photo != CEO.load_game_profile(app.active_game_id).avatar_data,
 		"Apply Crop updates the edit preview without persisting before Save Profile")
 	press("Cancel")
-	expect(app.ceo_profile.full_name == "Kai Founder" and app.ceo_profile.avatar_data == CEO.load_profile().avatar_data
+	expect(app.ceo_profile.full_name == "Kai Founder" and app.ceo_profile.avatar_data == CEO.load_game_profile(app.active_game_id).avatar_data
 		and not has_button("Save Changes"), "Cancel restores saved identity and photo after a staged replacement")
 	press("Edit Profile")
 	profile_fields = controls(app, "LineEdit")
@@ -268,27 +265,27 @@ func run() -> void:
 	await process_frame
 	press("Save Changes")
 	expect(app.ceo_profile.full_name == "Kai Global CEO" and app.sim.state.owner == "Kai Global CEO"
-		and CEO.load_profile().full_name == "Kai Global CEO" and CEO.load_profile().avatar_data == app.ceo_profile.avatar_data,
+		and CEO.load_game_profile(app.active_game_id).full_name == "Kai Global CEO" and CEO.load_game_profile(app.active_game_id).avatar_data == app.ceo_profile.avatar_data,
 		"Saving Profile persists edited identity and a replacement photo")
 	var retained_photo := str(app.ceo_profile.avatar_data)
 	press("Edit Profile")
 	press("Remove Photo")
 	expect(str(app.ceo_profile.avatar_data).is_empty(), "Remove Photo stages a reversible change while editing")
 	press("Cancel")
-	expect(str(app.ceo_profile.avatar_data) == retained_photo and CEO.load_profile().avatar_data == retained_photo,
+	expect(str(app.ceo_profile.avatar_data) == retained_photo and CEO.load_game_profile(app.active_game_id).avatar_data == retained_photo,
 		"Cancel restores the previously saved CEO photo")
 	press("Edit Profile")
 	press("Remove Photo")
 	press("Save Changes")
-	expect(str(app.ceo_profile.avatar_data).is_empty() and CEO.load_profile().avatar_data.is_empty(),
+	expect(str(app.ceo_profile.avatar_data).is_empty() and CEO.load_game_profile(app.active_game_id).avatar_data.is_empty(),
 		"Saving Profile commits photo removal")
 	CEO.add_avatar(app.ceo_profile, "image/png", existing_photo.save_png_to_buffer())
-	CEO.save_profile(app.ceo_profile)
+	Games.update_game_profile(app.active_game_id, app.ceo_profile)
 	var first_company_id := str(app.sim.state.company_id)
 	var second_company := Sim.register("Kai Global CEO", "Harbor Digital", "", 1, 1, 0, 9123)
 	app.ceo_profile = CEO.register_company(app.ceo_profile, second_company)
-	expect(Saves.save(second_company, CEO.company_path(second_company.company_id), 2.0) == OK
-		and CEO.save_profile(app.ceo_profile) == OK, "Second company save is linked without changing the current business")
+	expect(Saves.save(second_company, CEO.company_path_for_game(app.active_game_id, second_company.company_id), 2.0) == OK
+		and Games.update_game_profile(app.active_game_id, app.ceo_profile) == OK, "Second company save is linked without changing the current business")
 	app.navigate("Profile")
 	var switch_buttons := controls(app, "Button").filter(func(button): return button.text == "Switch")
 	expect(switch_buttons.size() == 1, "Profile offers company switching for the other owned company")

@@ -8,11 +8,8 @@ func run() -> void:
 	root.size = Vector2i(390, 844)
 	app = Main.instantiate()
 	root.add_child(app)
-	press("New Game")
+	create_new_game_for_test("Nora Founder", "Northstar Goods")
 	var fields := controls(app, "LineEdit")
-	fields[0].text = "Nora Founder"
-	fields[1].text = "Northstar Goods"
-	press("Register company")
 	expect(app.sim.state.stores.is_empty(), "New company starts with no marketplace stores or websites")
 	expect(app.sim.report(app.sim.state.day).closing_cash == app.sim.state.cash, "Dashboard Bank Balance uses the reconciled cash ledger balance")
 	var primary_names := ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]

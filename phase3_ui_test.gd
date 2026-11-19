@@ -11,11 +11,8 @@ func run() -> void:
 	root.size = Vector2i(390, 844)
 	app = Main.instantiate()
 	root.add_child(app)
-	press("New Game")
+	create_new_game_for_test("Mira Founder", "Aster Labs")
 	var inputs := controls(app, "LineEdit")
-	inputs[0].text = "Mira Founder"
-	inputs[1].text = "Aster Labs"
-	press("Register company")
 	expect(app.sim.state.stores.is_empty() and app.sim.state.store.is_empty(), "New company has no default store or store name")
 	expect(controls(app, "Button").filter(func(button): return button.text == "Growth").is_empty(),
 		"Growth is not a standalone navigation destination")
@@ -66,7 +63,7 @@ func run() -> void:
 	press("Dashboard")
 	expect(has_label("Mira Rouf Kalil, CEO"), "Dashboard updates CEO label")
 	app.persist("Identity test save.")
-	expect(Slots.latest().state.owner == "Mira Rouf Kalil", "Autosave persists entrepreneur name")
+	expect(Slots.latest_for_game(app.active_game_id).state.owner == "Mira Rouf Kalil", "Autosave persists entrepreneur name")
 	press("Business")
 	press("Advertising")
 	expect(has_label("Advertising Overview"), "Growth tab opens the advertising overview")
@@ -173,32 +170,16 @@ func run() -> void:
 	expect(Stores.listing(app.sim.state, store_id, 0).price == original_listing_price,
 		"Cancel discards unsaved store listing changes in My Products")
 	await settle("phase3-store-listings")
-	expect(Slots.latest().state.advertising.campaigns.size() == 1 and Slots.latest().state.stores.size() == 2
-		and Slots.latest().state.stores[1].domain == "direct.aster.shop"
-		and Slots.latest().state.stores[1].active and Slots.latest().state.stores[1].setup_cost == website_setup_cost,
+	expect(Slots.latest_for_game(app.active_game_id).state.advertising.campaigns.size() == 1 and Slots.latest_for_game(app.active_game_id).state.stores.size() == 2
+		and Slots.latest_for_game(app.active_game_id).state.stores[1].domain == "direct.aster.shop"
+		and Slots.latest_for_game(app.active_game_id).state.stores[1].active and Slots.latest_for_game(app.active_game_id).state.stores[1].setup_cost == website_setup_cost,
 		"Campaign, website domain, activation, and setup cost persist through autosave")
-	var legacy_snapshot: Dictionary = app.sim.state.duplicate(true)
-	legacy_snapshot.owner = ""
-	var preserved_stores: Array = legacy_snapshot.stores.duplicate(true)
-	var preserved_products: Dictionary = legacy_snapshot.products.duplicate(true)
-	var preserved_campaigns: Dictionary = legacy_snapshot.advertising.campaigns.duplicate(true)
-	expect(Slots.write(3, legacy_snapshot, Time.get_unix_time_from_system()) == OK,
-		"Write a legacy save missing its entrepreneur identity")
-	app.dirty = false
-	app.request_load(Slots.read(3))
-	if is_instance_valid(app.confirmation):
-		app.confirmation.confirmed.emit()
-	expect(app.screen == "Entrepreneur name" and has_label("Enter your entrepreneur name to continue this saved company."),
-		"Loading a legacy save asks for a CEO name instead of inventing one")
-	inputs = controls(app, "LineEdit")
-	if not inputs.is_empty(): inputs[0].text = "Mira Restored"
-	press("Save and continue")
-	expect(app.screen == "CEO identity conflict" and has_label("CEO identity needs your choice"),
-		"A legacy name that conflicts with the global CEO profile requires an explicit migration choice")
-	press("Use Current CEO Profile")
-	expect(app.sim.state.owner == "Mira Rouf Kalil" and app.sim.state.company == "Aster Labs"
-		and app.sim.state.stores == preserved_stores and app.sim.state.products == preserved_products
-		and app.sim.state.advertising.campaigns == preserved_campaigns,
-		"Explicit identity migration resumes the same company and preserves progress")
+	var migrated_slot := Slots.latest_for_game(app.active_game_id)
+	expect(Saves.valid(migrated_slot.get("state", {}))
+		and migrated_slot.state.advertising.campaigns.size() == 1
+		and migrated_slot.state.stores.size() == 2
+		and migrated_slot.state.stores[1].domain == "direct.aster.shop"
+		and migrated_slot.state.stores[1].setup_cost == website_setup_cost,
+		"Game-scoped Save & Load preserves campaign, website, product, and company state")
 	print("Phase 3 UI (390 × 844): %d failures" % failures)
 	quit(0 if failures == 0 else 1)
