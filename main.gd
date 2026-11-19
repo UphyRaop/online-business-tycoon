@@ -522,6 +522,7 @@ func profile_page() -> void:
 	var avatar := TextureRect.new()
 	avatar.name = "CEOAvatar"
 	avatar.custom_minimum_size = Vector2(128, 128)
+	avatar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	avatar.texture = _profile_avatar_texture()
@@ -572,12 +573,14 @@ func profile_page() -> void:
 	var companies := card("Owned companies")
 	companies.add_child(label("Each company keeps its own save, operations, and accounts.", 14, Style.MUTED))
 	for entry in ceo_profile.get("companies", []):
-		var company_row := row(companies)
+		var company_row := VBoxContainer.new()
+		company_row.add_theme_constant_override("separation", 8)
+		companies.add_child(company_row)
 		var description := label("%s · %s" % [str(entry.get("name", "Company")), str(entry.get("country", ""))], 15, Style.GOLD)
 		description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		company_row.add_child(description)
 		if str(entry.get("company_id", "")) == str(sim.state.get("company_id", "")):
-			company_row.add_child(label("Current", 14, Style.GREEN))
+			company_row.add_child(label("Current company", 14, Style.GREEN))
 		else:
 			action(company_row, "Switch", switch_company.bind(str(entry.get("company_id", ""))))
 	action(companies, "Start Another Company", start_new_game, true)

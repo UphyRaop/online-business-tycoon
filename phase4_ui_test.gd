@@ -148,6 +148,14 @@ func run() -> void:
 	root.size = Vector2i(390, 844)
 	await process_frame
 	await process_frame
+	app.navigate("Profile")
+	var mobile_current_labels := controls(app, "Label").filter(func(node): return node.text == "Current company")
+	var ceo_avatar := app.find_child("CEOAvatar", true, false) as TextureRect
+	expect(mobile_current_labels.size() == 1 and mobile_current_labels[0].get_parent() is VBoxContainer,
+		"Mobile owned-company rows stack the company name and current status without narrow wrapping")
+	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size == Vector2(128, 128)
+		and ceo_avatar.size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
+		"CEO avatar retains a centered square portrait size on mobile")
 	for target in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
 		press(target)
 		expect(app.primary_category(app.page) == target or (target == "Order" and app.primary_category(app.page) == "Order"),
