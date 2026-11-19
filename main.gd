@@ -44,6 +44,9 @@ var selected_store_id := 0
 var page_shell: VBoxContainer
 var page_wide: VBoxContainer
 var page_grid: GridContainer
+var page_left_column: VBoxContainer
+var page_right_column: VBoxContainer
+var page_cards: Array[Control] = []
 var ad_period := 0
 var ad_period_end := 0
 var ad_platform_filter := -1
@@ -154,7 +157,10 @@ func _create_card(parent: Node, title: String) -> VBoxContainer:
 		surface.mouse_filter = Control.MOUSE_FILTER_PASS
 	surface.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 15, 16))
 	surface.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	surface.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	parent.add_child(surface)
+	if parent == page_grid:
+		page_cards.append(surface)
 	var content := stack(surface)
 	content.add_child(label(title, 20))
 	return content
@@ -197,7 +203,8 @@ func _update_responsive_layout() -> void:
 		var horizontal_margin := 20 if viewport_width >= 900.0 else 12
 		page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
 	if is_instance_valid(page_grid):
-		page_grid.columns = 2 if screen == "Game" and viewport_width >= 900.0 else 1
+		page_grid.columns = 2 if viewport_width >= 900.0 else 1
+		_reflow_page_cards()
 	var nav := find_child("PrimaryNavigation", true, false) as GridContainer
 	if nav != null:
 		nav.columns = 3 if viewport_width < 600.0 else 5
@@ -208,6 +215,47 @@ func _update_responsive_layout() -> void:
 	var kpis := find_child("DashboardKpis", true, false) as GridContainer
 	if kpis != null:
 		kpis.columns = 4 if viewport_width >= 900.0 else 2
+
+func _reflow_page_cards() -> void:
+	if not is_instance_valid(page_grid):
+		return
+	for panel in page_cards:
+		if panel.get_parent() != null:
+			panel.get_parent().remove_child(panel)
+	for column in [page_left_column, page_right_column]:
+		if is_instance_valid(column):
+			if column.get_parent() == page_grid:
+				page_grid.remove_child(column)
+			column.queue_free()
+	page_left_column = null
+	page_right_column = null
+	if page_cards.size() == 1 and page_grid.columns >= 2:
+		page_wide.add_child(page_cards[0])
+		return
+	if page_grid.columns >= 2 and page_cards.size() > 1:
+		page_left_column = VBoxContainer.new()
+		page_left_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		page_left_column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		page_left_column.add_theme_constant_override("separation", 18)
+		page_right_column = VBoxContainer.new()
+		page_right_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		page_right_column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		page_right_column.add_theme_constant_override("separation", 18)
+		page_grid.add_child(page_left_column)
+		page_grid.add_child(page_right_column)
+		for panel in page_cards:
+			var left_height := page_left_column.get_combined_minimum_size().y
+			var right_height := page_right_column.get_combined_minimum_size().y
+			if left_height <= right_height:
+				page_left_column.add_child(panel)
+			else:
+				page_right_column.add_child(panel)
+		return
+	for panel in page_cards:
+		page_grid.add_child(panel)
+
+func _finish_responsive_content() -> void:
+	_reflow_page_cards()
 
 func set_notice(message: String, error: bool = false) -> void:
 	notice = message
@@ -491,6 +539,9 @@ func render() -> void:
 	page_shell = null
 	page_wide = null
 	page_grid = null
+	page_left_column = null
+	page_right_column = null
+	page_cards.clear()
 	for child in get_children():
 		if child == confirmation:
 			confirmation.hide()
@@ -559,7 +610,7 @@ func render() -> void:
 	page_wide = stack(body, 12)
 	page_wide.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_grid = GridContainer.new()
-	page_grid.columns = 2 if screen == "Game" and size.x >= 900.0 else 1
+	page_grid.columns = 2 if size.x >= 900.0 else 1
 	page_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_grid.add_theme_constant_override("h_separation", 18)
 	page_grid.add_theme_constant_override("v_separation", 18)
@@ -580,6 +631,7 @@ func render() -> void:
 			"Advertising Analytics": AdsView.analytics(self)
 			"Management": StoresView.management(self)
 			"Store Listings": StoresView.listings(self)
+		_finish_responsive_content()
 		return
 	match page:
 		"Dashboard": dashboard()
@@ -596,6 +648,7 @@ func render() -> void:
 		"Management": StoresView.management(self)
 		"Store Profitability": StoresView.profitability(self)
 		"Store Listings": StoresView.listings(self)
+	_finish_responsive_content()
 
 func setup() -> void:
 	var details := card("Company registration")

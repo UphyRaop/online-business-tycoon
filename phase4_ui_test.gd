@@ -79,6 +79,14 @@ func run() -> void:
 	expect(app.page == "Pre-orders" and has_label("Pre-orders"), "Order secondary route opens pre-order management")
 	press("Returns and Service")
 	expect(app.page == "Orders" and app.orders_tab == 1, "Returns and Service retains the existing customer-service screen")
+	app.orders_tab = 0
+	app.navigate("Orders")
+	expect(app.page_grid.get_child_count() == 2 and app.page_left_column.get_child_count() + app.page_right_column.get_child_count() == 3
+		and app.page_left_column.get_child_count() > 0 and app.page_right_column.get_child_count() > 0,
+		"Desktop content uses two populated natural-height columns without an empty grid cell")
+	press("Pre-orders")
+	expect(app.page_grid.get_child_count() == 0 and app.page_wide.get_child_count() == 1,
+		"A single desktop content card expands to the full content width")
 
 	press("Business")
 	expect(app.page == "Business" and has_label("Owned stores"), "Business category opens Company Profile")
@@ -117,6 +125,14 @@ func run() -> void:
 		_check_primary_tabs_within_viewport(viewport)
 		expect(app.page_grid.columns == (2 if viewport.x >= 900 else 1),
 			"Page panels use the intended responsive column count at %dx%d" % [viewport.x, viewport.y])
+		var expected_grid_children: int = 0 if viewport.x >= 900 and app.page_cards.size() == 1 else (2 if viewport.x >= 900 else app.page_cards.size())
+		expect(app.page_grid.get_child_count() == expected_grid_children,
+			"Card layout reflows without unused columns at %dx%d" % [viewport.x, viewport.y])
+		press("Dashboard")
+		var kpis: GridContainer = app.find_child("DashboardKpis", true, false)
+		expect(kpis != null and kpis.columns == (4 if viewport.x >= 900 else 2),
+			"Dashboard KPI cards use the intended responsive columns at %dx%d" % [viewport.x, viewport.y])
+		_check_primary_tabs_within_viewport(viewport)
 		var shell_bounds: Rect2 = app.page_shell.get_global_rect()
 		var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
 		expect(shell_bounds.position.x * scale_x >= 0 and shell_bounds.end.x * scale_x <= float(viewport.x) + 1.0,
