@@ -28,6 +28,18 @@ func press(title: String) -> void:
 		if button.text.to_lower() == title.to_lower() and not button.disabled and button.is_visible_in_tree():
 			button.pressed.emit()
 			return
+	var primary := title.to_lower()
+	if primary in ["dashboard", "market", "order", "orders", "business", "finance", "profile"]:
+		var target := "Order" if primary in ["order", "orders"] else title
+		var drawer: Control = app.find_child("PrimaryNavigation", true, false)
+		var menu: Button = app.find_child("NavigationMenuButton", true, false)
+		if drawer != null and menu != null:
+			if not drawer.is_visible_in_tree():
+				menu.pressed.emit()
+			var navigation_item: Button = drawer.find_child("Primary_" + target, true, false)
+			if navigation_item != null and navigation_item.is_visible_in_tree():
+				navigation_item.pressed.emit()
+				return
 	expect(false, "Missing enabled button " + title)
 
 func has_visible_label(prefix: String) -> bool:
@@ -78,6 +90,8 @@ func settle(name: String) -> void:
 	await process_frame
 	await process_frame
 	for scroll in controls(app, "ScrollContainer"):
+		if not scroll.is_visible_in_tree(): continue
+		if scroll.horizontal_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED: continue
 		var content: Control = scroll.get_child(0)
 		expect(content.get_combined_minimum_size().x <= scroll.size.x + 1, "Portrait content fits on " + name)
 	var captures := OS.get_environment("OBT_UI_CAPTURE_DIR")
