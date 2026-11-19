@@ -18,6 +18,7 @@ const AvatarCrop = preload("res://avatar_crop_viewport.gd")
 const FinanceManagement = preload("res://finance_management.gd")
 const FinanceChart = preload("res://ads_chart.gd")
 const ChartLegend = preload("res://chart_legend.gd")
+const CompanySale = preload("res://company_sale.gd")
 const NAV := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
@@ -471,6 +472,11 @@ func request_load(record: Dictionary) -> void:
 	if record.is_empty():
 		set_notice("No readable save was found.", true)
 		return
+	var loaded_company_id := str(record.state.get("company_id", ""))
+	var owned_index := CEOProfile.company_index(ceo_profile, loaded_company_id) if not loaded_company_id.is_empty() else -1
+	if owned_index >= 0 and str(ceo_profile.companies[owned_index].get("ownership_status", "owned")) == "sold":
+		show_company_selection("This company has been sold. Its saved history remains available in the CEO profile.")
+		return
 	var autosave := Slots.read(Slots.AUTOSAVE)
 	var load := func():
 		if str(record.state.get("owner", "")).strip_edges().is_empty():
@@ -576,6 +582,9 @@ func switch_company(company_id: String) -> void:
 		set_notice("That company is no longer in this CEO profile.", true)
 		return
 	var entry: Dictionary = ceo_profile.companies[index]
+	if str(entry.get("ownership_status", "owned")) != "owned":
+		set_notice("This company has been sold and cannot be reopened for management.", true)
+		return
 	var state := Saves.load_state(str(entry.get("save_path", CEOProfile.company_path(company_id))))
 	if state.is_empty() or str(state.get("company_id", "")) != company_id:
 		set_notice("The saved company could not be recovered. Other companies were left untouched.", true)
@@ -593,6 +602,100 @@ func switch_company(company_id: String) -> void:
 		)
 	else:
 		change.call()
+
+func show_company_selection(message: String = "") -> void:
+	sim = null
+	dirty = false
+	screen = "Company Selection"
+	page = "Dashboard"
+	set_notice(message)
+	render()
+
+func sell_current_company() -> void:
+	if sim == null or not CEOProfile.owns_company(ceo_profile, str(sim.state.get("company_id", ""))):
+		set_notice("Only an owned company can be sold.", true)
+		return
+	if has_form_edits():
+		set_notice("Save or cancel company detail edits before selling the company.", true)
+		return
+	var value := CompanySale.preview(sim.state)
+	if not str(value.get("error", "")).is_empty():
+		set_notice(str(value.error), true)
+		return
+	var details := "Estimated equity proceeds: %s\nMethod: %s\n\nThis permanently transfers company ownership. Proceeds are recorded in your CEO personal ledger; company cash will not be moved to another company. The sold company's save and accounting history will be retained." % [sale_money(int(value.equity_value), str(value.currency)), str(value.method)]
+	confirm_action("Sell %s?" % str(value.company_name), details, "Confirm Company Sale", func(): _complete_company_sale())
+
+func _complete_company_sale() -> void:
+	if sim == null:
+		set_notice("The active company could not be found.", true)
+		return
+	var company_state: Dictionary = sim.state.duplicate(true)
+	var company_id := str(company_state.get("company_id", ""))
+	if not CEOProfile.owns_company(ceo_profile, company_id):
+		set_notice("This company has already been sold or is no longer owned.", true)
+		return
+	var archive_error := Saves.save(company_state, CEOProfile.company_path(company_id), Time.get_unix_time_from_system())
+	if archive_error != OK:
+		set_notice("The company history could not be archived. The sale was not completed. " + error_string(archive_error), true)
+		return
+	var sale := CompanySale.sell(ceo_profile, company_state)
+	if not str(sale.get("error", "")).is_empty():
+		set_notice(str(sale.error), true)
+		return
+	var profile_error := CEOProfile.save_profile(sale.profile)
+	if profile_error != OK:
+		set_notice("The sale could not be recorded in the CEO profile. The company remains owned. " + error_string(profile_error), true)
+		return
+	ceo_profile = sale.profile
+	var autosave_error := Slots.delete_slot(Slots.AUTOSAVE)
+	sim = null
+	dirty = false
+	screen = "Company Selection"
+	page = "Dashboard"
+	set_notice("%s was sold for %s. Its company records were preserved.%s" % [str(sale.record.company_name), sale_money(int(sale.record.amount), str(sale.record.currency)), " Autosave cleanup needs attention; sold-company loads are blocked." if autosave_error != OK else ""])
+	render()
+
+func sale_money(amount: int, currency: String) -> String:
+	return "%s %s" % [currency, amount_text(amount)]
+
+func company_entry_currency(entry: Dictionary) -> String:
+	var country := _company_entry_country_index(entry)
+	return Catalog.CURRENCIES[country] if country in range(Catalog.CURRENCIES.size()) else ""
+
+func company_entry_country(entry: Dictionary) -> String:
+	var country := _company_entry_country_index(entry)
+	return Catalog.COUNTRIES[country] if country in range(Catalog.COUNTRIES.size()) else "Country unavailable"
+
+func _company_entry_country_index(entry: Dictionary) -> int:
+	var saved_country := str(entry.get("country", ""))
+	if saved_country.is_valid_int(): return saved_country.to_int()
+	return Catalog.COUNTRIES.find(saved_country)
+
+func company_selection() -> void:
+	var view := wide_card("Choose a Company")
+	view.add_child(label("Each owned company keeps separate operations, accounts, and saved progress.", 14, Style.MUTED))
+	var owned: Array[Dictionary] = CEOProfile.owned_companies(ceo_profile)
+	if owned.is_empty():
+		view.add_child(label("You do not currently own a company. Start a new company to continue your career.", 15, Style.MUTED))
+		action(view, "Start a New Company", func(): show_screen("Setup"), true)
+	else:
+		for entry in owned:
+			var row := card(str(entry.get("name", "Company")))
+			metric(row, "Country", company_entry_country(entry))
+			metric(row, "Lifetime net sales", sale_money(int(entry.get("lifetime_sales", 0)), company_entry_currency(entry)))
+			metric(row, "Lifetime net profit", sale_money(int(entry.get("lifetime_profit", 0)), company_entry_currency(entry)))
+			action(row, "Open Company", switch_company.bind(str(entry.get("company_id", ""))), true)
+		action(view, "Start Another Company", func(): show_screen("Setup"))
+	var sold: Array[Dictionary] = []
+	for entry in ceo_profile.get("companies", []):
+		if entry is Dictionary and str(entry.get("ownership_status", "owned")) == "sold": sold.append(entry)
+	if not sold.is_empty():
+		var archive := card("Sold Company Records")
+		archive.add_child(label("Sold businesses remain in your career history and cannot be reopened for management.", 13, Style.MUTED))
+		for entry in sold:
+			var sale: Dictionary = entry.get("sale_record", {})
+			archive.add_child(label("%s · Sold for %s · %s" % [str(entry.get("name", "Company")), sale_money(int(sale.get("amount", 0)), str(sale.get("currency", ""))), str(sale.get("date", "Date unavailable"))], 14, Style.GOLD))
+	action(view, "Back to Title", func(): show_screen("Title"))
 
 func profile_page() -> void:
 	if ceo_profile_corrupt:
@@ -698,7 +801,7 @@ func profile_page() -> void:
 	var company_records: Array = ceo_profile.get("companies", [])
 	var active_companies := 0
 	for company_record in company_records:
-		if not bool(company_record.get("bankrupt", false)):
+		if str(company_record.get("ownership_status", "owned")) == "owned" and not bool(company_record.get("bankrupt", false)):
 			active_companies += 1
 	var ceo_id := str(ceo_profile.get("ceo_id", ""))
 	var career_start := str(ceo_profile.get("career_start_date", ""))
@@ -713,7 +816,18 @@ func profile_page() -> void:
 	for item in earned:
 		achievements.add_child(label("• %s" % _title_case(str(item.get("title", item.get("id", "Achievement")))), 15))
 	var finance_card := card("Personal Finance")
-	finance_card.add_child(label("Personal cash and net worth are not currently tracked.", 14, Style.MUTED))
+	finance_card.add_child(label("Personal cash and net worth remain untracked. Known company-sale proceeds are recorded separately by currency.", 14, Style.MUTED))
+	var proceeds := CompanySale.known_sale_proceeds_by_currency(ceo_profile)
+	if proceeds.is_empty():
+		finance_card.add_child(label("No company sale proceeds have been recorded.", 14, Style.MUTED))
+	else:
+		var currencies: Array = proceeds.keys()
+		currencies.sort()
+		for currency in currencies:
+			metric(finance_card, "Known Sale Proceeds · %s" % str(currency), sale_money(int(proceeds[currency]), str(currency)), Style.GOLD)
+	for transaction in ceo_profile.get("personal_finance_ledger", []):
+		if transaction is Dictionary and str(transaction.get("type", "")) == "company_sale":
+			metric(finance_card, "%s · %s" % [str(transaction.get("company_name", "Company sale")), str(transaction.get("date", "Date unavailable"))], sale_money(int(transaction.get("amount", 0)), str(transaction.get("currency", ""))))
 	finance_card.add_child(label("Company funds and profit remain separate from personal finances.", 14, Style.MUTED))
 	var companies := card("Owned Companies")
 	companies.add_child(label("Each company keeps separate operations, accounts, and save data.", 14, Style.MUTED))
@@ -724,7 +838,10 @@ func profile_page() -> void:
 		var description := label("%s · %s" % [str(entry.get("name", "Company")), str(entry.get("country", ""))], 15, Style.GOLD)
 		description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		company_row.add_child(description)
-		if str(entry.get("company_id", "")) == str(sim.state.get("company_id", "")):
+		if str(entry.get("ownership_status", "owned")) == "sold":
+			var sale: Dictionary = entry.get("sale_record", {})
+			company_row.add_child(label("Sold · %s · %s" % [str(sale.get("date", "Date unavailable")), sale_money(int(sale.get("amount", 0)), str(sale.get("currency", "")))], 14, Style.MUTED))
+		elif str(entry.get("company_id", "")) == str(sim.state.get("company_id", "")):
 			company_row.add_child(label("Current Company", 14, Style.GREEN))
 		else:
 			action(company_row, "Switch", switch_company.bind(str(entry.get("company_id", ""))))
@@ -907,6 +1024,10 @@ func _on_web_avatar_selected(args: Array) -> void:
 func enter_game(data: Dictionary) -> void:
 	sim = Sim.new(data)
 	_sync_ceo_profile()
+	if not CEOProfile.owns_company(ceo_profile, str(sim.state.get("company_id", ""))):
+		sim = null
+		show_company_selection("This company is no longer owned. Choose another company or start a new one.")
+		return
 	var profile_error := ERR_FILE_CORRUPT if ceo_profile_corrupt else CEOProfile.save_profile(ceo_profile)
 	var archive_error := Saves.save(sim.state, CEOProfile.company_path(str(sim.state.company_id)), Time.get_unix_time_from_system())
 	dirty = false
@@ -1171,7 +1292,7 @@ func secondary_navigation(parent: Node) -> void:
 	match category:
 		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Management", "Management"]]
 		"Order": routes = [["Customer Orders", "Orders"], ["Pre-orders", "Pre-orders"], ["Returns and Service", "Returns & Service"]]
-		"Business": routes = [["Company Profile", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
+		"Business": routes = [["Company Management", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
 		"Finance": routes = [["Statements", "Finance"], ["Expense Management", "Expense Management"], ["Store Profitability", "Store Profitability"]]
 		_: return
 	var scroller := ScrollContainer.new()
@@ -1258,7 +1379,7 @@ func render() -> void:
 		Menu.brand(self, masthead)
 	else:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
-			"Campaign Manager": "Campaign Manager", "Campaign Details": "Campaign Details",
+			"Campaign Manager": "Campaign Manager", "Campaign Details": "Campaign Details", "Company Selection": "Choose a Company",
 			"Advertising Analytics": "Ads Analytics", "Management": "Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
 			"CEO identity conflict": "Identity choice"}
 		masthead.add_child(label(titles.get(screen, screen), 30))
@@ -1292,6 +1413,7 @@ func render() -> void:
 		match screen:
 			"Title": Menu.title(self)
 			"Setup": setup()
+			"Company Selection": company_selection()
 			"Entrepreneur name": complete_identity()
 			"CEO identity conflict": identity_conflict_screen()
 			"Load": Menu.slots(self, false)
@@ -1492,7 +1614,7 @@ func price_cents(value: String) -> int:
 	return roundi(price * 100.0)
 
 func business() -> void:
-	var profile := card("Company Profile")
+	var profile := card("Company Management")
 	metric(profile, "Owned Stores", str(sim.state.stores.size()))
 	metric(profile, "Registration", "Active")
 	metric(profile, "Difficulty", Catalog.DIFFICULTIES[sim.state.difficulty])
@@ -1538,6 +1660,7 @@ func business() -> void:
 			company_profile_editing = true
 			refresh_view()
 		)
+	company_sale_panel(profile)
 	action(card("Management"), "Management", navigate.bind("Management"), true)
 	action(card("Inventory and listings"), "My Products", navigate.bind("My Products"))
 	action(card("Business advertising"), "Advertising", navigate.bind("Advertising"))
@@ -1546,6 +1669,26 @@ func business() -> void:
 	var controls := row(saves)
 	action(controls, "Manage Saves", open_screen.bind("Save"))
 	action(controls, "Load Game", open_screen.bind("Load"))
+
+func company_sale_panel(parent: Control) -> void:
+	parent.add_child(label("Sell Company", 18, Style.GOLD))
+	if not CEOProfile.owns_company(ceo_profile, str(sim.state.get("company_id", ""))):
+		parent.add_child(label("Only companies still owned by this CEO can be sold.", 14, Style.MUTED))
+		return
+	var value := CompanySale.preview(sim.state)
+	if not str(value.get("error", "")).is_empty():
+		parent.add_child(label(str(value.error), 14, Style.RED))
+		return
+	metric(parent, "Company", str(value.company_name), Style.GOLD)
+	metric(parent, "Estimated equity sale proceeds", sale_money(int(value.equity_value), str(value.currency)), Style.GOLD)
+	metric(parent, "Normalized annual revenue", sale_money(int(value.annual_revenue), str(value.currency)))
+	metric(parent, "Normalized annual operating profit", sale_money(int(value.annual_operating_profit), str(value.currency)), profit_color(int(value.annual_operating_profit)))
+	metric(parent, "Company reputation", "%d / 100" % int(value.reputation))
+	metric(parent, "Assets · Company cash", "%s · %s" % [sale_money(int(value.inventory_value + value.goods_in_transit_value), str(value.currency)), sale_money(int(value.cash), str(value.currency))])
+	metric(parent, "Outstanding liabilities", sale_money(int(value.liabilities), str(value.currency)))
+	var explanation := "%s. %d operating days; multiple %.2fx. Inventory is included once in earnings value, or counted as a verified asset in the fallback. Sale proceeds go to the CEO's personal sale ledger; corporate funds are not transferred." % [str(value.method), int(value.operating_days), float(value.multiple)]
+	parent.add_child(label(explanation, 13, Style.MUTED))
+	action(parent, "Sell Company", sell_current_company, true)
 
 func finance() -> void:
 	var anchor: int = report_end if report_end > 0 else sim.state.day

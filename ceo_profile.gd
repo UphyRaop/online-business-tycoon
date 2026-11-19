@@ -2,7 +2,7 @@ extends RefCounted
 
 const Simulation = preload("res://simulation.gd")
 const PATH := "user://ceo_profile_v1.json"
-const VERSION := 1
+const VERSION := 2
 const MAX_AVATAR_BYTES := 524288
 const LEVEL_XP := 1000
 const SALES_MILESTONES := [100000, 1000000, 10000000, 100000000]
@@ -24,6 +24,7 @@ static func empty(owner: String = "") -> Dictionary:
 		"personal_reputation": 0,
 		"personal_cash": null,
 		"personal_net_worth": null,
+		"personal_finance_ledger": [],
 		"companies": [],
 	}
 
@@ -35,20 +36,22 @@ static func load_profile(path: String = PATH) -> Dictionary:
 		if parser.parse(FileAccess.get_file_as_string(candidate)) != OK:
 			continue
 		var parsed: Variant = parser.data
-		if parsed is Dictionary and valid(parsed):
-			parsed.schema_version = VERSION
-			parsed.xp = int(parsed.xp)
-			return parsed
+		if parsed is Dictionary:
+			var upgraded := migrate_profile(parsed)
+			if valid(upgraded):
+				upgraded.xp = int(upgraded.xp)
+				return upgraded
 	return {}
 
 static func save_profile(profile: Dictionary, path: String = PATH) -> Error:
-	if not valid(profile):
+	var normalized := migrate_profile(profile)
+	if not valid(normalized):
 		return ERR_INVALID_DATA
 	var temporary := path + ".tmp"
 	var file := FileAccess.open(temporary, FileAccess.WRITE)
 	if file == null:
 		return FileAccess.get_open_error()
-	file.store_string(JSON.stringify(profile))
+	file.store_string(JSON.stringify(normalized))
 	file.flush()
 	var result := file.get_error()
 	file.close()
@@ -75,6 +78,8 @@ static func valid(profile: Dictionary) -> bool:
 		return false
 	if not profile.get("achievements") is Array or not profile.get("awarded_events") is Array or not profile.get("companies") is Array:
 		return false
+	if not profile.get("personal_finance_ledger") is Array:
+		return false
 	if profile.has("career_start_date") and not profile.career_start_date is String:
 		return false
 	if not (profile.get("personal_cash") == null or _whole_number(profile.personal_cash)):
@@ -84,13 +89,60 @@ static func valid(profile: Dictionary) -> bool:
 	if profile.avatar_data.length() > int(MAX_AVATAR_BYTES * 4.0 / 3.0) + 16:
 		return false
 	var company_ids := {}
+	var sold_company_ids := {}
 	for company in profile.companies:
 		if not company is Dictionary or not company.get("company_id") is String or company.company_id.is_empty():
 			return false
+		if str(company.get("ownership_status", "owned")) not in ["owned", "sold"]:
+			return false
+		if company.get("ownership_status", "owned") == "sold":
+			var sale: Variant = company.get("sale_record", {})
+			if not sale is Dictionary or not sale.get("record_id") is String or sale.record_id.is_empty():
+				return false
+			if not _whole_number(sale.get("amount")) or float(sale.amount) < 0 or not _whole_number(sale.get("day")) or float(sale.day) < 1:
+				return false
+			if str(sale.get("company_id", "")) != str(company.company_id): return false
+			sold_company_ids[str(company.company_id)] = str(sale.record_id)
 		if company_ids.has(company.company_id):
 			return false
 		company_ids[company.company_id] = true
+	var transaction_ids := {}
+	var sold_transaction_companies := {}
+	for transaction in profile.personal_finance_ledger:
+		if not transaction is Dictionary or str(transaction.get("type", "")) != "company_sale":
+			return false
+		if not transaction.get("record_id") is String or transaction.record_id.is_empty() or not transaction.get("company_id") is String or transaction.company_id.is_empty():
+			return false
+		if not _whole_number(transaction.get("amount")) or float(transaction.amount) < 0 or not _whole_number(transaction.get("day")) or float(transaction.day) < 1 or not transaction.get("currency") is String or transaction.currency.is_empty():
+			return false
+		if transaction_ids.has(transaction.record_id): return false
+		transaction_ids[transaction.record_id] = true
+		var sold_id := str(transaction.company_id)
+		if sold_transaction_companies.has(sold_id) or not sold_company_ids.has(sold_id) or sold_company_ids[sold_id] != str(transaction.record_id): return false
+		sold_transaction_companies[sold_id] = true
+	if sold_transaction_companies.size() != sold_company_ids.size(): return false
 	return true
+
+static func migrate_profile(profile: Dictionary) -> Dictionary:
+	var result := profile.duplicate(true)
+	var version := int(result.get("schema_version", 0))
+	if version not in [1, VERSION]:
+		return {}
+	# A legacy personal balance was never tracked. Preserve null rather than
+	# manufacturing a starting balance when introducing the sale-proceeds ledger.
+	if not result.get("personal_finance_ledger") is Array:
+		result.personal_finance_ledger = []
+	if not result.has("personal_cash"):
+		result.personal_cash = null
+	if not result.has("personal_net_worth"):
+		result.personal_net_worth = null
+	for index in result.get("companies", []).size():
+		var entry: Dictionary = result.companies[index]
+		if not entry.has("ownership_status"):
+			entry.ownership_status = "owned"
+		result.companies[index] = entry
+	result.schema_version = VERSION
+	return result
 
 static func _whole_number(value: Variant) -> bool:
 	if not (value is int or value is float):
@@ -98,7 +150,8 @@ static func _whole_number(value: Variant) -> bool:
 	return is_finite(float(value)) and floorf(float(value)) == float(value)
 
 static func ensure(profile: Dictionary, owner: String = "") -> Dictionary:
-	var result := profile.duplicate(true) if valid(profile) else empty(owner)
+	var migrated := migrate_profile(profile)
+	var result := migrated if valid(migrated) else empty(owner)
 	if str(result.ceo_id).is_empty():
 		result.ceo_id = _new_id("ceo")
 	if str(result.full_name).strip_edges().is_empty() and not owner.strip_edges().is_empty():
@@ -120,7 +173,8 @@ static func register_company(profile: Dictionary, state: Dictionary) -> Dictiona
 	var index := company_index(result, company_id)
 	var entry := {"company_id": company_id, "name": str(state.get("company", "Company")),
 		"country": str(state.get("country", "")), "save_path": company_path(company_id),
-		"lifetime_sales": 0, "lifetime_profit": 0, "markets": 0, "bankrupt": false}
+		"lifetime_sales": 0, "lifetime_profit": 0, "markets": 0, "bankrupt": false,
+		"ownership_status": "owned"}
 	if index >= 0:
 		entry = result.companies[index]
 		entry.name = str(state.get("company", entry.get("name", "Company")))
@@ -216,6 +270,17 @@ static func company_index(profile: Dictionary, company_id: String) -> int:
 		if str(profile.companies[index].get("company_id", "")) == company_id:
 			return index
 	return -1
+
+static func owns_company(profile: Dictionary, company_id: String) -> bool:
+	var index := company_index(profile, company_id)
+	return index >= 0 and str(profile.companies[index].get("ownership_status", "owned")) == "owned"
+
+static func owned_companies(profile: Dictionary) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for entry in profile.get("companies", []):
+		if entry is Dictionary and str(entry.get("ownership_status", "owned")) == "owned":
+			result.append(entry)
+	return result
 
 static func company_path(company_id: String) -> String:
 	return "user://ceo_companies/%s.save" % company_id
