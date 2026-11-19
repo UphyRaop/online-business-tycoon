@@ -41,6 +41,9 @@ var order_page := 0
 var analytics_window := 1
 var campaign_id := 0
 var selected_store_id := 0
+var page_shell: VBoxContainer
+var page_wide: VBoxContainer
+var page_grid: GridContainer
 var ad_period := 0
 var ad_period_end := 0
 var ad_platform_filter := -1
@@ -53,6 +56,7 @@ var show_new_store_form := false
 
 func _ready() -> void:
 	theme = Style.build()
+	get_viewport().size_changed.connect(_update_responsive_layout)
 	var settings := ConfigFile.new()
 	if settings.load(PREFERENCES) == OK:
 		large_text = settings.get_value("display", "large_text", false) == true
@@ -139,11 +143,18 @@ func field(parent: Node, caption: String, value: String, max_length: int = 48) -
 	return input
 
 func card(title: String) -> VBoxContainer:
+	return _create_card(page_grid if is_instance_valid(page_grid) else body, title)
+
+func wide_card(title: String) -> VBoxContainer:
+	return _create_card(page_wide if is_instance_valid(page_wide) else body, title)
+
+func _create_card(parent: Node, title: String) -> VBoxContainer:
 	var surface := PanelContainer.new()
 	if OS.has_feature("web"):
 		surface.mouse_filter = Control.MOUSE_FILTER_PASS
 	surface.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 15, 16))
-	body.add_child(surface)
+	surface.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(surface)
 	var content := stack(surface)
 	content.add_child(label(title, 20))
 	return content
@@ -179,6 +190,24 @@ func money(cents: int) -> String:
 
 func profit_color(cents: int) -> Color:
 	return Style.GREEN if cents >= 0 else Style.RED
+
+func _update_responsive_layout() -> void:
+	var viewport_width := size.x
+	if is_instance_valid(page_shell):
+		var horizontal_margin := 20 if viewport_width >= 900.0 else 12
+		page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
+	if is_instance_valid(page_grid):
+		page_grid.columns = 2 if screen == "Game" and viewport_width >= 900.0 else 1
+	var nav := find_child("PrimaryNavigation", true, false) as GridContainer
+	if nav != null:
+		nav.columns = 3 if viewport_width < 600.0 else 5
+		for item in nav.get_children():
+			if item is Button:
+				item.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 180)
+				item.add_theme_font_size_override("font_size", 12 if viewport_width < 600.0 else 13)
+	var kpis := find_child("DashboardKpis", true, false) as GridContainer
+	if kpis != null:
+		kpis.columns = 4 if viewport_width >= 900.0 else 2
 
 func set_notice(message: String, error: bool = false) -> void:
 	notice = message
@@ -412,19 +441,20 @@ func route_secondary(target: String) -> void:
 	navigate(target)
 
 func primary_navigation(parent: Node) -> void:
-	var nav := FlowContainer.new()
+	var viewport_width := size.x
+	var nav := GridContainer.new()
 	nav.name = "PrimaryNavigation"
 	nav.size_flags_horizontal = Control.SIZE_FILL
+	nav.columns = 3 if viewport_width < 600.0 else 5
 	nav.add_theme_constant_override("h_separation", 6)
 	nav.add_theme_constant_override("v_separation", 6)
 	parent.add_child(nav)
-	var narrow_viewport := get_viewport_rect().size.x < 600.0
 	for target in NAV:
 		var tab := action(nav, target, navigate.bind(target), target == primary_category(page))
-		tab.add_theme_font_size_override("font_size", 12 if narrow_viewport else 13)
+		tab.add_theme_font_size_override("font_size", 12 if viewport_width < 600.0 else 13)
 		tab.clip_text = true
-		tab.custom_minimum_size.x = 70 if narrow_viewport else 100
-		tab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		tab.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 180)
+		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		for button_state in ["normal", "hover", "pressed", "focus", "disabled"]:
 			var style: StyleBox = tab.get_theme_stylebox(button_state).duplicate()
 			style.content_margin_left = 4
@@ -458,6 +488,9 @@ func secondary_navigation(parent: Node) -> void:
 
 func render() -> void:
 	edit_checks.clear()
+	page_shell = null
+	page_wide = null
+	page_grid = null
 	for child in get_children():
 		if child == confirmation:
 			confirmation.hide()
@@ -471,9 +504,26 @@ func render() -> void:
 	var margin := MarginContainer.new()
 	add_child(margin)
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var viewport_width := size.x
+	var horizontal_margin := 20 if viewport_width >= 900.0 else 12
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
-	var shell := stack(margin, 12)
+		margin.add_theme_constant_override("margin_" + side, horizontal_margin if side in ["left", "right"] else 16)
+	var centering := HBoxContainer.new()
+	centering.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centering.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	centering.add_theme_constant_override("separation", 0)
+	margin.add_child(centering)
+	var left_space := Control.new()
+	left_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centering.add_child(left_space)
+	page_shell = stack(centering, 12)
+	page_shell.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	page_shell.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
+	var right_space := Control.new()
+	right_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centering.add_child(right_space)
+	var shell := page_shell
 	var masthead := stack(shell, 3)
 	if screen != "Title":
 		masthead.add_child(label("ONLINE BUSINESS TYCOON", 13, Style.GOLD))
@@ -501,10 +551,19 @@ func render() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.follow_focus = true
 	shell.add_child(scroll)
 	body = stack(scroll, 12)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page_wide = stack(body, 12)
+	page_wide.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page_grid = GridContainer.new()
+	page_grid.columns = 2 if screen == "Game" and size.x >= 900.0 else 1
+	page_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page_grid.add_theme_constant_override("h_separation", 18)
+	page_grid.add_theme_constant_override("v_separation", 18)
+	body.add_child(page_grid)
 	status = label(notice, 14, Style.RED if error_notice else Style.GREEN)
 	status.visible = not notice.is_empty()
 	shell.add_child(status)
@@ -571,28 +630,31 @@ func setup() -> void:
 
 func dashboard() -> void:
 	var totals := sim.report(sim.state.day)
-	var overview := card(sim.state.company)
+	var overview := wide_card(sim.state.company)
 	overview.add_child(label(sim.state.owner + ", CEO", 16, Style.MUTED))
-	overview.add_child(label("Bank Balance", 13, Style.MUTED))
-	overview.add_child(label(money(totals.closing_cash), 32, Style.GOLD))
-	divider(overview)
-	metric(overview, "Lifetime net sales", money(totals.sales - totals.refunds))
-	metric(overview, "Lifetime net profit", money(Sim.net(totals)), profit_color(Sim.net(totals)))
-	metric(overview, "Orders fulfilled", str(totals.channels[0].orders + totals.channels[1].orders + totals.channels[2].orders))
-	metric(overview, "Open orders", str(sim.state.active_orders.size()))
-	metric(overview, "Store reputation", "%d / 100" % sim.state.reputation)
 	var active_marketplaces := 0
 	var active_websites := 0
 	for store in sim.state.stores:
 		if not store.active: continue
 		if int(store.type) == 0: active_marketplaces += 1
 		else: active_websites += 1
-	metric(overview, "Active Marketplace Stores", str(active_marketplaces))
-	metric(overview, "Active Websites", str(active_websites))
 	var active_campaigns := 0
 	for campaign in sim.state.advertising.campaigns.values():
 		if campaign.status == "active": active_campaigns += 1
-	metric(overview, "Active Advertising Campaigns · Lifetime Spend", "%d · %s" % [active_campaigns, money(totals.advertising)])
+	var kpis := GridContainer.new()
+	kpis.columns = 4 if size.x >= 900.0 else 2
+	kpis.add_theme_constant_override("h_separation", 8)
+	kpis.add_theme_constant_override("v_separation", 8)
+	kpis.name = "DashboardKpis"
+	overview.add_child(kpis)
+	_add_kpi(kpis, "Bank Balance", money(totals.closing_cash), Style.GOLD)
+	_add_kpi(kpis, "Lifetime net sales", money(totals.sales - totals.refunds))
+	_add_kpi(kpis, "Lifetime net profit", money(Sim.net(totals)), profit_color(Sim.net(totals)))
+	_add_kpi(kpis, "Orders fulfilled", str(totals.channels[0].orders + totals.channels[1].orders + totals.channels[2].orders))
+	_add_kpi(kpis, "Open orders", str(sim.state.active_orders.size()))
+	_add_kpi(kpis, "Store reputation", "%d / 100" % sim.state.reputation)
+	_add_kpi(kpis, "Marketplace stores · Websites", "%d · %d" % [active_marketplaces, active_websites])
+	_add_kpi(kpis, "Active campaigns · Lifetime spend", "%d · %s" % [active_campaigns, money(totals.advertising)])
 	action(overview, "My Products", navigate.bind("My Products"))
 	var alerts: VBoxContainer = card("Business Alerts")
 	if active_marketplaces == 0 and active_websites == 0:
@@ -630,6 +692,16 @@ func dashboard() -> void:
 		next.add_child(label("Choose a product in Market, purchase stock from a supplier, then publish your listing.", 15, Style.MUTED))
 		action(next, "Browse product catalog", navigate.bind("Market"), true)
 	channel_cards(totals, "Lifetime")
+
+func _add_kpi(parent: GridContainer, caption: String, value: String, color: Color = Style.TEXT) -> void:
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 9, 10))
+	panel.custom_minimum_size.x = 105
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(panel)
+	var content := stack(panel, 3)
+	content.add_child(label(caption, 12, Style.MUTED))
+	content.add_child(label(value, 16, color))
 
 func advance(days: int) -> void:
 	sim.advance(days)

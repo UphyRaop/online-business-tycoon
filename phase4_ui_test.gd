@@ -14,7 +14,7 @@ func run() -> void:
 	fields[1].text = "Harbor Works"
 	press("Register company")
 	await process_frame
-	var nav: FlowContainer = app.find_child("PrimaryNavigation", true, false)
+	var nav: GridContainer = app.find_child("PrimaryNavigation", true, false)
 	var game_date: Label = app.find_child("GameDate", true, false)
 	expect(nav != null and game_date != null and nav.get_parent() == game_date.get_parent()
 		and nav.get_index() == game_date.get_index() + 1,
@@ -105,12 +105,22 @@ func run() -> void:
 	Slots.delete_slot(1)
 
 	root.size = Vector2i(390, 844)
-	await settle("phase4-mobile-top-navigation")
-	_check_primary_tabs_within_viewport(Vector2i(390, 844))
+	await process_frame
+	await process_frame
 	for target in ["Dashboard", "Market", "Order", "Business", "Finance"]:
 		press(target)
 		expect(app.primary_category(app.page) == target or (target == "Order" and app.primary_category(app.page) == "Order"),
 			"Mobile navigation opens %s" % target)
+	for viewport in [Vector2i(1920, 1080), Vector2i(1280, 720), Vector2i(768, 1024), Vector2i(390, 844), Vector2i(375, 812)]:
+		root.size = viewport
+		await settle("phase4-%dx%d" % [viewport.x, viewport.y])
+		_check_primary_tabs_within_viewport(viewport)
+		expect(app.page_grid.columns == (2 if viewport.x >= 900 else 1),
+			"Page panels use the intended responsive column count at %dx%d" % [viewport.x, viewport.y])
+		var shell_bounds: Rect2 = app.page_shell.get_global_rect()
+		var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
+		expect(shell_bounds.position.x * scale_x >= 0 and shell_bounds.end.x * scale_x <= float(viewport.x) + 1.0,
+			"Centered content shell fits %dx%d" % [viewport.x, viewport.y])
 	print("Phase 4 navigation and Management UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 
@@ -120,10 +130,11 @@ func _check_primary_tabs_within_viewport(viewport: Vector2i) -> void:
 		expect(false, "Primary navigation remains present at %dx%d" % [viewport.x, viewport.y])
 		return
 	var button_count := 0
+	var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
 	for item in controls(nav, "Button"):
 		var button: Button = item
 		var button_bounds: Rect2 = button.get_global_rect()
 		button_count += 1
-		expect(button_bounds.position.x >= 0 and button_bounds.end.x <= float(viewport.x) + 1.0,
+		expect(button_bounds.position.x * scale_x >= 0 and button_bounds.end.x * scale_x <= float(viewport.x) + 1.0,
 			"%s remains reachable within the viewport" % button.text)
 	expect(button_count == 5, "All five primary tabs remain present without requiring horizontal scrolling")
