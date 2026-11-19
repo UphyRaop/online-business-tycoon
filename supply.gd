@@ -168,7 +168,12 @@ static func purchase_order(state: Dictionary, product: int, supplier: int, units
 	state.ledger.back().purchases += total
 	state.ledger.back().credit_purchases += credit_amount
 	var row: Dictionary = state.ledger.back()
-	row.inbound_freight = row.get("inbound_freight", 0) + freight * units
+	var freight_total := freight * units
+	row.inbound_freight = row.get("inbound_freight", 0) + freight_total
+	# Allocate the credit portion proportionally so cash-flow statements exclude
+	# freight financed by the supplier, including mixed cash/credit purchases.
+	var credited_freight := mini(freight_total, int(round(float(freight_total) * float(credit_amount) / float(maxi(1, total)))))
+	row.credit_inbound_freight = row.get("credit_inbound_freight", 0) + credited_freight
 	return {"error": "", "purchase_id": id, "total": total, "credit_amount": credit_amount,
 		"cash_paid": total - credit_amount, "landed_unit_cost": landed, "freight_unit_cost": freight}
 

@@ -94,7 +94,7 @@ static func build(sim: RefCounted, mobile: bool = false) -> PanelContainer:
 	heading.add_theme_font_size_override("font_size", 19)
 	content.add_child(heading)
 	var note := Label.new()
-	note.text = "Low stock means %d or fewer available and reserved units." % LOW_STOCK_THRESHOLD
+	note.text = "Low stock is based on %d or fewer available units; reserved units are shown separately." % LOW_STOCK_THRESHOLD
 	note.add_theme_font_size_override("font_size", 12)
 	note.add_theme_color_override("font_color", Style.MUTED)
 	content.add_child(note)

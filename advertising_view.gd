@@ -69,7 +69,7 @@ static func details(app: Control) -> void:
 		app.set_notice("Campaign not found.", true)
 		app.navigate("Campaign Manager")
 		return
-	var view: VBoxContainer = app.card("Create campaign" if creating else existing.name)
+	var view: VBoxContainer = app.card("Create Campaign" if creating else existing.name)
 	if not creating and not app.campaign_editing:
 		_campaign_summary(app, view, state, existing)
 		return

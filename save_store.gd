@@ -5,6 +5,7 @@ const Catalog = preload("res://catalog.gd")
 const Storefront = preload("res://storefront.gd")
 const Advertising = preload("res://advertising.gd")
 const Stores = preload("res://store_manager.gd")
+const SupplierCredit = preload("res://supplier_credit.gd")
 const PATH := "user://business_phase1.save"
 const PROTOTYPE := "user://business_save.json"
 
@@ -108,6 +109,12 @@ static func valid(state: Dictionary) -> bool:
 		var inbound_freight: Variant = row.get("inbound_freight", 0)
 		if not inbound_freight is int or inbound_freight < 0 or inbound_freight > row.purchases + row.get("direct_purchases", 0):
 			return false
+		var credit_purchases: Variant = row.get("credit_purchases", 0)
+		var credit_freight: Variant = row.get("credit_inbound_freight", 0)
+		if not credit_purchases is int or credit_purchases < 0 or credit_purchases > row.purchases:
+			return false
+		if not credit_freight is int or credit_freight < 0 or credit_freight > inbound_freight:
+			return false
 		for channel in row.channels:
 			if not channel is Dictionary:
 				return false
@@ -136,6 +143,8 @@ static func valid(state: Dictionary) -> bool:
 	if not state.get("products") is Dictionary or computed_cash != state.cash:
 		return false
 	if not valid_supplier_returns(state):
+		return false
+	if not SupplierCredit.validate(state):
 		return false
 	var stock_value := 0
 	for product in state.products:

@@ -19,6 +19,8 @@ const FinanceManagement = preload("res://finance_management.gd")
 const FinanceChart = preload("res://ads_chart.gd")
 const ChartLegend = preload("res://chart_legend.gd")
 const CompanySale = preload("res://company_sale.gd")
+const InventoryOverview = preload("res://dashboard_inventory.gd")
+const PortraitFrame = preload("res://portrait_frame.gd")
 const NAV := ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]
 const NAV_ICON_PATHS := {
 	"Dashboard": "res://assets/navigation/dashboard.svg",
@@ -142,15 +144,7 @@ func action(parent: Node, title: String, callback: Callable, accent: bool = fals
 	node.custom_minimum_size.y = TOUCH_HEIGHT
 	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	node.pressed.connect(callback)
-	var action_name := title.strip_edges().to_lower()
-	if accent or action_name.begins_with("create") or action_name.begins_with("save") or action_name.begins_with("register") or action_name.begins_with("continue") or action_name.begins_with("apply") or action_name.begins_with("launch") or action_name.begins_with("open "):
-		Style.primary(node)
-	elif action_name.contains("delete") or action_name.contains("permanently remove") or action_name == "stop" or action_name == "deactivate":
-		Style.danger(node)
-	elif action_name.contains("confirm") or action_name.contains("complete") or action_name.contains("approve") or action_name.contains("refund"):
-		Style.success(node)
-	elif action_name == "cancel" or action_name == "back" or action_name == "close" or action_name.begins_with("discard") or action_name == "previous" or action_name == "next":
-		Style.secondary(node)
+	Style.apply_button_role(node, Style.ROLE_PRIMARY if accent else Style.button_role_for_action(title))
 	parent.add_child(node)
 	return node
 
@@ -191,6 +185,9 @@ func _style_secondary_navigation_tab(node: Button, selected: bool) -> void:
 	node.add_theme_color_override("font_pressed_color", Style.GOLD)
 
 func action_title(value: String) -> String:
+	var trimmed := value.strip_edges()
+	if trimmed.begins_with("Manage "):
+		return "Manage " + trimmed.substr(7)
 	var parts := value.split(" ", false)
 	for index in parts.size():
 		var word: String = parts[index]
@@ -280,9 +277,8 @@ func profit_color(cents: int) -> Color:
 func _update_responsive_layout() -> void:
 	var viewport_width := size.x
 	if page == "Profile":
-		var avatar := find_child("CEOAvatar", true, false) as TextureRect
-		if avatar != null and avatar.get_parent() != null and avatar.get_parent().get_parent() is BoxContainer:
-			var identity_layout: BoxContainer = avatar.get_parent().get_parent()
+		var identity_layout := find_child("CEOIdentityLayout", true, false) as BoxContainer
+		if identity_layout != null:
 			if (identity_layout is HBoxContainer) != (viewport_width >= 600.0):
 				render()
 				return
@@ -720,21 +716,17 @@ func profile_page() -> void:
 		return
 	var info := wide_card("CEO Profile")
 	var identity_layout: BoxContainer = HBoxContainer.new() if size.x >= 600.0 else VBoxContainer.new()
+	identity_layout.name = "CEOIdentityLayout"
 	identity_layout.add_theme_constant_override("separation", 18)
 	info.add_child(identity_layout)
 	var portrait := VBoxContainer.new()
 	portrait.add_theme_constant_override("separation", 8)
 	portrait.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	identity_layout.add_child(portrait)
-	var avatar := TextureRect.new()
-	avatar.name = "CEOAvatar"
 	var portrait_width := 170.0 if size.x >= 600.0 else minf(150.0, maxf(132.0, size.x * 0.38))
-	avatar.custom_minimum_size = Vector2(portrait_width, portrait_width * 4.0 / 3.0)
-	avatar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	avatar.texture = _profile_avatar_texture()
-	portrait.add_child(avatar)
+	var portrait_frame := PortraitFrame.new()
+	portrait_frame.set_portrait(_profile_avatar_texture(), portrait_width)
+	portrait.add_child(portrait_frame)
 	var details := VBoxContainer.new()
 	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	details.add_theme_constant_override("separation", 8)
@@ -1505,7 +1497,7 @@ func render() -> void:
 	_finish_responsive_content()
 
 func setup() -> void:
-	var details := card("Company registration")
+	var details := card("Company Registration")
 	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Store Management.", 15, Style.MUTED))
 	var owner := field(details, "Entrepreneur name", str(ceo_profile.get("full_name", "")))
 	if not ceo_profile.is_empty():
@@ -1569,6 +1561,7 @@ func dashboard() -> void:
 	_add_kpi(kpis, "Store reputation", "%d / 100" % sim.state.reputation)
 	_add_kpi(kpis, "Marketplace stores · Websites", "%d · %d" % [active_marketplaces, active_websites])
 	_add_kpi(kpis, "Active campaigns · Lifetime spend", "%d · %s" % [active_campaigns, money(totals.advertising)])
+	page_grid.add_child(InventoryOverview.build(sim, size.x < 600.0))
 	action(overview, "My Products", navigate.bind("My Products"))
 	var alerts: VBoxContainer = card("Business Alerts")
 	if active_marketplaces == 0 and active_websites == 0:
@@ -1592,7 +1585,7 @@ func dashboard() -> void:
 		alerts.add_child(label("%d supplier shipments are delayed." % delayed_shipments, 14, Style.GOLD))
 	if alerts.get_child_count() == 1:
 		alerts.add_child(label("No business alerts.", 14, Style.MUTED))
-	var time := card("Advance time")
+	var time := card("Advance Time")
 	time.add_child(label("Each simulated day generates orders and charges operating expenses.", 14, Style.MUTED))
 	var controls := row(time)
 	for days in [1, 2, 7, 30]:
@@ -1602,7 +1595,7 @@ func dashboard() -> void:
 		if item.listed:
 			has_listing = true
 	if not has_listing:
-		var next := card("Open your store")
+		var next := card("Open Your Store")
 		next.add_child(label("Choose a product in Market, purchase stock from a supplier, then publish your listing.", 15, Style.MUTED))
 		action(next, "Browse Product Catalogue", navigate.bind("Market"), true)
 	channel_cards(totals, "Lifetime")
@@ -1627,7 +1620,7 @@ func advance(days: int) -> void:
 	render()
 
 func channel_cards(report: Dictionary, scope: String) -> void:
-	var channels := card("Sales by channel")
+	var channels := card("Sales by Channel")
 	channels.add_child(label(scope, 14, Style.MUTED))
 	for channel in Catalog.FEES.size():
 		if channel > 0:
@@ -1723,7 +1716,7 @@ func business() -> void:
 	action(card("Store Management"), "Store Management", navigate.bind("Management"), true)
 	action(card("Inventory Management"), "Inventory Management", navigate.bind("My Products"))
 	action(card("Marketing"), "Marketing", navigate.bind("Marketing"))
-	var saves := card("Local progress")
+	var saves := card("Local Progress")
 	saves.add_child(label("Progress saves automatically when you make changes or advance time.", 14, Style.MUTED))
 	var controls := row(saves)
 	action(controls, "Manage Saves", open_screen.bind("Save"))
@@ -1754,7 +1747,7 @@ func finance() -> void:
 	var boundaries := Calendar.bounds(period, anchor)
 	var report := sim.calendar_report(period, anchor)
 	financial_dashboard(report)
-	var controls := card("Financial statements")
+	var controls := card("Financial Statements")
 	var selection := dropdown(controls, Calendar.PERIODS, period)
 	selection.item_selected.connect(func(index: int):
 		period = index
@@ -1804,7 +1797,7 @@ func financial_dashboard(report: Dictionary) -> void:
 		content.add_child(label(str(item[1]), 16, Style.GOLD))
 		metric_card.add_child(content)
 		kpis.add_child(metric_card)
-	view.add_child(label("This report uses existing ledger rules. Delivered sales and supplier orders settle immediately, so receivables and supplier payables are zero. Customer deposits remain a liability until delivery or refund.", 13, Style.MUTED))
+	view.add_child(label("Delivered sales settle under existing revenue rules. Supplier purchases may be paid in cash or financed through trade credit, which creates a payable until repayment or return adjustment. Customer deposits remain a liability until delivery or refund.", 13, Style.MUTED))
 	var forecast := card("Known Fixed-Cost Estimate")
 	metric(forecast, "Known next-day fixed costs", money(-int(summary.known_fixed_costs)))
 	metric(forecast, "Cash after known fixed costs", money(int(summary.cash_after_known_fixed_costs)), profit_color(int(summary.cash_after_known_fixed_costs)))
@@ -1917,26 +1910,31 @@ func balance_sheet(report: Dictionary) -> void:
 	divider(view)
 	metric(view, "Overdraft liability", money(report.overdraft))
 	metric(view, "Customer deposits", money(report.customer_deposits))
+	metric(view, "Supplier Payables", money(report.get("supplier_payables", 0)))
 	metric(view, "Contributed capital", money(report.equity_capital))
 	metric(view, "Retained earnings", money(report.retained))
-	metric(view, "Total liabilities and equity", money(report.overdraft + report.customer_deposits + report.equity_capital + report.retained), Style.GOLD)
+	metric(view, "Total liabilities and equity", money(report.overdraft + report.customer_deposits + report.get("supplier_payables", 0) + report.equity_capital + report.retained), Style.GOLD)
 
 func cash_flow(report: Dictionary) -> void:
 	var view := card(STATEMENTS[2])
+	var lines := FinanceManagement.cash_flow_lines(report)
 	metric(view, "Opening cash", money(report.opening_cash))
 	divider(view)
-	metric(view, "Receipts from customers", money(report.sales + report.deposits))
-	metric(view, "Refunds paid", money(-report.refunds))
-	metric(view, "Warehouse goods paid", money(-(report.purchases - (report.inbound_freight - report.direct_inbound_freight))))
-	metric(view, "Supplier-direct goods paid", money(-(report.direct_purchases - report.direct_inbound_freight)))
-	metric(view, "Inbound freight paid", money(-report.inbound_freight))
-	metric(view, "Supplier refunds received", money(report.supplier_refunds))
-	metric(view, "Outbound shipping paid", money(-report.shipping))
-	metric(view, "Advertising paid", money(-report.advertising))
-	metric(view, "Store setup paid", money(-report.store_setup))
-	metric(view, "Additional store expenses paid", money(-report.store_expenses))
-	metric(view, "Other operating payments", money(-report.fees - report.overhead - report.hosting - report.legacy))
-	metric(view, "Owner investment", money(report.capital))
+	metric(view, "Receipts from customers", money(lines.customer_receipts))
+	metric(view, "Customer refunds paid", money(lines.customer_refunds))
+	metric(view, "Warehouse goods paid", money(lines.warehouse_goods))
+	metric(view, "Supplier-direct goods paid", money(lines.supplier_direct_goods))
+	metric(view, "Inbound freight paid", money(lines.inbound_freight))
+	metric(view, "Supplier repayments", money(lines.supplier_repayments))
+	metric(view, "Supplier refunds received", money(lines.supplier_refunds))
+	metric(view, "Outbound shipping paid", money(lines.outbound_shipping))
+	metric(view, "Advertising paid", money(lines.advertising))
+	metric(view, "Store setup paid", money(lines.store_setup))
+	metric(view, "Additional store expenses paid", money(lines.store_expenses))
+	metric(view, "Other operating payments", money(lines.other_operating))
+	metric(view, "Owner investment", money(lines.owner_investment))
+	if int(lines.total) != Sim.cash_change(report):
+		view.add_child(label("Cash flow reconciliation error: the displayed lines do not match recorded cash movement.", 13, Style.RED))
 	metric(view, "Net change in cash", money(Sim.cash_change(report)), profit_color(Sim.cash_change(report)))
 	divider(view)
 	metric(view, "Closing cash", money(report.closing_cash), Style.GOLD)

@@ -10,7 +10,7 @@ const Stores = preload("res://store_manager.gd")
 const Advertising = preload("res://advertising.gd")
 const SupplierCredit = preload("res://supplier_credit.gd")
 const PERIODS := [1, 7, 30, 365]
-const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "credit_purchases", "supplier_repayments", "supplier_credit_adjustments", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses", "inventory_returns", "supplier_refunds"]
+const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "credit_purchases", "credit_inbound_freight", "supplier_repayments", "supplier_credit_adjustments", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses", "inventory_returns", "supplier_refunds"]
 const CHANNEL_FIELDS := ["orders", "sales", "cogs", "fees", "hosting", "shipping", "refunds",
 	"placed", "dispatched", "tracked_deliveries", "on_time", "checkouts", "abandoned", "stockouts", "bundles", "upsells", "refunded"]
 const VERSION := 6

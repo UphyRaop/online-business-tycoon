@@ -45,6 +45,7 @@ func test_supplier_credit() -> void:
 	var preview := Supply.purchase_breakdown(state, 0, supplier, 1)
 	var next_purchase_before := int(state.next_purchase)
 	var purchases_before := int(state.ledger.back().purchases)
+	var inbound_freight_before := int(state.ledger.back().inbound_freight)
 	var too_large := Credit.purchase_on_credit(state, 0, supplier, Supply.maximum_order_quantity(supplier))
 	expect(not str(too_large.get("error", "")).is_empty() and int(state.next_purchase) == next_purchase_before
 		and int(state.ledger.back().purchases) == purchases_before,
@@ -60,9 +61,13 @@ func test_supplier_credit() -> void:
 		expect(int(state.cash) == before_credit_cash and int(state.ledger.back().credit_purchases) == total
 			and int(state.ledger.back().purchases) == purchases_before + total and Credit.open_payables(state) == total,
 			"Credit receipt adds goods-in-transit inventory and an equal payable without reducing cash (cash %d/%d, credit %d, purchases %d, payable %d, total %d)" % [int(state.cash), before_credit_cash, int(state.ledger.back().credit_purchases), int(state.ledger.back().purchases), Credit.open_payables(state), total])
+		expect(int(state.ledger.back().credit_inbound_freight) == int(state.ledger.back().inbound_freight) - inbound_freight_before,
+			"Fully credit-financed purchase freight is excluded from current cash payments")
 		expect(int(report.supplier_payables) == total and report.assets == report.overdraft + report.customer_deposits
 			+ report.supplier_payables + report.equity_capital + report.retained and report.closing_cash == state.cash,
 			"Balance sheet, cash, inventory, retained earnings, and supplier payables reconcile after credit purchase")
+		expect(int(FinanceManagement.cash_flow_lines(report).total) == Sim.cash_change(report),
+			"Cash flow statement lines reconcile after credit-financed purchase")
 		expect(Credit.validate(state), "Supplier credit schema passes domain validation after creating an obligation")
 
 		var half := maxi(1, total / 2)
@@ -187,6 +192,8 @@ func test_credit_return_adjustment(supplier: int) -> void:
 	expect(int(report.closing_cash) == int(state.cash)
 		and int(report.assets) == int(report.overdraft + report.customer_deposits + report.supplier_payables + report.equity_capital + report.retained),
 		"Cash flow and balance sheet reconcile after a partial repayment and credit-funded supplier return")
+	expect(int(FinanceManagement.cash_flow_lines(report).total) == Sim.cash_change(report),
+		"Cash flow statement separates cash refunds from supplier-return payable adjustments")
 	var dashboard := FinanceManagement.dashboard(state, report)
 	expect(int(dashboard.payables) == int(report.supplier_payables),
 		"The financial dashboard reports outstanding supplier credit payables after returns")

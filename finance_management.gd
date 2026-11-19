@@ -63,6 +63,30 @@ static func expense_categories(report: Dictionary) -> Array[Dictionary]:
 			result.append({"id": item.id, "label": item.label, "amount": amount})
 	return result
 
+static func cash_flow_lines(report: Dictionary) -> Dictionary:
+	var cash_purchases := int(report.get("purchases", 0)) - int(report.get("credit_purchases", 0))
+	var cash_freight := int(report.get("inbound_freight", 0)) - int(report.get("credit_inbound_freight", 0))
+	var direct_freight := int(report.get("direct_inbound_freight", 0))
+	var lines := {
+		"customer_receipts": int(report.get("sales", 0)) + int(report.get("deposits", 0)),
+		"customer_refunds": -int(report.get("refunds", 0)),
+		"warehouse_goods": -(cash_purchases - (cash_freight - direct_freight)),
+		"supplier_direct_goods": -(int(report.get("direct_purchases", 0)) - direct_freight),
+		"inbound_freight": -cash_freight,
+		"supplier_repayments": -int(report.get("supplier_repayments", 0)),
+		"supplier_refunds": int(report.get("supplier_refunds", 0)) - int(report.get("supplier_credit_adjustments", 0)),
+		"outbound_shipping": -int(report.get("shipping", 0)),
+		"advertising": -int(report.get("advertising", 0)),
+		"store_setup": -int(report.get("store_setup", 0)),
+		"store_expenses": -int(report.get("store_expenses", 0)),
+		"other_operating": -int(report.get("fees", 0)) - int(report.get("overhead", 0)) - int(report.get("hosting", 0)) - int(report.get("legacy", 0)),
+		"owner_investment": int(report.get("capital", 0)),
+	}
+	lines.total = 0
+	for key in lines.keys():
+		if key != "total": lines.total += int(lines[key])
+	return lines
+
 static func daily_totals(state: Dictionary, first_day: int, last_day: int) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	var start := maxi(1, first_day)

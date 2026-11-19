@@ -24,7 +24,7 @@ static func brand(app: Control, parent: Node) -> void:
 
 static func title(app: Control) -> void:
 	var latest := Slots.latest()
-	var play: VBoxContainer = app.card("Build your business")
+	var play: VBoxContainer = app.card("Build Your Business")
 	var resume: Button = app.action(play, "Continue Game", app.continue_game, true)
 	resume.disabled = latest.is_empty()
 	if not latest.is_empty():
