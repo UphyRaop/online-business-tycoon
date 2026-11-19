@@ -18,11 +18,31 @@ func expect(value: bool, message: String) -> void:
 
 func run() -> void:
 	test_global_profile_and_achievements()
+	test_progression_titles()
 	test_company_save_independence_and_migration()
 	test_avatar_and_corruption_recovery()
 	await test_interactive_avatar_crop()
 	print("CEO profile functional suite: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
+
+func test_progression_titles() -> void:
+	var profile := CEO.empty("Kai Founder")
+	var legacy_profile := CEO.ensure_legacy({}, "Legacy Founder")
+	expect(str(legacy_profile.get("career_start_date", "")).is_empty(),
+		"Legacy CEO profiles show an unknown career start date instead of fabricating historical information")
+	expect(not str(profile.get("career_start_date", "")).is_empty(),
+		"New CEO profiles record their actual registration date")
+	var cases := [
+		[0, "Aspiring Entrepreneur"], [3, "Aspiring Entrepreneur"], [4, "Startup Founder"],
+		[8, "Startup Founder"], [9, "Business Owner"], [18, "Business Owner"],
+		[19, "Managing Director"], [28, "Managing Director"], [29, "Chief Executive Officer"],
+		[38, "Chief Executive Officer"], [39, "Business Magnate"], [48, "Business Magnate"],
+		[49, "Business Tycoon"], [74, "Business Tycoon"],
+	]
+	for test_case in cases:
+		profile.xp = int(test_case[0]) * CEO.LEVEL_XP
+		expect(CEO.progression_title(profile) == str(test_case[1]),
+			"CEO level %d receives the approved %s progression title" % [int(test_case[0]) + 1, str(test_case[1])])
 
 func test_global_profile_and_achievements() -> void:
 	var profile := CEO.ensure({}, "Kai Founder")

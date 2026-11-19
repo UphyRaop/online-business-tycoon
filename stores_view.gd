@@ -6,6 +6,7 @@ const Supply = preload("res://supply.gd")
 const Fulfillment = preload("res://fulfillment.gd")
 const Calendar = preload("res://game_calendar.gd")
 const Style = preload("res://corporate_theme.gd")
+const Offers = preload("res://offer_view.gd")
 
 static func management(app: Control) -> void:
 	var intro: VBoxContainer = app.card("Management · %s" % app.sim.state.company)
@@ -199,3 +200,4 @@ static func listings(app: Control) -> void:
 	app.metric(heading, "Landed cost per unit", app.money(cost.landed))
 	app.metric(heading, "Estimated contribution after channel fee and delivery", app.money(contribution), app.profit_color(contribution))
 	app.metric(heading, "Offer eligibility", "Listed products in this store can be advertised here.")
+	Offers.show(app, app.selected_product, int(store.id))

@@ -154,6 +154,115 @@ static func purchase(state: Dictionary, product: int, supplier: int, units: int)
 	row.inbound_freight = row.get("inbound_freight", 0) + freight * units
 	return ""
 
+static func return_sources(state: Dictionary, product: int) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if product not in range(Catalog.PRODUCTS.size()): return result
+	var item: Dictionary = state.get("products", {}).get(product, {})
+	var groups := {}
+	for lot in item.get("lots", []):
+		var supplier := _lot_supplier(lot)
+		if not groups.has(supplier):
+			groups[supplier] = {"supplier": supplier, "name": _lot_supplier_name(lot, supplier), "units": 0}
+		groups[supplier].units += maxi(0, int(lot.get("units", 0)))
+	for supplier in groups:
+		if int(groups[supplier].units) > 0:
+			result.append(groups[supplier])
+	result.sort_custom(func(a: Dictionary, b: Dictionary): return int(a.supplier) < int(b.supplier))
+	return result
+
+static func preview_return(state: Dictionary, product: int, supplier: int, units: int) -> Dictionary:
+	if product not in range(Catalog.PRODUCTS.size()): return {"error": "Choose a valid product."}
+	if units <= 0: return {"error": "Enter a positive quantity to return."}
+	var source: Dictionary = {}
+	for option in return_sources(state, product):
+		if int(option.supplier) == supplier:
+			source = option
+			break
+	if source.is_empty(): return {"error": "No unreserved stock from this supplier is available to return."}
+	if units > int(source.units): return {"error": "Return quantity exceeds unreserved stock from this supplier."}
+	var remaining := units
+	var original_cost := 0
+	var landed_cost := 0
+	var refund := 0
+	var allocations: Array[Dictionary] = []
+	var item: Dictionary = state.products.get(product, {})
+	for lot in item.get("lots", []):
+		if _lot_supplier(lot) != supplier or remaining <= 0: continue
+		var taken := mini(remaining, maxi(0, int(lot.get("units", 0))))
+		if taken <= 0: continue
+		var costs := _lot_costs(state, product, lot)
+		var goods_total := int(costs.goods) * taken
+		var landed_total := int(costs.landed) * taken
+		var refund_total := floori(float(costs.goods) * 0.5) * taken
+		original_cost += goods_total
+		landed_cost += landed_total
+		refund += refund_total
+		allocations.append({"units": taken, "original_unit_cost": int(costs.goods), "landed_unit_cost": int(costs.landed), "freight_per_unit": int(costs.freight), "cost_fallback": bool(costs.fallback)})
+		remaining -= taken
+	return {"error": "" if remaining == 0 else "Unable to allocate the requested historical lots.", "supplier": supplier,
+		"supplier_name": str(source.name), "units": units, "original_purchase_cost": original_cost,
+		"landed_cost": landed_cost, "refund": refund, "allocations": allocations}
+
+static func return_stock(state: Dictionary, product: int, supplier: int, units: int) -> Dictionary:
+	var preview := preview_return(state, product, supplier, units)
+	if not str(preview.get("error", "")).is_empty(): return preview
+	var item: Dictionary = state.products.get(product, {}).duplicate(true)
+	var remaining := units
+	var index := 0
+	while index < item.lots.size() and remaining > 0:
+		var lot: Dictionary = item.lots[index]
+		if _lot_supplier(lot) != supplier:
+			index += 1
+			continue
+		var taken := mini(remaining, int(lot.units))
+		lot.units -= taken
+		remaining -= taken
+		if lot.units <= 0:
+			item.lots.remove_at(index)
+		else:
+			item.lots[index] = lot
+			index += 1
+	if remaining != 0: return {"error": "The available stock changed before the return could be recorded."}
+	state.products[product] = item
+	var record := {
+		"id": int(state.get("next_supplier_return", 1)), "day": int(state.day), "date": Calendar.format(int(state.day)),
+		"product": product, "product_id": Catalog.product_id(product), "supplier": supplier,
+		"supplier_id": Catalog.supplier_id(supplier) if supplier in range(Catalog.SUPPLIERS.size()) else "",
+		"supplier_name": str(preview.supplier_name), "units": units,
+		"original_purchase_cost": int(preview.original_purchase_cost), "landed_cost": int(preview.landed_cost),
+		"refund": int(preview.refund), "allocations": preview.allocations,
+	}
+	state.next_supplier_return = int(record.id) + 1
+	if not state.get("supplier_returns") is Array: state.supplier_returns = []
+	state.supplier_returns.append(record)
+	var row: Dictionary = state.ledger.back()
+	row.inventory_returns += int(record.landed_cost)
+	row.supplier_refunds += int(record.refund)
+	state.cash += int(record.refund)
+	return {"error": "", "record": record}
+
+static func _lot_supplier(lot: Dictionary) -> int:
+	var supplier := int(lot.get("supplier", -1))
+	if supplier in range(Catalog.SUPPLIERS.size()): return supplier
+	var stable_id := str(lot.get("supplier_id", ""))
+	return Catalog.supplier_index(stable_id) if not stable_id.is_empty() else -1
+
+static func _lot_supplier_name(lot: Dictionary, supplier: int) -> String:
+	if supplier in range(Catalog.SUPPLIERS.size()): return Catalog.SUPPLIERS[supplier].name
+	var recorded := str(lot.get("supplier_name", "")).strip_edges()
+	return recorded if not recorded.is_empty() else "Historical supplier not recorded"
+
+static func _lot_costs(state: Dictionary, product: int, lot: Dictionary) -> Dictionary:
+	if lot.get("cost") is int and int(lot.cost) > 0:
+		var landed := int(lot.cost)
+		var freight := clampi(int(lot.get("freight", 0)), 0, landed - 1)
+		return {"goods": landed - freight, "landed": landed, "freight": freight, "fallback": false}
+	# Old/partial lots without a unit cost use the catalog's original base goods cost
+	# converted at the company's country scale. This is stable and excludes supplier
+	# discounts, current quotes, freight, and later negotiation state.
+	var goods := Catalog.local_cents(int(state.get("country", 0)), float(Catalog.PRODUCTS[product].cost))
+	return {"goods": goods, "landed": goods, "freight": 0, "fallback": true}
+
 static func receive(sim: RefCounted) -> void:
 	var pending: Array = []
 	for batch in sim.state.inbound:

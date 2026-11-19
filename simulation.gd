@@ -9,7 +9,7 @@ const Calendar = preload("res://game_calendar.gd")
 const Stores = preload("res://store_manager.gd")
 const Advertising = preload("res://advertising.gd")
 const PERIODS := [1, 7, 30, 365]
-const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses"]
+const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses", "inventory_returns", "supplier_refunds"]
 const CHANNEL_FIELDS := ["orders", "sales", "cogs", "fees", "hosting", "shipping", "refunds",
 	"placed", "dispatched", "tracked_deliveries", "on_time", "checkouts", "abandoned", "stockouts", "bundles", "upsells", "refunded"]
 const VERSION := 6
@@ -73,6 +73,10 @@ static func upgrade(data: Dictionary) -> void:
 			for field in CHANNEL_FIELDS:
 				if not channel.has(field):
 					channel[field] = 0
+	if not data.get("supplier_returns") is Array:
+		data.supplier_returns = []
+	if not data.get("next_supplier_return") is int or int(data.next_supplier_return) < 1:
+		data.next_supplier_return = 1
 	if not data.get("stores") is Array:
 		data.stores = []
 		if int(data.get("channel", 0)) in [0, 2]:
@@ -88,6 +92,7 @@ static func upgrade(data: Dictionary) -> void:
 	for store in data.get("stores", []):
 		if not store is Dictionary: continue
 		if not store.get("listings") is Dictionary: store.listings = {}
+		if not store.get("offers") is Dictionary: store.offers = {}
 		for product in store.listings:
 			var listing: Dictionary = store.listings[product]
 			if int(product) in range(Catalog.PRODUCTS.size()):
@@ -239,6 +244,10 @@ func buy(product: int, supplier: int, units: int) -> String:
 		select_supplier(product, supplier)
 	return result
 
+func return_stock(product: int, supplier: int, units: int) -> Dictionary:
+	Fulfillment.allocate_preorders(self)
+	return Supply.return_stock(state, product, supplier, units)
+
 func add_stock(product: int, lot: Dictionary) -> void:
 	var item := product_state(product)
 	lot.product_id = Catalog.product_id(product)
@@ -307,10 +316,10 @@ func advance(days: int) -> void:
 	state.seed = rng.state
 
 static func net(row: Dictionary) -> int:
-	return row.sales - row.refunds - row.cogs - row.fees - row.overhead - row.hosting - row.shipping - row.legacy - row.get("advertising", 0) - row.get("store_setup", 0) - row.get("store_expenses", 0)
+	return row.sales - row.refunds - row.cogs - row.fees - row.overhead - row.hosting - row.shipping - row.legacy - row.get("advertising", 0) - row.get("store_setup", 0) - row.get("store_expenses", 0) + row.get("supplier_refunds", 0) - row.get("inventory_returns", 0)
 
 static func cash_change(row: Dictionary) -> int:
-	return net(row) + row.cogs - row.purchases - row.get("direct_purchases", 0) + row.capital + row.deposits
+	return net(row) + row.cogs - row.purchases - row.get("direct_purchases", 0) + row.capital + row.deposits + row.get("inventory_returns", 0)
 
 func calendar_report(period: int, anchor: int) -> Dictionary:
 	var boundaries := Calendar.bounds(period, clampi(anchor, 1, state.day))
@@ -329,7 +338,7 @@ func report(days: int, end_day: int = 0) -> Dictionary:
 	var deposits := 0
 	for i in range(end):
 		var row: Dictionary = state.ledger[i]
-		inventory += row.purchases - (row.cogs - row.get("direct_cogs", 0))
+		inventory += row.purchases - (row.cogs - row.get("direct_cogs", 0)) - row.get("inventory_returns", 0)
 		goods_in_transit += row.get("direct_purchases", 0) - row.get("direct_cogs", 0)
 		capital += row.capital
 		retained += net(row)

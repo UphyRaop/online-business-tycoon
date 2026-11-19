@@ -10,16 +10,23 @@ func _ready() -> void:
 func configure(labels: Array[String], values: Array[Dictionary]) -> void:
 	chart_labels = labels.duplicate()
 	series = values.duplicate(true)
+	custom_minimum_size.y = 170 if _has_data() else 52
 	queue_redraw()
 
+func _has_data() -> bool:
+	for item in series:
+		for value in item.get("values", []):
+			if absf(float(value)) > 0.000001: return true
+	return false
+
 func _draw() -> void:
+	if not _has_data():
+		draw_string(ThemeDB.fallback_font, Vector2(4, maxf(20.0, size.y * 0.68)), "No recorded activity for this period", HORIZONTAL_ALIGNMENT_LEFT, maxf(120.0, size.x - 8.0), 12, Color("#a6b5c8"))
+		return
 	var bounds := Rect2(Vector2(34, 8), Vector2(maxf(80, size.x - 44), maxf(80, size.y - 38)))
 	for line in range(0, 4):
 		var y := bounds.position.y + bounds.size.y * float(line) / 3.0
 		draw_line(Vector2(bounds.position.x, y), Vector2(bounds.end.x, y), Color("#29384d"), 1.0)
-	if chart_labels.is_empty():
-		draw_string(ThemeDB.fallback_font, Vector2(40, 28), "No recorded activity for this period", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#a6b5c8"))
-		return
 	var minimum := 0.0
 	var maximum := 0.0
 	for item in series:

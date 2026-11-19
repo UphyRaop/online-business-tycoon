@@ -6,6 +6,7 @@ const Stores = preload("res://store_manager.gd")
 const Calendar = preload("res://game_calendar.gd")
 const Style = preload("res://corporate_theme.gd")
 const AdsChart = preload("res://ads_chart.gd")
+const ChartLegend = preload("res://chart_legend.gd")
 
 static func overview(app: Control) -> void:
 	var view: VBoxContainer = app.card("Advertising Overview")
@@ -311,7 +312,7 @@ static func analytics(app: Control) -> void:
 	filters.add_child(app.label("Advertising Platform", 13, Style.MUTED))
 	var platform_filter: OptionButton = app.dropdown(filters, platform_choices, app.ad_platform_filter + 1)
 	platform_filter.item_selected.connect(func(index: int): app.ad_platform_filter = index - 1; app.render())
-	var status_choices := ["All Statuses", "Draft", "Active", "Paused", "Stopped"]
+	var status_choices := ["All Status", "Draft", "Active", "Paused", "Stopped"]
 	filters.add_child(app.label("Campaign Status", 13, Style.MUTED))
 	var status_filter: OptionButton = app.dropdown(filters, status_choices, app.ad_status_filter + 1)
 	status_filter.item_selected.connect(func(index: int): app.ad_status_filter = index - 1; app.render())
@@ -336,6 +337,8 @@ static func analytics(app: Control) -> void:
 		for field in Ads.METRIC_FIELDS: totals[field] += int(metrics.get(field, 0))
 	var conversions: int = maxi(0, totals.purchases + totals.preorders - totals.preorders_cancelled)
 	var roas := "%.2f×" % (float(totals.attributed_revenue) / totals.spend) if totals.spend > 0 else "Unavailable"
+	var ctr := "%.2f%%" % Ads.ctr_percent(totals.clicks, totals.impressions) if totals.impressions > 0 else "Unavailable"
+	var cpm: String = app.money(roundi(Ads.cpm_cents(totals.spend, totals.impressions))) if totals.impressions > 0 else "Unavailable"
 	var kpis := GridContainer.new()
 	kpis.columns = 3 if app.size.x >= 700.0 else 2
 	kpis.add_theme_constant_override("h_separation", 10)
@@ -347,6 +350,8 @@ static func analytics(app: Control) -> void:
 	_analytics_kpi(app, kpis, "Impressions", _count(totals.impressions))
 	_analytics_kpi(app, kpis, "Clicks", _count(totals.clicks))
 	_analytics_kpi(app, kpis, "Conversions", str(conversions))
+	_analytics_kpi(app, kpis, "CTR", ctr)
+	_analytics_kpi(app, kpis, "CPM", cpm)
 	var daily_spend: Array[float] = []
 	var daily_revenue: Array[float] = []
 	var daily_roas: Array[float] = []
@@ -403,22 +408,24 @@ static func analytics(app: Control) -> void:
 		return
 	if app.size.x >= 850.0:
 		var headers := GridContainer.new()
-		headers.columns = 8
+		headers.columns = 10
 		table.add_child(headers)
-		for heading in ["Campaign", "Platform", "Spend", "Revenue", "ROAS", "Clicks", "Conversions", "Status"]:
+		for heading in ["Campaign", "Platform", "Spend", "Revenue", "ROAS", "Clicks", "Conversions", "CTR", "CPM", "Status"]:
 			headers.add_child(app.label(heading, 12, Style.GOLD))
 	for campaign_id in matched:
 		var campaign: Dictionary = campaigns[campaign_id]
 		var metrics := Ads.aggregate_range(state, campaign_id, first_day, last_day)
-		var row_values := [str(campaign.name), str(Ads.PLATFORMS[int(campaign.platform)].name), app.money(metrics.spend), app.money(metrics.attributed_revenue - metrics.attributed_refunds), "%.2f×" % metrics.roas if metrics.spend > 0 else "Unavailable", _count(metrics.clicks), str(maxi(0, metrics.purchases + metrics.preorders - metrics.preorders_cancelled)), str(campaign.status).capitalize()]
+		var campaign_ctr := "%.2f%%" % Ads.ctr_percent(metrics.clicks, metrics.impressions) if metrics.impressions > 0 else "Unavailable"
+		var campaign_cpm: String = app.money(roundi(Ads.cpm_cents(metrics.spend, metrics.impressions))) if metrics.impressions > 0 else "Unavailable"
+		var row_values := [str(campaign.name), str(Ads.PLATFORMS[int(campaign.platform)].name), app.money(metrics.spend), app.money(metrics.attributed_revenue - metrics.attributed_refunds), "%.2f×" % metrics.roas if metrics.spend > 0 else "Unavailable", _count(metrics.clicks), str(maxi(0, metrics.purchases + metrics.preorders - metrics.preorders_cancelled)), campaign_ctr, campaign_cpm, str(campaign.status).capitalize()]
 		if app.size.x >= 850.0:
 			var cells := GridContainer.new()
-			cells.columns = 8
+			cells.columns = 10
 			table.add_child(cells)
 			for value in row_values: cells.add_child(app.label(value, 12))
 		else:
 			var detail: VBoxContainer = _analytics_card(app, table, str(campaign.name))
-			for index in range(1, row_values.size()): app.metric(detail, ["Platform", "Spend", "Revenue", "ROAS", "Clicks", "Conversions", "Status"][index - 1], str(row_values[index]))
+			for index in range(1, row_values.size()): app.metric(detail, ["Platform", "Spend", "Revenue", "ROAS", "Clicks", "Conversions", "CTR", "CPM", "Status"][index - 1], str(row_values[index]))
 
 static func _analytics_kpi(app: Control, parent: Control, title: String, value: String) -> void:
 	var panel := PanelContainer.new()
@@ -447,10 +454,7 @@ static func _add_analytics_chart(app: Control, parent: Control, title: String, l
 	chart.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	chart.configure(labels, series)
 	chart_card.add_child(chart)
-	var legend: HBoxContainer = app.row(chart_card)
-	for item in series:
-		var key: Label = app.label("● " + str(item.name), 12, item.color)
-		legend.add_child(key)
+	chart_card.add_child(ChartLegend.build(series))
 
 static func _analytics_buckets(state: Dictionary, selected_period: int) -> Array[Dictionary]:
 	var buckets: Array[Dictionary] = []

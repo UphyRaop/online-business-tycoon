@@ -14,6 +14,7 @@ const EXPENSE_FIELDS := [
 	{"id": "store_setup", "label": "Store Setup", "field": "store_setup"},
 	{"id": "store_expenses", "label": "Store Operating Costs", "field": "store_expenses"},
 	{"id": "legacy", "label": "Other Legacy Costs", "field": "legacy"},
+	{"id": "supplier_return_loss", "label": "Supplier Return Loss", "field": "supplier_return_loss"},
 ]
 
 static func dashboard(state: Dictionary, report: Dictionary) -> Dictionary:
@@ -56,6 +57,8 @@ static func expense_categories(report: Dictionary) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for item in EXPENSE_FIELDS:
 		var amount: int = int(report.get(item.field, 0))
+		if item.id == "supplier_return_loss":
+			amount = int(report.get("inventory_returns", 0)) - int(report.get("supplier_refunds", 0))
 		if amount > 0:
 			result.append({"id": item.id, "label": item.label, "amount": amount})
 	return result
@@ -68,6 +71,6 @@ static func daily_totals(state: Dictionary, first_day: int, last_day: int) -> Ar
 		if day - 1 < 0 or day - 1 >= state.ledger.size():
 			continue
 		var row: Dictionary = state.ledger[day - 1]
-		var expenses: int = int(row.cogs) + int(row.refunds) + int(row.fees) + int(row.shipping) + int(row.overhead) + int(row.hosting) + int(row.legacy) + int(row.advertising) + int(row.store_setup) + int(row.store_expenses)
+		var expenses: int = int(row.cogs) + int(row.refunds) + int(row.fees) + int(row.shipping) + int(row.overhead) + int(row.hosting) + int(row.legacy) + int(row.advertising) + int(row.store_setup) + int(row.store_expenses) + int(row.get("inventory_returns", 0)) - int(row.get("supplier_refunds", 0))
 		result.append({"day": day, "sales": int(row.sales), "expenses": expenses, "net_profit": Simulation.net(row), "cash_change": Simulation.cash_change(row)})
 	return result

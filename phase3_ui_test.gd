@@ -154,7 +154,7 @@ func run() -> void:
 	else:
 		expect(false, "Created store exposes its Manage listings control")
 	expect(has_label("Aster Direct · Product listings"), "Store management opens store-specific product listings")
-	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Listing"),
+	expect(controls(app, "LineEdit").filter(func(field): return field.is_visible_in_tree()).is_empty() and has_button("Edit Listing"),
 		"Saved store listings display read-only details by default")
 	var original_listing_price: int = Stores.listing(app.sim.state, store_id, 0).price
 	press("Edit Listing")
