@@ -4,6 +4,7 @@ const Catalog = preload("res://catalog.gd")
 const Supply = preload("res://supply.gd")
 const Fulfillment = preload("res://fulfillment.gd")
 const Calendar = preload("res://game_calendar.gd")
+const SupplierCredit = preload("res://supplier_credit.gd")
 const Style = preload("res://corporate_theme.gd")
 
 static func show(app: Control) -> void:
@@ -61,140 +62,204 @@ static func show(app: Control) -> void:
 	var links: HBoxContainer = app.row(catalog)
 	app.secondary_tab(links, "My Products", app.navigate.bind("My Products"), app.page == "My Products")
 	var stock_label: Label = app.label("", 15, Style.MUTED)
-	catalog.add_child(stock_label)
 	app.metric(catalog, "Category · Estimated supplier cost", "%s · %s" % [Catalog.PRODUCTS[product].category, app.money(Catalog.quote(app.sim.state.country, product, int(item.supplier)))])
 	app.metric(catalog, "Demand · Competition", "%.2f · %.2f" % [Catalog.PRODUCTS[product].demand, Catalog.PRODUCTS[product].competition])
 	supplier_form(app, product, item, stock_label)
 
 static func supplier_form(app: Control, product: int, item: Dictionary, stock_label: Label) -> void:
 	var state: Dictionary = app.sim.state
-	var supply: VBoxContainer = app.card("Suppliers and Quotations · %s" % Catalog.PRODUCTS[product].name)
-	supply.add_child(app.label("Compare sourcing terms for the selected product. Quotations remain attached to this product in your saved company.", 13, Style.MUTED))
+	SupplierCredit.ensure(state)
+	var company_key := str(state.get("company_id", "legacy-company"))
+	var safe_company_key := company_key.replace("-", "_")
+	var route_key := "catalog_supplier_%s_%d" % [safe_company_key, product]
+	var accepted_key := "accepted_quote_%s_%d" % [safe_company_key, product]
+	var last_supplier_key := "last_catalog_supplier_%s_%d" % [safe_company_key, product]
+	var selected_supplier := int(app.get_meta(route_key, -1))
 	var supplier_indices: Array[int] = []
 	for supplier_id in Catalog.SUPPLIER_SELECTION_INDICES:
 		supplier_indices.append(int(supplier_id))
-	var supplier_names: Array[String] = []
-	for supplier_id in supplier_indices:
-		supplier_names.append(Catalog.SUPPLIERS[supplier_id].name)
-	var selected_supplier: int = supplier_indices.find(int(item.supplier))
-	if selected_supplier < 0: selected_supplier = 0
-	if item.has("legacy_supplier"):
-		supply.add_child(app.label("Historical supplier: %s · Choose a retained supplier to change future replenishment." % item.legacy_supplier.name, 13, Style.MUTED))
-	var supplier: OptionButton = app.dropdown(supply, supplier_names, selected_supplier)
-	var quote_label: Label = app.label("", 17, Style.GOLD)
-	var terms: Label = app.label("", 14, Style.MUTED)
-	supply.add_child(quote_label)
-	supply.add_child(terms)
-	var freight_label: Label = app.label("", 14, Style.MUTED)
-	supply.add_child(freight_label)
-	var quantity: LineEdit = app.field(supply, "Order quantity", "10", 10)
-	quantity.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
-	var total: Label = app.label("", 16)
-	var forecast_label: Label = app.label("", 14, Style.MUTED)
-	supply.add_child(total)
-	supply.add_child(forecast_label)
-	var quote_comparison: VBoxContainer = app.stack(supply, 8)
-	quote_comparison.name = "SupplierQuoteComparison"
-	var purchase_button: Button
-	var forecast_button: Button = app.action(supply, "Use forecast quantity", func():
-		var forecast := Supply.forecast(app.sim, product, supplier_indices[supplier.selected])
-		quantity.text = str(forecast.suggested)
-		quantity.text_changed.emit(quantity.text)
-	)
-	var inbound: VBoxContainer = app.card("Inbound stock")
+	var supply: VBoxContainer = app.card("Product Catalogue · Suppliers · %s" % Catalog.PRODUCTS[product].name)
+	supply.add_child(app.label("Select a supplier for this product, review the terms, negotiate, then accept an offer before ordering.", 13, Style.MUTED))
+	var inbound: VBoxContainer = app.card("Inbound Stock")
 	var shipments: VBoxContainer = app.stack(inbound)
-	var refresh := func():
-		var supplier_index: int = supplier_indices[supplier.selected]
-		var provider: Dictionary = Catalog.SUPPLIERS[supplier_index]
-		var standard := Catalog.quote(state.country, product, supplier_index)
-		var quote := Supply.quote(state, product, supplier_index)
-		var qty := units_from(quantity.text)
-		var effective: int = quote.cost if qty >= quote.minimum else standard
-		var freight := Catalog.inbound_freight(state.country, supplier_index)
-		var forecast := Supply.forecast(app.sim, product, supplier_index)
-		stock_label.text = "%d available · %d inbound\n%s cash available" % [
-			app.sim.stock(product), Supply.incoming(state, product), app.money(state.cash)]
-		quote_label.text = "%s per unit" % app.money(standard)
-		if quote.discount > 0:
-			quote_label.text = "%s per unit at %d+ units · Through %s" % [
-				app.money(quote.cost), quote.minimum, Calendar.format(quote.expires)]
-		terms.text = "Order quantity %s–%s · %s quality · %d%% on-time · %d-day lead\nNegotiate from %s units" % [
-			_format_quantity(provider.minimum), _format_quantity(Supply.maximum_order_quantity(supplier_index)),
-			"High" if provider.quality >= 0.95 else "Standard",
-			roundi(provider.reliability * 100), provider.lead, _format_quantity(Supply.negotiation_minimum(supplier_index))]
-		freight_label.text = "Inbound freight per unit  " + app.money(freight)
-		total.text = "Landed order total  " + (app.money((effective + freight) * qty) if qty > 0 else "—")
-		var demand_source := "catalog estimate" if forecast.days == 0 else "%d recent days" % forecast.days
-		forecast_label.text = "Demand %.1f units/day (%s)\nTarget %d units · Restock %d" % [
-			forecast.daily, demand_source, forecast.target, forecast.suggested]
-		forecast_button.disabled = forecast.suggested == 0
-		for child in quote_comparison.get_children():
-			quote_comparison.remove_child(child)
-			child.queue_free()
-		quote_comparison.add_child(app.label("Compare Supplier Offers", 17, Style.GOLD))
+	var quantity: LineEdit
+	var payment: OptionButton
+	if selected_supplier < 0 or selected_supplier not in supplier_indices:
+		var list: VBoxContainer = app.stack(supply, 6)
+		list.name = "CompactSupplierList"
 		for candidate in supplier_indices:
 			var row_supplier := int(candidate)
-			var source: Dictionary = Catalog.SUPPLIERS[row_supplier]
+			var provider: Dictionary = Catalog.SUPPLIERS[row_supplier]
 			var available := Supply.supplier_unlocked(state, row_supplier)
-			var offer := Supply.quote(state, product, row_supplier)
-			var has_negotiated := int(offer.get("discount", 0)) > 0 and int(offer.get("expires", 0)) >= int(state.day)
-			var row_box: VBoxContainer = app.stack(quote_comparison, 5)
-			row_box.name = "SupplierOffer%d" % row_supplier
-			var status_text := "Level %d locked" % int(source.level) if not available else ("Negotiated · expires %s" % Calendar.format(int(offer.expires)) if has_negotiated else "Standard quotation")
-			app.metric(row_box, str(source.name), status_text, Style.GOLD if available else Style.MUTED)
-			var goods_cost := int(offer.cost) if has_negotiated else Catalog.quote(state.country, product, row_supplier)
-			var freight_cost := Catalog.inbound_freight(state.country, row_supplier)
-			app.metric(row_box, "Buying · Landed Unit Price", "%s · %s" % [app.money(goods_cost), app.money(goods_cost + freight_cost)])
-			app.metric(row_box, "MOQ · Max Per Order", "%s · %s" % [_format_quantity(int(source.minimum)), _format_quantity(Supply.maximum_order_quantity(row_supplier))])
-			app.metric(row_box, "Lead Time · Reliability · Quality", "%d days · %d%% · %d%%" % [int(source.lead), roundi(float(source.reliability) * 100.0), roundi(float(source.quality) * 100.0)])
-			if not available:
-				row_box.add_child(app.label("Unlock this supplier platform through company sales progression.", 12, Style.MUTED))
+			var price := Catalog.quote(state.country, product, row_supplier) + Catalog.inbound_freight(state.country, row_supplier)
+			var entry: HBoxContainer = app.row(list)
+			entry.name = "SupplierChoice%d" % row_supplier
+			var summary := "%s · %s landed · MOQ %s · %d days%s" % [str(provider.name), app.money(price), _format_quantity(int(provider.minimum)), int(provider.lead), " · locked" if not available else ""]
+			var last_selected := int(app.get_meta(last_supplier_key, -1)) == row_supplier
+			if last_selected: summary = "Selected · " + summary
+			var text: Label = app.label(summary, 13, Style.GOLD if last_selected else (Style.TEXT if available else Style.MUTED))
+			text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			entry.add_child(text)
+			var choose: Button = app.action(entry, "View Details", func():
+				app.set_meta(route_key, row_supplier)
+				app.set_meta(last_supplier_key, row_supplier)
+				app.refresh_view()
+			)
+			choose.disabled = not available
+			choose.custom_minimum_size = Vector2(116, 44)
+		if item.has("legacy_supplier"):
+			supply.add_child(app.label("Existing purchases from %s remain in your history. Choose a currently available supplier for new orders." % str(item.legacy_supplier.name), 12, Style.MUTED))
+	else:
+		var provider: Dictionary = Catalog.SUPPLIERS[selected_supplier]
+		var title: VBoxContainer = app.card("Supplier Details · %s" % str(provider.name))
+		title.name = "SelectedSupplierDetails"
+		var terms: Dictionary = Supply.quote(state, product, selected_supplier)
+		var has_negotiated := int(terms.get("discount", 0)) > 0 and int(terms.get("expires", 0)) >= int(state.day)
+		app.metric(title, "Fulfillment Capability", "Direct-to-customer available" if provider.direct else "Warehouse inventory only")
+		app.metric(title, "Quality · Reliability", "%d%% · %d%%" % [roundi(float(provider.quality) * 100.0), roundi(float(provider.reliability) * 100.0)])
+		app.metric(title, "Lead Time · MOQ · Maximum Order", "%d days · %s · %s" % [int(provider.lead), _format_quantity(int(provider.minimum)), _format_quantity(Supply.maximum_order_quantity(selected_supplier))])
+		app.metric(title, "Landed Cost Per Unit", app.money(Catalog.quote(state.country, product, selected_supplier) + Catalog.inbound_freight(state.country, selected_supplier)))
+		var quote_status: Label = app.label("", 14, Style.GOLD)
+		title.add_child(quote_status)
+		quantity = app.field(title, "Purchase Quantity", str(int(provider.minimum)), 10)
+		quantity.name = "SupplierPurchaseQuantity"
+		quantity.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+		var total_label: Label = app.label("", 16, Style.TEXT)
+		title.add_child(total_label)
+		payment = app.dropdown(title, ["Pay Upfront", "Supplier Credit"], 0)
+		var credit_label: Label = app.label("", 13, Style.MUTED)
+		title.add_child(credit_label)
+		var accepted := int(app.get_meta(accepted_key, -1)) == selected_supplier
+		var accepted_label: Label = app.label("Offer accepted" if accepted else "Accept an offer before placing a purchase order.", 13, Style.GREEN if accepted else Style.MUTED)
+		title.add_child(accepted_label)
+		var buy_state := {"button": null}
+		var update_detail := func():
+			var qty := units_from(quantity.text)
+			var breakdown := Supply.purchase_breakdown(state, product, selected_supplier, qty)
+			var current_quote := Supply.quote(state, product, selected_supplier)
+			var negotiated_valid := int(current_quote.get("discount", 0)) > 0 and int(current_quote.get("expires", 0)) >= int(state.day)
+			var use_negotiated := negotiated_valid and qty >= int(current_quote.get("minimum", 0))
+			var goods := int(current_quote.cost) if use_negotiated else Catalog.quote(state.country, product, selected_supplier)
+			var freight := Catalog.inbound_freight(state.country, selected_supplier)
+			if use_negotiated:
+				quote_status.text = "Negotiated offer: %d%% off at %s+ units, expires %s." % [int(current_quote.discount), _format_quantity(int(current_quote.minimum)), Calendar.format(int(current_quote.expires))]
+			elif negotiated_valid:
+				quote_status.text = "Negotiated offer starts at %s units. Standard rate applies below the minimum." % _format_quantity(int(current_quote.minimum))
 			else:
-				var actions: HBoxContainer = app.row(row_box)
-				app.action(actions, "Request Quotation", func():
-					var result := Supply.negotiate(state, product, row_supplier, units_from(quantity.text))
-					if not result.is_empty():
-						app.set_notice(result, true)
-						return
-					app.persist("Product quotation received.")
-					app.refresh_view()
-				)
-				app.action(actions, "Accept Quotation", func():
-					app.sim.select_supplier(product, row_supplier)
-					supplier.select(supplier_indices.find(row_supplier))
-					app.set_meta("accepted_quote_supplier_%d" % product, row_supplier)
-					app.persist("Supplier quotation accepted for this product.")
-					app.refresh_view()
-				, true)
-		if is_instance_valid(purchase_button):
-			purchase_button.disabled = int(app.get_meta("accepted_quote_supplier_%d" % product, -1)) != supplier_index
-	quantity.text_changed.connect(func(_value: String): refresh.call())
-	supplier.item_selected.connect(func(index: int):
-		app.set_meta("accepted_quote_supplier_%d" % product, -1)
-		app.sim.select_supplier(product, supplier_indices[index])
-		app.persist("Supplier selected.")
-		refresh.call()
-	)
-	app.action(supply, "Request Quotation", func():
-		var result := Supply.negotiate(state, product, supplier_indices[supplier.selected], units_from(quantity.text))
-		if not result.is_empty():
-			app.set_notice(result, true)
-			return
-		app.persist("Product quotation received.")
-		refresh.call()
-	)
-	purchase_button = app.action(supply, "Purchase Inventory", func():
-		var result: String = app.sim.buy(product, supplier_indices[supplier.selected], units_from(quantity.text))
-		if not result.is_empty():
-			app.set_notice(result, true)
-			return
-		app.persist("Purchase order placed. Track it below.")
-		refresh.call()
-		refresh_inbound(app, product, inbound, shipments)
-	, true)
-	refresh.call()
+				quote_status.text = "Standard simulated supplier terms."
+			var breakdown_error := not str(breakdown.get("error", "")).is_empty()
+			if breakdown_error:
+				total_label.text = str(breakdown.error)
+			else:
+				total_label.text = "Goods %s · Freight %s · Total %s" % [app.money(goods * qty), app.money(freight * qty), app.money((goods + freight) * qty)]
+			var eligibility := SupplierCredit.eligibility(state, selected_supplier)
+			credit_label.text = "Trust %d/100 · Settled purchases %d · Credit limit %s · Available %s\n" % [int(eligibility.trust), int(eligibility.settled_purchases), app.money(int(eligibility.credit_limit)), app.money(int(eligibility.available))]
+			credit_label.text += "%d-day terms · Due %s" % [SupplierCredit.PAYMENT_TERM_DAYS, Calendar.format(int(eligibility.due_day))] if eligibility.eligible else str(eligibility.reason)
+			payment.set_item_disabled(1, not eligibility.eligible)
+			if payment.selected == 1 and not eligibility.eligible: payment.select(0)
+			var accepted_now := int(app.get_meta(accepted_key, -1)) == selected_supplier
+			accepted_label.text = "Offer accepted" if accepted_now else "Accept an offer before placing a purchase order."
+			accepted_label.add_theme_color_override("font_color", Style.GREEN if accepted_now else Style.MUTED)
+			if breakdown_error:
+				buy_state.button.disabled = true
+			elif payment.selected == 1:
+				buy_state.button.disabled = not accepted_now or int(breakdown.total) > int(eligibility.available)
+			else:
+				buy_state.button.disabled = not accepted_now
+		quantity.text_changed.connect(func(_value: String):
+			app.set_meta(accepted_key, -1)
+			update_detail.call()
+		)
+		payment.item_selected.connect(func(_index: int): update_detail.call())
+		app.action(title, "Negotiate", func():
+			var result := Supply.negotiate(state, product, selected_supplier, units_from(quantity.text))
+			if not result.is_empty():
+				app.set_notice(result, true)
+				return
+			app.set_meta(accepted_key, -1)
+			app.persist("Negotiation complete. Review the updated offer before accepting.")
+			app.refresh_view()
+		)
+		var actions: HBoxContainer = app.row(title)
+		app.action(actions, "Accept Offer", func():
+			app.sim.select_supplier(product, selected_supplier)
+			app.set_meta(accepted_key, selected_supplier)
+			app.persist("Supplier offer accepted for this product.")
+			app.refresh_view()
+		, true)
+		buy_state.button = app.action(actions, "Purchase", func():
+			if int(app.get_meta(accepted_key, -1)) != selected_supplier:
+				app.set_notice("Accept the supplier offer before purchasing inventory.", true)
+				return
+			var result: Dictionary
+			if payment.selected == 1:
+				result = SupplierCredit.purchase_on_credit(state, product, selected_supplier, units_from(quantity.text))
+				if str(result.get("error", "")).is_empty():
+					app.persist("Inventory purchased on supplier credit. Repayment is due %s." % str(result.obligation.due_date))
+			else:
+				var cash_error: String = app.sim.buy(product, selected_supplier, units_from(quantity.text))
+				result = {"error": cash_error}
+				if cash_error.is_empty():
+					app.persist("Purchase order placed. Track it below.")
+			if not str(result.get("error", "")).is_empty():
+				app.set_notice(str(result.error), true)
+				return
+			app.refresh_view()
+		, true)
+		app.action(actions, "Back", func():
+			app.set_meta(route_key, -1)
+			app.refresh_view()
+		)
+		update_detail.call()
+		var forecast := Supply.forecast(app.sim, product, selected_supplier)
+		var forecast_text := "Forecast %d units/day · Restock suggestion %d" % [roundi(float(forecast.daily)), int(forecast.suggested)]
+		title.add_child(app.label(forecast_text, 12, Style.MUTED))
+	var inbound_summary: VBoxContainer = app.card("Inbound Stock")
+	stock_label.text = "%d available · %d inbound · %s available cash" % [app.sim.stock(product), Supply.incoming(state, product), app.money(state.cash)]
+	inbound_summary.add_child(stock_label)
 	refresh_inbound(app, product, inbound, shipments)
 	supplier_returns(app, product)
+	supplier_credit_payables(app)
+
+static func supplier_credit_payables(app: Control) -> void:
+	var state: Dictionary = app.sim.state
+	SupplierCredit.ensure(state)
+	if state.supplier_credit.obligations.is_empty() and state.supplier_credit.payments.is_empty(): return
+	var view: VBoxContainer = app.wide_card("Supplier Credit Accounts")
+	view.name = "SupplierCreditAccounts"
+	var obligations: Array = state.supplier_credit.get("obligations", [])
+	var open_count := 0
+	for obligation in obligations:
+		if int(obligation.get("balance", 0)) <= 0: continue
+		open_count += 1
+		var payable: VBoxContainer = app.card("%s · PO-%04d" % [str(obligation.supplier_name), int(obligation.purchase_id)])
+		app.metric(payable, "Product · Quantity", "%s · %d units" % [Catalog.PRODUCTS[int(obligation.product)].name, int(obligation.units)])
+		app.metric(payable, "Remaining Payable · Due Date", "%s · %s" % [app.money(int(obligation.balance)), str(obligation.due_date)], Style.GOLD if int(state.day) <= int(obligation.due_day) else Style.RED)
+		var amount: LineEdit = app.field(payable, "Repayment Amount", app.amount_text(int(obligation.balance), true).replace(",", ""), 16)
+		amount.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
+		var request_id := "ui-repay-%d-%d" % [int(obligation.id), Time.get_ticks_usec()]
+		app.action(payable, "Repay Supplier", func():
+			var cents: int = app.price_cents(amount.text)
+			var result := SupplierCredit.repay(state, int(obligation.id), cents, request_id)
+			if not str(result.get("error", "")).is_empty():
+				app.set_notice(str(result.error), true)
+				return
+			app.persist("Supplier repayment recorded. Remaining payable: %s." % app.money(int(result.balance)))
+			app.refresh_view()
+		, true)
+	if open_count == 0:
+		view.add_child(app.label("No supplier-credit payables are outstanding. Cash purchases continue to settle immediately.", 14, Style.MUTED))
+	else:
+		view.add_child(app.label("Payments reduce company cash and the related payable. Due dates and repayment history are saved with this company.", 13, Style.MUTED))
+	var history: VBoxContainer = app.card("Recent Supplier Payments")
+	var payments: Array = state.supplier_credit.get("payments", []).duplicate()
+	payments.reverse()
+	if payments.is_empty():
+		history.add_child(app.label("No supplier-credit repayments have been recorded.", 13, Style.MUTED))
+	else:
+		for payment in payments.slice(0, mini(5, payments.size())):
+			var provider_name: String = Catalog.SUPPLIERS[int(payment.supplier)].name if int(payment.supplier) in range(Catalog.SUPPLIERS.size()) else "Supplier"
+			app.metric(history, "%s · %s · %s" % [str(payment.date), provider_name, "On time" if bool(payment.timely) else "Late"], app.money(int(payment.amount)))
 
 static func supplier_returns(app: Control, product: int) -> void:
 	var state: Dictionary = app.sim.state

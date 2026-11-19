@@ -2,6 +2,7 @@ extends RefCounted
 
 const Catalog = preload("res://catalog.gd")
 const Calendar = preload("res://game_calendar.gd")
+const SupplierCredit = preload("res://supplier_credit.gd")
 const QUOTE_DAYS := 7
 
 static func ensure_progress(state: Dictionary) -> void:
@@ -123,18 +124,33 @@ static func maximum_order_quantity(supplier: int) -> int:
 	return int(Catalog.SUPPLIER_MAX_ORDER[supplier]) if supplier in range(Catalog.SUPPLIER_MAX_ORDER.size()) else 0
 
 static func purchase(state: Dictionary, product: int, supplier: int, units: int) -> String:
-	if supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.supplier_available_for_sourcing(supplier): return "This supplier is retained for historical records and is unavailable for new sourcing."
+	return str(purchase_order(state, product, supplier, units, 0).get("error", ""))
+
+static func purchase_breakdown(state: Dictionary, product: int, supplier: int, units: int) -> Dictionary:
+	if product not in range(Catalog.PRODUCTS.size()): return {"error": "Choose a valid catalog product."}
+	if supplier not in range(Catalog.SUPPLIERS.size()) or not Catalog.supplier_available_for_sourcing(supplier): return {"error": "This supplier is retained for historical records and is unavailable for new sourcing."}
 	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
-	if not supplier_unlocked(state, supplier): return "Supplier platform is locked."
+	if not supplier_unlocked(state, supplier): return {"error": "Supplier platform is locked."}
 	var offer := quote(state, product, supplier)
 	var maximum := maximum_order_quantity(supplier)
 	if units < provider.minimum or units > maximum:
-		return "Enter a quantity from %s to %s." % [_quantity(provider.minimum), _quantity(maximum)]
+		return {"error": "Enter a quantity from %s to %s." % [_quantity(provider.minimum), _quantity(maximum)]}
 	var goods: int = offer.cost if units >= offer.minimum else Catalog.quote(state.country, product, supplier)
 	var freight := Catalog.inbound_freight(state.country, supplier)
-	var cost := goods + freight
-	if cost * units > state.cash:
-		return "Insufficient cash for this purchase."
+	return {"error": "", "supplier": supplier, "supplier_id": Catalog.supplier_id(supplier), "product": product,
+		"units": units, "goods_unit_cost": goods, "freight_unit_cost": freight,
+		"landed_unit_cost": goods + freight, "total": (goods + freight) * units,
+		"minimum": int(provider.minimum), "maximum": maximum, "offer": offer.duplicate(true)}
+
+static func purchase_order(state: Dictionary, product: int, supplier: int, units: int, credit_amount: int = 0) -> Dictionary:
+	var breakdown := purchase_breakdown(state, product, supplier, units)
+	if not str(breakdown.get("error", "")).is_empty(): return breakdown
+	var total := int(breakdown.total)
+	if credit_amount < 0 or credit_amount > total: return {"error": "Invalid supplier credit amount."}
+	if total - credit_amount > int(state.cash): return {"error": "Insufficient cash for this purchase."}
+	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+	var freight := int(breakdown.freight_unit_cost)
+	var landed := int(breakdown.landed_unit_cost)
 	var rng := RandomNumberGenerator.new()
 	rng.state = state.seed
 	var delay := rng.randi_range(1, 3) if rng.randf() >= provider.reliability else 0
@@ -143,16 +159,18 @@ static func purchase(state: Dictionary, product: int, supplier: int, units: int)
 	state.next_purchase += 1
 	state.inbound.append({
 		"id": id, "product": product, "product_id": Catalog.product_id(product), "supplier": supplier, "supplier_id": Catalog.supplier_id(supplier),
-		"supplier_name": provider.name, "units": units, "cost": cost,
+		"supplier_name": provider.name, "units": units, "cost": landed,
 		"freight": freight,
 		"quality": provider.quality, "lead_time": provider.lead, "eta": state.day + provider.lead, "arrival": state.day + provider.lead + delay,
-		"delayed": false,
+		"delayed": false, "payment_method": "credit" if credit_amount > 0 else "cash",
 	})
-	state.cash -= cost * units
-	state.ledger.back().purchases += cost * units
+	state.cash -= total - credit_amount
+	state.ledger.back().purchases += total
+	state.ledger.back().credit_purchases += credit_amount
 	var row: Dictionary = state.ledger.back()
 	row.inbound_freight = row.get("inbound_freight", 0) + freight * units
-	return ""
+	return {"error": "", "purchase_id": id, "total": total, "credit_amount": credit_amount,
+		"cash_paid": total - credit_amount, "landed_unit_cost": landed, "freight_unit_cost": freight}
 
 static func return_sources(state: Dictionary, product: int) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
@@ -197,7 +215,10 @@ static func preview_return(state: Dictionary, product: int, supplier: int, units
 		original_cost += goods_total
 		landed_cost += landed_total
 		refund += refund_total
-		allocations.append({"units": taken, "original_unit_cost": int(costs.goods), "landed_unit_cost": int(costs.landed), "freight_per_unit": int(costs.freight), "cost_fallback": bool(costs.fallback)})
+		allocations.append({"units": taken, "original_unit_cost": int(costs.goods), "landed_unit_cost": int(costs.landed),
+			"freight_per_unit": int(costs.freight), "cost_fallback": bool(costs.fallback),
+			"purchase_id": int(lot.get("purchase_id", 0)), "payment_method": str(lot.get("payment_method", "cash")),
+			"refund": refund_total})
 		remaining -= taken
 	return {"error": "" if remaining == 0 else "Unable to allocate the requested historical lots.", "supplier": supplier,
 		"supplier_name": str(source.name), "units": units, "original_purchase_cost": original_cost,
@@ -223,7 +244,6 @@ static func return_stock(state: Dictionary, product: int, supplier: int, units: 
 			item.lots[index] = lot
 			index += 1
 	if remaining != 0: return {"error": "The available stock changed before the return could be recorded."}
-	state.products[product] = item
 	var record := {
 		"id": int(state.get("next_supplier_return", 1)), "day": int(state.day), "date": Calendar.format(int(state.day)),
 		"product": product, "product_id": Catalog.product_id(product), "supplier": supplier,
@@ -232,13 +252,28 @@ static func return_stock(state: Dictionary, product: int, supplier: int, units: 
 		"original_purchase_cost": int(preview.original_purchase_cost), "landed_cost": int(preview.landed_cost),
 		"refund": int(preview.refund), "allocations": preview.allocations,
 	}
+	var credit_refunds_by_purchase := {}
+	for allocation in record.allocations:
+		if str(allocation.get("payment_method", "cash")) != "credit" or int(allocation.get("purchase_id", 0)) < 1: continue
+		var purchase_id := int(allocation.purchase_id)
+		credit_refunds_by_purchase[purchase_id] = int(credit_refunds_by_purchase.get(purchase_id, 0)) + int(allocation.get("refund", 0))
+	var credit_adjustment_total := 0
+	for purchase_id in credit_refunds_by_purchase:
+		var adjustment := SupplierCredit.record_return_adjustment(state, supplier, product, int(purchase_id),
+			int(credit_refunds_by_purchase[purchase_id]), int(record.id))
+		if not str(adjustment.get("error", "")).is_empty() and not bool(adjustment.get("duplicate", false)):
+			return {"error": str(adjustment.error)}
+		credit_adjustment_total += int(adjustment.get("applied", 0))
+	record.supplier_credit_adjustments = credit_adjustment_total
+	state.products[product] = item
 	state.next_supplier_return = int(record.id) + 1
 	if not state.get("supplier_returns") is Array: state.supplier_returns = []
 	state.supplier_returns.append(record)
 	var row: Dictionary = state.ledger.back()
 	row.inventory_returns += int(record.landed_cost)
 	row.supplier_refunds += int(record.refund)
-	state.cash += int(record.refund)
+	row.supplier_credit_adjustments += credit_adjustment_total
+	state.cash += int(record.refund) - credit_adjustment_total
 	return {"error": "", "record": record}
 
 static func _lot_supplier(lot: Dictionary) -> int:
@@ -267,9 +302,10 @@ static func receive(sim: RefCounted) -> void:
 	var pending: Array = []
 	for batch in sim.state.inbound:
 		if batch.arrival <= sim.state.day:
-			sim.add_stock(batch.product, {"units": batch.units, "cost": batch.cost, "quality": batch.quality, "freight": batch.get("freight", 0),
-				"supplier": batch.get("supplier", Catalog.DEFAULT_SUPPLIER), "supplier_id": batch.get("supplier_id", Catalog.supplier_id(int(batch.get("supplier", Catalog.DEFAULT_SUPPLIER)))),
-				"supplier_name": batch.get("supplier_name", Catalog.SUPPLIERS[int(batch.get("supplier", Catalog.DEFAULT_SUPPLIER))].name)})
+				sim.add_stock(batch.product, {"units": batch.units, "cost": batch.cost, "quality": batch.quality, "freight": batch.get("freight", 0),
+					"supplier": batch.get("supplier", Catalog.DEFAULT_SUPPLIER), "supplier_id": batch.get("supplier_id", Catalog.supplier_id(int(batch.get("supplier", Catalog.DEFAULT_SUPPLIER)))),
+					"supplier_name": batch.get("supplier_name", Catalog.SUPPLIERS[int(batch.get("supplier", Catalog.DEFAULT_SUPPLIER))].name),
+					"purchase_id": int(batch.get("id", 0)), "payment_method": str(batch.get("payment_method", "cash"))})
 		else:
 			batch.delayed = sim.state.day >= batch.eta
 			pending.append(batch)

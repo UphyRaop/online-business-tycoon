@@ -31,7 +31,7 @@ static func dashboard(state: Dictionary, report: Dictionary) -> Dictionary:
 		"net_profit": net_profit,
 		"operating_cash_flow": operating_cash_flow,
 		"receivables": 0,
-		"payables": 0,
+		"payables": int(report.get("supplier_payables", 0)),
 		"customer_deposits": int(report.get("customer_deposits", 0)),
 		"known_fixed_costs": fixed_costs,
 		"cash_after_known_fixed_costs": int(state.get("cash", 0)) - fixed_costs,
