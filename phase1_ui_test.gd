@@ -34,11 +34,11 @@ func press(title: String) -> void:
 	var selects_secondary := false
 	if primary in ["dashboard", "market", "order", "orders", "business", "marketing", "finance", "profile"]:
 		primary_target = "Order" if primary in ["order", "orders"] else title
-	elif primary in ["advertising", "overview", "campaign manager", "campaign management", "ads analytics"]:
+	elif primary in ["advertising", "overview", "ads manager", "campaign manager", "campaign management", "ads analytics"]:
 		primary_target = "Marketing"
 		selects_secondary = primary != "marketing"
 		if primary in ["advertising", "overview"]: secondary_title = "Overview"
-		if primary in ["campaign manager", "campaign management"]: secondary_title = "Campaign Management"
+		if primary in ["ads manager", "campaign manager", "campaign management"]: secondary_title = "Ads Manager"
 		if primary == "ads analytics": secondary_title = "Ads Analytics"
 	elif primary in ["my products", "inventory management", "management", "store management", "product catalogue"]:
 		primary_target = "Market"
@@ -95,6 +95,54 @@ func option_after_label(prefix: String) -> OptionButton:
 		if next_index < parent.get_child_count() and parent.get_child(next_index) is OptionButton:
 			return parent.get_child(next_index)
 	return null
+
+func browse_catalog_product(category: String, product_id: int) -> void:
+	await process_frame
+	await process_frame
+	var stage := str(app.get_meta("product_catalog_stage", "categories"))
+	if stage == "confirmation":
+		press("Continue Shopping")
+		await process_frame
+		stage = "categories"
+	if stage == "categories":
+		press("Browse " + category)
+		await process_frame
+		await process_frame
+		stage = "products"
+	if stage == "products":
+		var product_card: Control = app.find_child("CatalogueProduct_%d" % product_id, true, false)
+		if product_card == null:
+			expect(false, "Selected category contains the requested catalogue product")
+			return
+		var choose: Button
+		for candidate in controls(product_card, "Button"):
+			if candidate.text == "Choose Product":
+				choose = candidate
+				break
+		if choose == null:
+			expect(false, "Product card provides a Choose Product action")
+			return
+		if choose != null: choose.pressed.emit()
+		await process_frame
+		await process_frame
+	if str(app.get_meta("product_catalog_stage", "")) == "suppliers" and app.find_child("SelectedSupplierDetails", true, false) == null:
+		var supplier_action := "Select Supplier"
+		for candidate in controls(app, "Button"):
+			if candidate.text == "Selected Supplier" and candidate.is_visible_in_tree() and not candidate.disabled:
+				supplier_action = "Selected Supplier"
+				break
+		press(supplier_action)
+		await process_frame
+		await process_frame
+
+func quote_and_confirm_purchase() -> void:
+	press("Accept Offer")
+	await process_frame
+	press("Generate Quotation")
+	await process_frame
+	press("Confirm Purchase")
+	if is_instance_valid(app.confirmation): app.confirmation.confirmed.emit()
+	await process_frame
 
 func open_first_store_listing() -> void:
 	if app.sim == null or app.sim.state.stores.is_empty():
@@ -172,22 +220,19 @@ func run() -> void:
 
 	await settle("02-dashboard")
 	press("Browse Product Catalogue")
-	choices = controls(app, "OptionButton")
-	select(choices[0], 1)
-	select(app.find_child("ProductSelection", true, false), 0)
-	press("View Details")
+	await browse_catalog_product("Electronics", 1)
 	expect(has_label("Lead Time · MOQ · Maximum Order"), "Supplier details expose lead time and supplier-specific quantity limits")
 	await settle("03-market")
-	press("Accept Offer")
 	var quantity: LineEdit = field_for_label("Purchase Quantity")
 	quantity.text = "0"
 	quantity.text_changed.emit("0")
+	press("Accept Offer")
 	expect(has_label("Enter a quantity from"), "Purchase validation displays supplier-specific quantity limits")
 	quantity = field_for_label("Purchase Quantity")
 	quantity.text = "10"
 	quantity.text_changed.emit("10")
-	press("Purchase")
-	expect(app.sim.stock(1) == 0 and app.sim.state.inbound[0].units == 10, "Purchase button schedules inbound stock")
+	await quote_and_confirm_purchase()
+	expect(app.sim.stock(1) == 0 and app.sim.state.inbound[0].units == 10, "Confirmed quotation schedules inbound stock exactly once")
 	app.selected_store_id = int(app.sim.state.stores.front().id)
 	app.selected_product = 1
 	app.navigate("Store Listings")

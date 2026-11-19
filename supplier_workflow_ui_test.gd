@@ -4,6 +4,7 @@ const Main = preload("res://main.tscn")
 const Sim = preload("res://simulation.gd")
 const Catalog = preload("res://catalog.gd")
 const Supply = preload("res://supply.gd")
+const Market = preload("res://market_view.gd")
 
 var failures := 0
 var app: Control
@@ -24,72 +25,86 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func button(title: String, scope: Node = null) -> Button:
-	var root: Node = app if scope == null else scope
-	for candidate in controls(root, "Button"):
+	for candidate in controls(app if scope == null else scope, "Button"):
 		if candidate.text.to_lower() == title.to_lower() and candidate.is_visible_in_tree(): return candidate
 	return null
 
-func has_validation_label(prefix: String) -> bool:
-	return controls(app, "Label").any(func(candidate): return candidate.text.begins_with(prefix) and candidate.is_visible_in_tree())
+func click(title: String, scope: Node = null) -> void:
+	var candidate := button(title, scope)
+	if candidate != null: candidate.pressed.emit()
+
+func has_label(text: String) -> bool:
+	return controls(app, "Label").any(func(candidate): return candidate.text.contains(text) and candidate.is_visible_in_tree())
 
 func run() -> void:
+	if OS.get_environment("OBT_ISOLATED_TEST_PROFILE") != "1":
+		push_error("Run supplier workflow UI test with an isolated user-data profile.")
+		quit(1)
+		return
 	root.size = Vector2i(1280, 720)
 	app = Main.instantiate()
 	root.add_child(app)
 	await process_frame
-	var state := Sim.register("Ari Founder", "North Star Co", "North Star", 0, 0, 1, 954)
-	app.sim = Sim.new(state)
+	app.sim = Sim.new(Sim.register("Ari Founder", "North Star Co", "North Star", 0, 0, 1, 954))
 	app.screen = "Game"
 	app.page = "Market"
-	app.selected_product = 0
+	app.set_meta(Market.CATALOG_STAGE_META, "categories")
 	app.render()
 	await process_frame
+	expect(app.find_child("ProductCategoryGrid", true, false) != null, "Product Catalogue starts with category cards")
+	click("Browse Kitchen")
 	await process_frame
-	var list := app.find_child("CompactSupplierList", true, false)
-	expect(list != null, "Product Catalogue shows a compact supplier list before details")
-	var first_supplier := int(Catalog.SUPPLIER_SELECTION_INDICES[0])
-	var supplier_choice := app.find_child("SupplierChoice%d" % first_supplier, true, false)
-	expect(supplier_choice != null, "Selected product lists available supplier choices")
-	var detail_button := button("View Details", supplier_choice)
-	expect(detail_button != null and not detail_button.disabled, "Supplier selection opens its details without navigating away")
-	if detail_button != null:
-		detail_button.pressed.emit()
+	var product_card := app.find_child("CatalogueProduct_0", true, false)
+	expect(product_card != null and button("Choose Product", product_card) != null, "Selecting Kitchen opens its actual product cards")
+	click("Choose Product", product_card)
+	await process_frame
+	expect(app.find_child("CompactSupplierList", true, false) != null, "Product selection opens the compact supplier list")
+	var supplier_index := int(Catalog.SUPPLIER_SELECTION_INDICES[0])
+	var supplier_card := app.find_child("SupplierChoice%d" % supplier_index, true, false)
+	expect(supplier_card != null and button("Select Supplier", supplier_card) != null, "A single supplier can be selected for full details")
+	click("Select Supplier", supplier_card)
+	await process_frame
+	var details := app.find_child("SelectedSupplierDetails", true, false)
+	expect(details != null, "Selecting a supplier opens its details")
+	for action in ["Negotiate", "Accept Offer", "Generate Quotation", "Confirm Purchase", "Back to Suppliers"]:
+		expect(button(action, details) != null, "Supplier details provides the %s action" % action)
+	var quantity := app.find_child("SupplierPurchaseQuantity", true, false) as LineEdit
+	expect(quantity != null, "Quantity controls are shown within supplier details")
+	if quantity != null:
+		quantity.text = "0"
+		quantity.text_changed.emit("0")
+		var invalid_quote_button := button("Generate Quotation")
+		expect(invalid_quote_button != null and invalid_quote_button.disabled, "Invalid quantity is rejected using actual supplier minimums")
+		quantity.text = str(Supply.negotiation_minimum(supplier_index))
+		quantity.text_changed.emit(quantity.text)
+	click("Negotiate", details)
+	await process_frame
+	var terms := Supply.quote(app.sim.state, 0, supplier_index)
+	expect(int(terms.get("discount", 0)) > 0, "Negotiation persists the existing supplier response and quote")
+	click("Accept Offer")
+	await process_frame
+	click("Generate Quotation")
+	await process_frame
+	var quotation := app.find_child("GeneratedPurchaseQuotation", true, false)
+	expect(quotation != null and has_label("Total") and has_label("Freight"), "A valid quotation presents the goods, freight, and total costs")
+	var confirm := button("Confirm Purchase")
+	expect(confirm != null and not confirm.disabled, "Accepted supplier terms and a valid quotation enable purchase confirmation")
+	if confirm != null: confirm.pressed.emit()
+	await process_frame
+	expect(is_instance_valid(app.confirmation) and app.sim.state.inbound.is_empty(), "Purchase requires a confirmation dialog before creating inbound inventory")
+	if is_instance_valid(app.confirmation):
+		app.confirmation.confirmed.emit()
 		await process_frame
-		await process_frame
-	expect(app.find_child("SelectedSupplierDetails", true, false) != null, "Supplier Details opens for the selected product and supplier")
-	for action in ["Negotiate", "Accept Offer", "Purchase", "Back"]:
-		expect(button(action) != null, "Supplier details provides the %s action" % action)
-	expect(button("Request Quotation") == null, "The obsolete prominent Quotation action is replaced by Negotiate")
-	var quantity := app.find_child("SelectedSupplierDetails", true, false).find_child("SupplierPurchaseQuantity", true, false)
-	expect(quantity != null, "Purchase quantity appears only in supplier details")
-	var payment_labels := controls(app.find_child("SelectedSupplierDetails", true, false), "OptionButton")
-	expect(not payment_labels.is_empty(), "Supplier Details offers an upfront or supplier-credit payment choice")
-	var accept := button("Accept Offer")
-	if accept != null and quantity is LineEdit:
-		accept.pressed.emit()
-		await process_frame
-		await process_frame
-		var accepted_details := app.find_child("SelectedSupplierDetails", true, false)
-		var accepted_quantity := accepted_details.find_child("SupplierPurchaseQuantity", true, false) as LineEdit
-		accepted_quantity.text = "0"
-		accepted_quantity.text_changed.emit("0")
-		var accepted_label := controls(accepted_details, "Label").any(func(candidate): return candidate.text == "Offer accepted")
-		expect(accepted_label and button("Purchase").disabled and has_validation_label("Enter a quantity from"),
-			"Changing quantity preserves accepted supplier terms while invalid quantities remain blocked with an inline message")
-		accepted_quantity.text = str(int(Catalog.SUPPLIERS[first_supplier].minimum))
-		accepted_quantity.text_changed.emit(accepted_quantity.text)
-		expect(button("Purchase") != null and not button("Purchase").disabled,
-			"A valid quantity can use the accepted offer without forcing another acceptance action")
-	var back := button("Back")
-	if back != null:
-		back.pressed.emit()
-		await process_frame
-		await process_frame
-	expect(app.find_child("CompactSupplierList", true, false) != null and app.find_child("SelectedSupplierDetails", true, false) == null,
-		"Back returns to the supplier list for the same product")
+	expect(app.sim.state.inbound.size() == 1 and app.find_child("SupplierPurchaseConfirmation", true, false) != null,
+		"Confirming a purchase creates exactly one order and displays a receipt")
 	root.size = Vector2i(390, 844)
+	app.set_meta(Market.CATALOG_STAGE_META, "categories")
+	app.catalog_category = -1
+	app.render()
 	await process_frame
-	expect(app.find_child("CompactSupplierList", true, false) != null,
-		"Supplier list remains present at a mobile portrait viewport")
+	var grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
+	expect(grid != null and grid.columns == 1, "Category cards adapt to mobile portrait")
+	app.queue_free()
+	await process_frame
 	print("Supplier workflow UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
