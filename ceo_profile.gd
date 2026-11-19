@@ -222,6 +222,18 @@ static func add_avatar(profile: Dictionary, mime: String, data: PackedByteArray)
 	profile.avatar_mime = "image/jpeg"
 	return OK
 
+static func set_avatar_image(profile: Dictionary, image: Image) -> Error:
+	if image == null or image.is_empty() or image.get_width() <= 0 or image.get_height() <= 0:
+		return ERR_INVALID_DATA
+	var finalized := image.duplicate()
+	finalized.resize(300, 400, Image.INTERPOLATE_LANCZOS)
+	var jpeg: PackedByteArray = finalized.save_jpg_to_buffer(0.84)
+	if jpeg.is_empty() or jpeg.size() > MAX_AVATAR_BYTES:
+		return ERR_INVALID_DATA
+	profile.avatar_data = Marshalls.raw_to_base64(jpeg)
+	profile.avatar_mime = "image/jpeg"
+	return OK
+
 static func clear_avatar(profile: Dictionary) -> void:
 	profile.avatar_data = ""
 	profile.avatar_mime = ""

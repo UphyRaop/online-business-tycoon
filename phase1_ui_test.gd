@@ -71,6 +71,9 @@ func has_label(prefix: String) -> bool:
 			return true
 	return false
 
+func has_button(title: String) -> bool:
+	return controls(app, "Button").any(func(button): return button.text.to_lower() == title.to_lower() and button.is_visible_in_tree())
+
 func settle(name: String) -> void:
 	await process_frame
 	await process_frame
@@ -129,12 +132,14 @@ func run() -> void:
 		listings_buttons[0].pressed.emit()
 	else:
 		expect(false, "Management exposes per-store listings")
+	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 1)
-	press("Save store listing")
+	press("Save Changes")
 	expect(Stores.listing(app.sim.state, 0, 1).listed, "Store listing is published through Management")
+	press("Edit Listing")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "250000"
-	press("Save store listing")
+	press("Save Changes")
 	expect(Stores.listing(app.sim.state, 0, 1).price == 25000000, "Store-specific listing price updates")
 	press("Dashboard")
 	press("+1")
@@ -159,10 +164,11 @@ func run() -> void:
 	select(controls(app, "OptionButton")[1], 1)
 	await settle("05-balance")
 	press("Business")
+	press("Edit Company Details")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "Mira Founder Updated"
 	inputs[1].text = "Aster Holdings"
-	press("Save company profile")
+	press("Save Changes")
 	expect(app.sim.state.owner == "Mira Founder Updated" and app.sim.state.company == "Aster Holdings"
 		and not has_label("Website domain"), "Company Profile saves identity without exposing website controls")
 	press("Save Game")
@@ -184,8 +190,9 @@ func run() -> void:
 		store_listing_buttons[0].pressed.emit()
 	else:
 		expect(false, "Store listing can be paused through Management")
+	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 0)
-	press("Save store listing")
+	press("Save Changes")
 	expect(not Stores.listing(app.sim.state, 0, 1).listed, "Store listing pause action")
 	var saved := Slots.read(Slots.AUTOSAVE)
 	expect(saved.state.day == 41 and not Stores.listing(saved.state, 0, 1).listed, "Mutations autosave")

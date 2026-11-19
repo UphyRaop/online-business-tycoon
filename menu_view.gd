@@ -62,9 +62,22 @@ static func describe(app: Control, parent: Node, slot: Dictionary) -> void:
 		parent.add_child(app.label("Recovered backup", 14, Style.GOLD))
 
 static func settings(app: Control) -> void:
-	var view: VBoxContainer = app.card("Display")
-	view.add_child(app.label("Text size", 15, Style.MUTED))
-	var size: OptionButton = app.dropdown(view, ["Standard", "Large"], 1 if app.large_text else 0)
-	app.watch_edits([size])
-	app.action(view, "Apply settings", func(): app.apply_text_setting(size.selected == 1), true)
+	var view: VBoxContainer = app.card("Display Settings")
+	if app.display_settings_editing:
+		view.add_child(app.label("Text Size", 14, Style.MUTED))
+		var size: OptionButton = app.dropdown(view, ["Standard", "Large"], 1 if app.large_text else 0)
+		size.custom_minimum_size.y = 44
+		app.watch_edits([size])
+		app.action(view, "Save Changes", func(): app.apply_text_setting(size.selected == 1), true)
+		app.action(view, "Cancel", func():
+			app.display_settings_editing = false
+			app.edit_checks.clear()
+			app.render()
+		)
+	else:
+		app.metric(view, "Text Size", "Large" if app.large_text else "Standard")
+		app.action(view, "Edit Display Settings", func():
+			app.display_settings_editing = true
+			app.render()
+		)
 	app.action(view, "Back", app.open_screen.bind("Title"))

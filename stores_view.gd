@@ -10,7 +10,7 @@ const Style = preload("res://corporate_theme.gd")
 static func management(app: Control) -> void:
 	var intro: VBoxContainer = app.card("Management · %s" % app.sim.state.company)
 	intro.add_child(app.label("Manage marketplace stores and websites here. Inventory is shared, while each destination keeps its own listings, costs, sales, and campaigns.", 14, Style.MUTED))
-	app.action(intro, "Advertising", app.navigate.bind("Advertising"))
+	app.secondary_tab(intro, "Advertising", app.navigate.bind("Advertising"), false)
 	var stores: VBoxContainer = app.card("Owned stores · %d" % app.sim.state.stores.size())
 	for store in app.sim.state.stores:
 		var id: int = store.id
@@ -112,7 +112,7 @@ static func profitability(app: Control) -> void:
 	summary.add_child(app.label("Lifetime results by marketplace store and website. Shared company inventory costs are assigned to the order that consumes each unit.", 14, Style.MUTED))
 	if app.sim.state.stores.is_empty():
 		summary.add_child(app.label("No stores or websites have been created yet.", 14, Style.MUTED))
-		app.action(summary, "Open Management", app.navigate.bind("Management"))
+		app.secondary_tab(summary, "Open Management", app.navigate.bind("Management"), false)
 		return
 	for store in app.sim.state.stores:
 		var result: Dictionary = Stores.report(app.sim.state, int(store.id))
@@ -136,9 +136,11 @@ static func listings(app: Control) -> void:
 	var website_name: String = Stores.WEBSITE_PLATFORMS[website_index].name if website_index >= 0 else "Website"
 	var subtitle: String = "Shared company inventory · Marketplace" if store.type == 0 else "Shared company inventory · %s · %s" % [website_name, store.domain]
 	heading.add_child(app.label(subtitle, 14, Style.MUTED))
-	app.action(heading, "Management", app.navigate.bind("Management"))
+	app.secondary_tab(heading, "Management", app.navigate.bind("Management"), true)
 	var products := Catalog.PRODUCTS.map(func(item): return item.name)
 	var picker: OptionButton = app.dropdown(heading, products, app.selected_product)
+	picker.custom_minimum_size.y = 44
+	picker.add_theme_font_size_override("font_size", 13)
 	var item: Dictionary = app.sim.product_state(app.selected_product)
 	var listing := Stores.listing(app.sim.state, int(store.id), app.selected_product)
 	var outstanding := Fulfillment.outstanding_preorders(app.sim.state, app.selected_product, int(store.id))
@@ -152,29 +154,46 @@ static func listings(app: Control) -> void:
 		app.metric(heading, "Estimated replenishment", Calendar.format(expected_restock) + " · shipment confirmed")
 	else:
 		app.metric(heading, "Estimated replenishment", Calendar.format(app.sim.state.day + int(Catalog.SUPPLIERS[product_supplier].lead)) + " · estimate only")
-	var price: LineEdit = app.field(heading, "Store selling price (%s)" % Catalog.CURRENCIES[app.sim.state.country], app.amount_text(listing.price, true).replace(",", ""), 16)
-	price.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
-	var status: OptionButton = app.dropdown(heading, ["Draft", "Listed"], 1 if listing.listed else 0)
-	heading.add_child(app.label("Allow Pre-orders", 14, Style.MUTED))
-	var preorders: OptionButton = app.dropdown(heading, ["Off", "On"], 1 if listing.get("allow_preorders", false) else 0)
-	preorders.tooltip_text = "Accept new orders while this listing is out of stock. Existing pre-orders remain accepted if switched off."
-	var mark_saved: Callable = app.watch_edits([picker, price, status, preorders])
 	picker.item_selected.connect(func(index: int):
 		app.discard_form_then(func():
 			app.selected_product = index
+			app.store_listing_editing = false
 			app.refresh_view()
 		)
 	)
-	app.action(heading, "Save store listing", func():
-		var cents: int = app.price_cents(price.text)
-		var error := Stores.set_listing(app.sim.state, int(store.id), app.selected_product, cents, status.selected == 1, preorders.selected == 1)
-		if not error.is_empty():
-			app.set_notice(error, true)
-			return
-		mark_saved.call()
-		app.persist("%s listing saved." % Catalog.PRODUCTS[app.selected_product].name)
-		app.refresh_view()
-	, true)
+	if app.store_listing_editing:
+		var price: LineEdit = app.field(heading, "Store Selling Price (%s)" % Catalog.CURRENCIES[app.sim.state.country], app.amount_text(listing.price, true).replace(",", ""), 16)
+		price.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
+		var status: OptionButton = app.dropdown(heading, ["Draft", "Listed"], 1 if listing.listed else 0)
+		heading.add_child(app.label("Allow Pre-orders", 14, Style.MUTED))
+		var preorders: OptionButton = app.dropdown(heading, ["Off", "On"], 1 if listing.get("allow_preorders", false) else 0)
+		preorders.tooltip_text = "Accept new orders while this listing is out of stock. Existing pre-orders remain accepted if switched off."
+		app.watch_edits([price, status, preorders])
+		app.action(heading, "Save Changes", func():
+			var cents: int = app.price_cents(price.text)
+			var error := Stores.set_listing(app.sim.state, int(store.id), app.selected_product, cents, status.selected == 1, preorders.selected == 1)
+			if not error.is_empty():
+				app.set_notice(error, true)
+				return
+			app.store_listing_editing = false
+			app.persist("%s listing saved." % Catalog.PRODUCTS[app.selected_product].name)
+			app.refresh_view()
+		, true)
+		app.action(heading, "Cancel", func():
+			app.store_listing_editing = false
+			app.edit_checks.clear()
+			app.set_notice("")
+			app.refresh_view()
+		)
+	else:
+		app.metric(heading, "Product", Catalog.PRODUCTS[app.selected_product].name)
+		app.metric(heading, "Selling Price", app.money(int(listing.price)))
+		app.metric(heading, "Listing Status", "Listed" if listing.listed else "Draft")
+		app.metric(heading, "Pre-orders", "Enabled" if listing.get("allow_preorders", false) else "Off")
+		app.action(heading, "Edit Listing", func():
+			app.store_listing_editing = true
+			app.refresh_view()
+		)
 	var cost: Dictionary = app.sim.unit_cost(app.selected_product, item.supplier)
 	var contribution: int = listing.price - cost.landed - Stores.store_fee(store, Stores.channel(store), listing.price) - Catalog.local_cents(app.sim.state.country, Catalog.SHIPPING[app.sim.state.shipping].cost)
 	app.metric(heading, "Landed cost per unit", app.money(cost.landed))

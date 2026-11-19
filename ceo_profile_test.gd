@@ -3,6 +3,7 @@ extends SceneTree
 const CEO = preload("res://ceo_profile.gd")
 const Sim = preload("res://simulation.gd")
 const Saves = preload("res://save_store.gd")
+const AvatarCrop = preload("res://avatar_crop_viewport.gd")
 var failures := 0
 
 func _initialize() -> void:
@@ -19,6 +20,7 @@ func run() -> void:
 	test_global_profile_and_achievements()
 	test_company_save_independence_and_migration()
 	test_avatar_and_corruption_recovery()
+	await test_interactive_avatar_crop()
 	print("CEO profile functional suite: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 
@@ -88,6 +90,13 @@ func test_avatar_and_corruption_recovery() -> void:
 	expect(CEO.add_avatar(profile, "image/png", bytes) == OK and profile.avatar_mime == "image/jpeg"
 		and Marshalls.base64_to_raw(profile.avatar_data).size() <= CEO.MAX_AVATAR_BYTES,
 		"JPEG/PNG/WebP input is validated and resized before local avatar storage")
+	var legacy_avatar_data: String = profile.avatar_data
+	var legacy_avatar := Image.new()
+	legacy_avatar.load_jpg_from_buffer(Marshalls.base64_to_raw(legacy_avatar_data))
+	var migrated_profile := CEO.ensure(profile, "Kai Founder")
+	expect(legacy_avatar.get_width() == 256 and legacy_avatar.get_height() == 256
+		and migrated_profile.avatar_data == legacy_avatar_data,
+		"Existing square profile photos remain readable and unchanged during migration")
 	expect(CEO.add_avatar(profile, "text/plain", bytes) == ERR_INVALID_DATA, "Unsupported avatar file types are rejected")
 	var path := "user://ceo_profile_recovery.json"
 	expect(CEO.save_profile(profile, path) == OK, "Profile snapshot saved")
@@ -103,6 +112,55 @@ func test_avatar_and_corruption_recovery() -> void:
 	invalid.xp = -1
 	expect(CEO.save_profile(invalid, path) == ERR_INVALID_DATA, "Invalid global profile data cannot replace a valid profile")
 	_cleanup_profile_files(path)
+
+func test_interactive_avatar_crop() -> void:
+	var source := Image.create(600, 400, false, Image.FORMAT_RGBA8)
+	for y in source.get_height():
+		for x in source.get_width():
+			source.set_pixel(x, y, Color(float(x) / source.get_width(), float(y) / source.get_height(), 0.4, 1.0))
+	var crop := AvatarCrop.new()
+	crop.custom_minimum_size = Vector2(300, 400)
+	crop.size = Vector2(300, 400)
+	root.add_child(crop)
+	await process_frame
+	crop.set_image(source)
+	await process_frame
+	var initial := crop.crop_image()
+	expect(initial.get_width() == 300 and initial.get_height() == 400,
+		"Interactive photo crop produces a finalized 3:4 portrait image")
+	crop.set_zoom(1.5)
+	var zoomed := crop.crop_image()
+	expect(zoomed.get_data() != initial.get_data(), "Zoom changes the live crop preview")
+	var mouse_down := InputEventMouseButton.new()
+	mouse_down.button_index = MOUSE_BUTTON_LEFT
+	mouse_down.pressed = true
+	mouse_down.position = Vector2(150, 200)
+	crop._gui_input(mouse_down)
+	var mouse_motion := InputEventMouseMotion.new()
+	mouse_motion.position = Vector2(110, 200)
+	crop._gui_input(mouse_motion)
+	var repositioned := crop.crop_image()
+	expect(repositioned.get_data() != zoomed.get_data(), "Mouse dragging repositions the live crop")
+	var touch_down := InputEventScreenTouch.new()
+	touch_down.pressed = true
+	touch_down.position = Vector2(150, 200)
+	crop._gui_input(touch_down)
+	var touch_drag := InputEventScreenDrag.new()
+	touch_drag.position = Vector2(170, 200)
+	touch_drag.relative = Vector2(20, 0)
+	crop._gui_input(touch_drag)
+	expect(crop.offset.x != -40.0, "Touch dragging supports mobile crop repositioning")
+	crop.reset_crop()
+	expect(is_equal_approx(crop.zoom, 1.0) and crop.offset == Vector2.ZERO,
+		"Reset restores the original crop framing")
+	var finalized_profile := CEO.ensure({}, "Kai Founder")
+	expect(CEO.set_avatar_image(finalized_profile, crop.crop_image()) == OK,
+		"Only the finalized portrait is stored in the CEO profile")
+	var saved_image := Image.new()
+	var saved_bytes := Marshalls.base64_to_raw(finalized_profile.avatar_data)
+	expect(saved_image.load_jpg_from_buffer(saved_bytes) == OK and saved_image.get_width() == 300
+		and saved_image.get_height() == 400, "Stored avatar data contains the finalized crop, not the source photo")
+	crop.queue_free()
 
 func _cleanup_profile_files(path: String) -> void:
 	for suffix in [".tmp", ".bak", ""]:

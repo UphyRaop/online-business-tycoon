@@ -52,7 +52,7 @@ static func show(app: Control) -> void:
 	)
 	refresh_picker.call()
 	var links: HBoxContainer = app.row(catalog)
-	app.action(links, "My Products", app.navigate.bind("My Products"))
+	app.secondary_tab(links, "My Products", app.navigate.bind("My Products"), app.page == "My Products")
 	var stock_label: Label = app.label("", 15, Style.MUTED)
 	catalog.add_child(stock_label)
 	app.metric(catalog, "Category · Estimated supplier cost", "%s · %s" % [Catalog.PRODUCTS[product].category, app.money(Catalog.quote(app.sim.state.country, product, int(item.supplier)))])
@@ -60,9 +60,9 @@ static func show(app: Control) -> void:
 	supplier_form(app, product, item, stock_label)
 	var listings: VBoxContainer = app.card("Store listings")
 	listings.add_child(app.label("Product listings belong to individual stores. Create a marketplace or website and manage its listings under Market / Management.", 14, Style.MUTED))
-	app.action(listings, "Management", app.navigate.bind("Management"), true)
+	app.secondary_tab(listings, "Management", app.navigate.bind("Management"), false)
 	var offers := Offers.show(app, product)
-	app.action(links, "Offers", func():
+	app.secondary_tab(links, "Offers", func():
 		var scroll: ScrollContainer = app.body.get_parent()
 		scroll.scroll_vertical += roundi(offers.get_parent().global_position.y - scroll.global_position.y)
 	)

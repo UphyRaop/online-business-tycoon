@@ -93,13 +93,18 @@ func run() -> void:
 		"A single desktop content card expands to the full content width")
 
 	press("Business")
-	expect(app.page == "Business" and has_label("Owned stores"), "Business category opens Company Profile")
+	expect(app.page == "Business" and has_label("Owned Stores"), "Business category opens Company Profile")
+	var company_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Company Profile")[0]
+	var dashboard_primary: Button = controls(nav, "Button").filter(func(button): return button.text == "Dashboard")[0]
+	expect(company_subtab.custom_minimum_size.y == 44 and dashboard_primary.custom_minimum_size.y == app.TOUCH_HEIGHT
+		and company_subtab.get_theme_font_size("font_size") < dashboard_primary.get_theme_font_size("font_size"),
+		"Secondary navigation is visually smaller than primary tabs while keeping a 44 px touch target")
 	press("Advertising")
 	expect(app.page == "Advertising" and has_label("Advertising Overview"), "Business secondary route opens Advertising")
 	press("Campaign Manager")
 	expect(app.screen == "Campaign Manager" or app.page == "Campaign Manager", "Campaign Manager remains reachable")
-	press("Advertising Analytics")
-	expect(app.screen == "Advertising Analytics" or app.page == "Advertising Analytics", "Advertising Analytics remains reachable")
+	press("Ads Analytics")
+	expect(app.screen == "Advertising Analytics" or app.page == "Advertising Analytics", "Ads Analytics remains reachable")
 
 	press("Finance")
 	expect(app.page == "Finance" and has_label("Income Statement"), "Finance category opens statements")
@@ -116,13 +121,22 @@ func run() -> void:
 		"Save/load preserves marketplace and website IDs and website details")
 	Slots.delete_slot(1)
 	press("Profile")
-	expect(app.page == "Profile" and has_label("CEO identity") and has_label("Career progression")
-		and has_label("Owned companies"), "Profile category presents CEO identity, career, and owned companies")
-	expect(has_label("Personal cash: Unavailable") and has_label("Personal net worth: Unavailable"),
-		"Unsupported personal finance is clearly unavailable and separated from company accounts")
+	expect(app.page == "Profile" and has_label("CEO Profile") and has_label("Career Progression")
+		and has_label("Owned Companies"), "Profile category presents identity, career, and owned companies with consistent title case")
+	expect(has_label("Personal cash and net worth are not currently tracked."),
+		"Profile explains that personal finance is not tracked and separates it from company accounts")
+	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Profile"),
+		"Profile details are read-only until editing is explicitly activated")
+	press("Edit Profile")
 	var profile_fields := controls(app, "LineEdit")
+	profile_fields[0].text = "Discarded CEO Name"
+	press("Cancel")
+	expect(app.ceo_profile.full_name == "Kai Founder" and not has_button("Save Changes"),
+		"Cancel discards unsaved CEO profile edits")
+	press("Edit Profile")
+	profile_fields = controls(app, "LineEdit")
 	profile_fields[0].text = "Kai Global CEO"
-	press("Save Profile")
+	press("Save Changes")
 	expect(app.ceo_profile.full_name == "Kai Global CEO" and app.sim.state.owner == "Kai Global CEO"
 		and CEO.load_profile().full_name == "Kai Global CEO", "Profile editing persists the shared CEO identity")
 	var first_company_id := str(app.sim.state.company_id)
@@ -149,13 +163,13 @@ func run() -> void:
 	await process_frame
 	await process_frame
 	app.navigate("Profile")
-	var mobile_current_labels := controls(app, "Label").filter(func(node): return node.text == "Current company")
+	var mobile_current_labels := controls(app, "Label").filter(func(node): return node.text == "Current Company")
 	var ceo_avatar := app.find_child("CEOAvatar", true, false) as TextureRect
 	expect(mobile_current_labels.size() == 1 and mobile_current_labels[0].get_parent() is VBoxContainer,
 		"Mobile owned-company rows stack the company name and current status without narrow wrapping")
-	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size == Vector2(128, 128)
+	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size == Vector2(144, 192)
 		and ceo_avatar.size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
-		"CEO avatar retains a centered square portrait size on mobile")
+		"CEO avatar keeps its centered portrait aspect ratio on mobile")
 	for target in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
 		press(target)
 		expect(app.primary_category(app.page) == target or (target == "Order" and app.primary_category(app.page) == "Order"),

@@ -12,6 +12,8 @@ const FILTERS := ["Active orders", "Queued", "In transit", "Delivered", "All ord
 static func show(app: Control) -> void:
 	var navigation: VBoxContainer = app.card("Store operations")
 	var tab: OptionButton = app.dropdown(navigation, ["Fulfillment", "Customer service", "Sales analytics", "Shipping settings"], app.orders_tab)
+	tab.custom_minimum_size.y = 44
+	tab.add_theme_font_size_override("font_size", 13)
 	tab.item_selected.connect(func(index: int):
 		tab.select(app.orders_tab)
 		app.discard_form_then(func():
@@ -96,17 +98,35 @@ static func _preorder_status(value: String) -> String:
 
 static func shipping_settings(app: Control) -> void:
 	var state: Dictionary = app.sim.state
-	var settings: VBoxContainer = app.card("Dispatch settings")
-	var method: OptionButton = app.dropdown(settings, methods(app), state.shipping)
-	var mode: OptionButton = app.dropdown(settings, ["Automatic dispatch", "Manual dispatch"], 0 if state.auto_dispatch else 1)
-	var saved: Callable = app.watch_edits([method, mode])
-	app.action(settings, "Save dispatch settings", func():
-		state.shipping = method.selected
-		state.auto_dispatch = mode.selected == 0
-		saved.call()
-		app.persist("Dispatch settings saved.")
-	)
-	settings.add_child(app.label("Automatic dispatch sends queued orders when you advance time. Manual dispatch lets you choose the method for each order. New orders use the advertised method to set their delivery promise.", 14, Style.MUTED))
+	var settings: VBoxContainer = app.card("Dispatch Settings")
+	if app.shipping_settings_editing:
+		var method: OptionButton = app.dropdown(settings, methods(app), state.shipping)
+		var mode: OptionButton = app.dropdown(settings, ["Automatic Dispatch", "Manual Dispatch"], 0 if state.auto_dispatch else 1)
+		method.custom_minimum_size.y = 44
+		mode.custom_minimum_size.y = 44
+		method.add_theme_font_size_override("font_size", 13)
+		mode.add_theme_font_size_override("font_size", 13)
+		app.watch_edits([method, mode])
+		app.action(settings, "Save Changes", func():
+			state.shipping = method.selected
+			state.auto_dispatch = mode.selected == 0
+			app.shipping_settings_editing = false
+			app.persist("Dispatch settings saved.")
+			app.refresh_view()
+		, true)
+		app.action(settings, "Cancel", func():
+			app.shipping_settings_editing = false
+			app.edit_checks.clear()
+			app.refresh_view()
+		)
+	else:
+		app.metric(settings, "Shipping Method", methods(app)[state.shipping])
+		app.metric(settings, "Dispatch Mode", "Automatic Dispatch" if state.auto_dispatch else "Manual Dispatch")
+		app.action(settings, "Edit Dispatch Settings", func():
+			app.shipping_settings_editing = true
+			app.refresh_view()
+		)
+	settings.add_child(app.label("Automatic dispatch sends queued orders when you advance time. Manual dispatch lets you choose the method for each order. New orders use the selected method to set their delivery promise.", 14, Style.MUTED))
 
 static func fulfillment(app: Control) -> void:
 	var state: Dictionary = app.sim.state
