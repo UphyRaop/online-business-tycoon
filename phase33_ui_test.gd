@@ -15,11 +15,11 @@ func run() -> void:
 	press("Register company")
 	expect(app.sim.state.stores.is_empty(), "New company starts with no marketplace stores or websites")
 	expect(app.sim.report(app.sim.state.day).closing_cash == app.sim.state.cash, "Dashboard Bank Balance uses the reconciled cash ledger balance")
-	var primary_names := ["Dashboard", "Market", "Order", "Business", "Finance"]
+	var primary_names := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
 	var nav_names: Array[String] = []
 	for button in controls(app, "Button"):
 		if button.text in primary_names: nav_names.append(button.text)
-	expect(nav_names.size() == 5, "Game navigation presents all five primary categories")
+	expect(nav_names.size() == 6 and "Profile" in nav_names, "Game navigation presents all six primary categories including Profile")
 	for button in controls(app, "Button"):
 		if button.text in primary_names:
 			expect(button.custom_minimum_size.y == app.TOUCH_HEIGHT, "Primary navigation uses the shared touch target height")

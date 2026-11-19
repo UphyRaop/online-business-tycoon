@@ -11,6 +11,10 @@ const PROTOTYPE := "user://business_save.json"
 static func save(state: Dictionary, path: String = PATH, timestamp: float = 0) -> Error:
 	if not valid(state):
 		return ERR_INVALID_DATA
+	var parent_path := ProjectSettings.globalize_path(path).get_base_dir()
+	var directory_error := DirAccess.make_dir_recursive_absolute(parent_path)
+	if directory_error != OK and directory_error != ERR_ALREADY_EXISTS:
+		return directory_error
 	var pending := path + ".tmp"
 	var file := FileAccess.open(pending, FileAccess.WRITE)
 	if file == null:
@@ -69,10 +73,10 @@ static func read_record(path: String) -> Dictionary:
 static func valid(state: Dictionary) -> bool:
 	if state.get("version") != Sim.VERSION:
 		return false
-	for field in ["owner", "company", "store", "brand", "website_domain"]:
+	for field in ["owner", "company", "company_id", "store", "brand", "website_domain"]:
 		if not state.get(field) is String:
 			return false
-	if state.brand.strip_edges().is_empty() or state.website_domain.strip_edges().is_empty() or not state.get("website_active") is bool:
+	if state.company_id.strip_edges().is_empty() or state.brand.strip_edges().is_empty() or state.website_domain.strip_edges().is_empty() or not state.get("website_active") is bool:
 		return false
 	for field in ["country", "difficulty", "channel", "day", "cash", "seed"]:
 		if not state.get(field) is int:

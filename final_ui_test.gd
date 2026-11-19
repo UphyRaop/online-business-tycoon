@@ -141,14 +141,14 @@ func register_company(name: String) -> void:
 	expect(app.sim.state.stores.is_empty() and not app.sim.channel_enabled(0) and not app.sim.channel_enabled(1),
 		"New registration starts without marketplace or website destinations")
 	press("Business")
-	press("Store Management")
+	press("Management")
 	press("Open New Store")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = name + " Market"
 	inputs[1].text = name + " Brand"
 	press("Create store")
 	expect(app.sim.state.stores.size() == 1 and app.sim.channel_enabled(0),
-		"A marketplace becomes available only after manual Store Management creation")
+		"A marketplace becomes available only after manual Management creation")
 	press("Dashboard")
 
 func resolve_dialog(confirm: bool) -> void:

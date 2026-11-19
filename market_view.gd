@@ -59,8 +59,8 @@ static func show(app: Control) -> void:
 	app.metric(catalog, "Demand · Competition", "%.2f · %.2f" % [Catalog.PRODUCTS[product].demand, Catalog.PRODUCTS[product].competition])
 	supplier_form(app, product, item, stock_label)
 	var listings: VBoxContainer = app.card("Store listings")
-	listings.add_child(app.label("Product listings belong to individual stores. Create a marketplace or website and manage its listings under Market / Stores.", 14, Style.MUTED))
-	app.action(listings, "Manage stores", app.navigate.bind("Store Management"), true)
+	listings.add_child(app.label("Product listings belong to individual stores. Create a marketplace or website and manage its listings under Market / Management.", 14, Style.MUTED))
+	app.action(listings, "Management", app.navigate.bind("Management"), true)
 	var offers := Offers.show(app, product)
 	app.action(links, "Offers", func():
 		var scroll: ScrollContainer = app.body.get_parent()

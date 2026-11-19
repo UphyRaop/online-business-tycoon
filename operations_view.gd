@@ -46,7 +46,7 @@ static func preorders(app: Control) -> void:
 	if overdue > 0:
 		view.add_child(app.label("%d pre-orders are past their estimated replenishment date. Review supplier shipments." % overdue, 14, Style.GOLD))
 	if ids.is_empty():
-		view.add_child(app.label("No customer pre-orders yet. Enable pre-orders on a product listing in Store Management.", 14, Style.MUTED))
+		view.add_child(app.label("No customer pre-orders yet. Enable pre-orders on a product listing in Market / Management.", 14, Style.MUTED))
 		return
 	for id in ids:
 		var order: Dictionary = state.orders[id]

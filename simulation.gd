@@ -12,7 +12,7 @@ const PERIODS := [1, 7, 30, 365]
 const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses"]
 const CHANNEL_FIELDS := ["orders", "sales", "cogs", "fees", "hosting", "shipping", "refunds",
 	"placed", "dispatched", "tracked_deliveries", "on_time", "checkouts", "abandoned", "stockouts", "bundles", "upsells", "refunded"]
-const VERSION := 5
+const VERSION := 6
 
 var state: Dictionary
 
@@ -29,6 +29,7 @@ static func register(owner: String, company: String, store: String, country: int
 	opening.capital = Catalog.local_cents(country, Catalog.CAPITAL[difficulty])
 	var data := {
 		"version": 1, "owner": owner, "company": company, "store": store,
+		"company_id": _new_company_id(owner, company, country, seed_value),
 		"brand": company.strip_edges(), "website_domain": _domain_for(company), "website_active": false,
 		"country": country, "difficulty": difficulty, "channel": channel,
 		"day": 1, "cash": opening.capital, "seed": rng.state,
@@ -48,10 +49,12 @@ static func upgrade(data: Dictionary) -> void:
 	if not data.has("website_active") or not data.get("website_active") is bool:
 		data.website_active = int(data.get("channel", 0)) != 0
 	var old_version: int = int(data.get("version", 0))
-	if old_version not in [1, 2, 3, 4, VERSION]:
+	if old_version not in [1, 2, 3, 4, 5, VERSION]:
 		return
 	if not data.get("ledger") is Array:
 		return
+	if not data.get("company_id") is String or str(data.company_id).is_empty():
+		data.company_id = _legacy_company_id(data)
 	for row in data.ledger:
 		if not row is Dictionary or not row.get("channels") is Array:
 			return
@@ -123,6 +126,19 @@ static func _domain_for(name: String) -> String:
 		clean = clean.replace("--", "-")
 	clean = clean.trim_prefix("-").trim_suffix("-")
 	return (clean if not clean.is_empty() else "my-business") + ".shop"
+
+static func _new_company_id(owner: String, company: String, country: int, seed_value: int) -> String:
+	var bytes := Crypto.new().generate_random_bytes(16)
+	return "company-%s" % bytes.hex_encode() if not bytes.is_empty() else "company-%s" % _stable_company_suffix("%s|%s|%d|%d|%d" % [owner, company, country, seed_value, Time.get_ticks_usec()])
+
+static func _legacy_company_id(data: Dictionary) -> String:
+	return "company-legacy-%s" % _stable_company_suffix("%s|%s|%d|%d" % [str(data.get("owner", "")).strip_edges().to_lower(), str(data.get("company", "")).strip_edges().to_lower(), int(data.get("country", 0)), int(data.get("seed", 0))])
+
+static func _stable_company_suffix(value: String) -> String:
+	var hasher := HashingContext.new()
+	hasher.start(HashingContext.HASH_SHA256)
+	hasher.update(value.to_utf8_buffer())
+	return hasher.finish().hex_encode().substr(0, 32)
 
 static func entry() -> Dictionary:
 	var row := {"channels": [], "demand": {}, "inbound_freight": 0, "store_activity": {}}
