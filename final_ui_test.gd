@@ -1,5 +1,7 @@
 extends "res://phase1_ui_test.gd"
 
+const Catalog = preload("res://catalog.gd")
+
 func first_store_id() -> int:
 	return int(app.sim.state.stores.front().id)
 
@@ -26,8 +28,8 @@ func run() -> void:
 	app.sim.state.seed = 153
 	expect(Slots.read(0).state.company == "Aster Holdings", "Registration writes autosave")
 	press("My Products")
-	expect(has_label("Active products") and has_label("Prepare a listing"), "Empty product portfolio is usable")
-	press("Browse catalog")
+	expect(has_label("Active products") and has_label("Your product portfolio is empty"), "Empty product portfolio is usable")
+	press("Product Catalogue")
 	open_first_store_listing()
 	press("Edit Listing")
 	var inputs := controls(app, "LineEdit")
@@ -48,7 +50,9 @@ func run() -> void:
 	press("My Products")
 	expect(has_label("Out of Stock") and app.sim.active_product_count() == 0, "Out-of-stock products are separate from the active total")
 	press("Manage Portable Blender")
-	press("Purchase stock")
+	press("Open Product Catalogue")
+	press("Accept Quotation")
+	press("Purchase Inventory")
 	open_first_store_listing()
 	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 0)
@@ -69,9 +73,9 @@ func run() -> void:
 	press("Dashboard")
 	press("+7")
 	press("My Products")
-	expect(has_label("Net revenue") and has_label("Product profit"), "Product portfolio shows sales and profit")
+	expect(has_label("Units sold · Net revenue") and has_label("Product Profit"), "Product portfolio shows sales and profit")
 	await settle("final-products")
-	press("Browse catalog")
+	press("Product Catalogue")
 	select(app.find_child("ProductSelection", true, false), 4)
 	open_first_store_listing()
 	press("Edit Listing")

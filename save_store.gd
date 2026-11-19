@@ -378,7 +378,7 @@ static func valid_advertising(state: Dictionary) -> bool:
 		for field in ["platform", "store_id", "channel", "product", "objective", "daily_budget", "start_day", "end_day", "audience", "bid_strategy", "bid", "creative", "created"]:
 			if not campaign.get(field) is int:
 				return false
-		if not campaign.get("name") is String or not campaign.get("status") in ["draft", "active", "paused", "stopped"] or not campaign.get("learning") is float:
+		if not campaign.get("name") is String or not campaign.get("status") in ["draft", "active", "paused", "stopped", "completed"] or not campaign.get("learning") is float or not campaign.get("deleted") is bool:
 			return false
 		var store := Stores.get_store(state, campaign.store_id)
 		if store.is_empty() or campaign.platform not in range(Advertising.PLATFORMS.size()) or not Advertising.platform_available(state.country, campaign.platform, store):

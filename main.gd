@@ -74,6 +74,11 @@ var campaign_editing := false
 var shipping_settings_editing := false
 var display_settings_editing := false
 var avatar_crop_source: Image
+var navigation_overlay: Control
+var navigation_drawer: PanelContainer
+var navigation_open := false
+var navigation_toggle: Button
+var bank_balance_label: Label
 
 func _ready() -> void:
 	theme = Style.build()
@@ -144,6 +149,30 @@ func secondary_tab(parent: Node, title: String, callback: Callable, selected: bo
 		node.add_theme_color_override("font_color", Style.GOLD)
 		node.add_theme_color_override("font_hover_color", Style.GOLD)
 	return node
+
+func _style_secondary_navigation_tab(node: Button, selected: bool) -> void:
+	node.flat = true
+	node.custom_minimum_size.y = 44
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color.TRANSPARENT
+	normal.border_color = Style.GOLD if selected else Color.TRANSPARENT
+	normal.border_width_bottom = 2 if selected else 0
+	normal.set_content_margin_all(7)
+	normal.content_margin_left = 10
+	normal.content_margin_right = 10
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Style.SURFACE.lightened(0.05)
+	var focus := StyleBoxFlat.new()
+	focus.bg_color = Color.TRANSPARENT
+	focus.border_color = Style.GOLD
+	focus.set_border_width_all(1)
+	node.add_theme_stylebox_override("normal", normal)
+	node.add_theme_stylebox_override("hover", hover)
+	node.add_theme_stylebox_override("pressed", hover)
+	node.add_theme_stylebox_override("focus", focus)
+	node.add_theme_color_override("font_color", Style.GOLD if selected else Style.MUTED)
+	node.add_theme_color_override("font_hover_color", Style.TEXT)
+	node.add_theme_color_override("font_pressed_color", Style.GOLD)
 
 func action_title(value: String) -> String:
 	var parts := value.split(" ", false)
@@ -247,13 +276,12 @@ func _update_responsive_layout() -> void:
 	if is_instance_valid(page_grid):
 		page_grid.columns = 2 if viewport_width >= 900.0 else 1
 		_reflow_page_cards()
-	var nav := find_child("PrimaryNavigation", true, false) as GridContainer
-	if nav != null:
-		nav.columns = 3 if viewport_width < 1024.0 else 6
-		for item in nav.get_children():
-			if item is Button:
-				item.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 145)
-				item.add_theme_font_size_override("font_size", 12 if viewport_width < 600.0 else 13)
+	if is_instance_valid(navigation_drawer):
+		var drawer_width := clampf(viewport_width * 0.82, 280.0, 340.0)
+		navigation_drawer.offset_right = drawer_width
+	if is_instance_valid(bank_balance_label):
+		bank_balance_label.custom_minimum_size.x = 152 if viewport_width < 600.0 else 245
+		_refresh_bank_balance()
 	var kpis := find_child("DashboardKpis", true, false) as GridContainer
 	if kpis != null:
 		kpis.columns = 4 if viewport_width >= 900.0 else 2
@@ -306,6 +334,28 @@ func set_notice(message: String, error: bool = false) -> void:
 		status.text = notice
 		status.visible = not notice.is_empty()
 		status.add_theme_color_override("font_color", Style.RED if error else Style.GREEN)
+	_refresh_bank_balance()
+
+func _refresh_bank_balance() -> void:
+	if not is_instance_valid(bank_balance_label) or sim == null or screen != "Game":
+		return
+	var balance := money(int(sim.state.get("cash", 0)))
+	if size.x < 600.0:
+		bank_balance_label.text = "Bank Balance\n" + balance
+		bank_balance_label.tooltip_text = "Available bank balance"
+		var compact_font := 12
+		var mobile_font_resource := bank_balance_label.get_theme_default_font()
+		while compact_font > 8 and mobile_font_resource.get_string_size(balance, HORIZONTAL_ALIGNMENT_LEFT, -1, compact_font).x > bank_balance_label.custom_minimum_size.x - 4:
+			compact_font -= 1
+		bank_balance_label.add_theme_font_size_override("font_size", compact_font)
+	else:
+		var display_text := "Bank Balance  ·  " + balance
+		bank_balance_label.text = display_text
+		var desktop_font := 14
+		var desktop_font_resource := bank_balance_label.get_theme_default_font()
+		while desktop_font > 9 and desktop_font_resource.get_string_size(display_text, HORIZONTAL_ALIGNMENT_LEFT, -1, desktop_font).x > bank_balance_label.custom_minimum_size.x - 4:
+			desktop_font -= 1
+		bank_balance_label.add_theme_font_size_override("font_size", desktop_font)
 
 func persist(message: String) -> void:
 	_sync_ceo_profile()
@@ -930,6 +980,7 @@ func navigate(target: String) -> void:
 			target = "Orders" if target == "Order" else target
 		else:
 			target = str(category_last_page.get(target, target))
+			if target == "Store Listings": target = "My Products"
 	if target != "Management": show_new_store_form = false
 	discard_form_then(func():
 		if target != page:
@@ -973,41 +1024,168 @@ func _reset_edit_modes() -> void:
 	shipping_settings_editing = false
 	display_settings_editing = false
 
-func primary_navigation(parent: Node) -> void:
+func primary_navigation(parent: Node) -> Button:
+	var heading := row(parent)
+	var menu_button := action(heading, "☰", toggle_navigation_drawer, false)
+	menu_button.name = "NavigationMenuButton"
+	menu_button.custom_minimum_size = Vector2(52, 48)
+	menu_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	menu_button.tooltip_text = "Open navigation menu"
+	navigation_toggle = menu_button
 	var viewport_width := size.x
-	var nav := GridContainer.new()
-	nav.name = "PrimaryNavigation"
-	nav.size_flags_horizontal = Control.SIZE_FILL
-	nav.columns = 3 if viewport_width < 1024.0 else 6
-	nav.add_theme_constant_override("h_separation", 5)
-	nav.add_theme_constant_override("v_separation", 5)
-	parent.add_child(nav)
-	for target in NAV:
-		var tab := action(nav, target, navigate.bind(target), target == primary_category(page))
-		tab.custom_minimum_size.y = 48
-		tab.add_theme_font_size_override("font_size", 12 if viewport_width < 600.0 else 13)
-		tab.clip_text = true
-		tab.custom_minimum_size.x = 70 if viewport_width < 600.0 else (100 if viewport_width < 1024.0 else 145)
-		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		for button_state in ["normal", "hover", "pressed", "focus", "disabled"]:
-			var style: StyleBox = tab.get_theme_stylebox(button_state).duplicate()
-			style.content_margin_left = 4
-			style.content_margin_right = 4
-			tab.add_theme_stylebox_override(button_state, style)
+	var date_text := "%s | %s" % [Calendar.format(sim.state.day), Catalog.COUNTRIES[sim.state.country]]
+	var game_date := label(date_text, 13 if viewport_width < 600.0 else 14, Style.MUTED)
+	game_date.name = "GameDate"
+	game_date.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	game_date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	game_date.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	heading.add_child(game_date)
+	var balance := label("", 12 if viewport_width < 600.0 else 14, Style.GOLD)
+	balance.name = "CompanyBankBalance"
+	balance.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	balance.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	balance.size_flags_horizontal = Control.SIZE_SHRINK_END
+	balance.custom_minimum_size.x = 152 if viewport_width < 600.0 else 245
+	balance.autowrap_mode = TextServer.AUTOWRAP_OFF
+	balance.clip_text = false
+	balance.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	heading.add_child(balance)
+	bank_balance_label = balance
+	_refresh_bank_balance()
+	_create_navigation_drawer()
+	return menu_button
+
+func toggle_navigation_drawer() -> void:
+	if not is_instance_valid(navigation_overlay):
+		return
+	navigation_open = not navigation_open
+	navigation_overlay.visible = navigation_open
+	if navigation_open:
+		var active := navigation_drawer.find_child("Primary_" + primary_category(page), true, false) as Button
+		if active != null and active.is_inside_tree():
+			active.grab_focus()
+	else:
+		_restore_navigation_focus()
+
+func close_navigation_drawer(restore_focus: bool = true) -> void:
+	if not is_instance_valid(navigation_overlay):
+		return
+	navigation_open = false
+	navigation_overlay.visible = false
+	if restore_focus:
+		_restore_navigation_focus()
+
+func _restore_navigation_focus() -> void:
+	if is_instance_valid(navigation_toggle) and navigation_toggle.is_inside_tree():
+		navigation_toggle.grab_focus()
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not navigation_open or not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	if event.keycode == KEY_ESCAPE:
+		close_navigation_drawer()
+		get_viewport().set_input_as_handled()
+		return
+	if event.keycode != KEY_TAB or not is_instance_valid(navigation_drawer):
+		return
+	var focusable: Array[Control] = []
+	for button in navigation_drawer.find_children("*", "Button", true, false):
+		if button is Button and button.focus_mode != Control.FOCUS_NONE and button.is_visible_in_tree():
+			focusable.append(button)
+	if focusable.is_empty():
+		return
+	var owner := get_viewport().gui_get_focus_owner()
+	var index := focusable.find(owner)
+	if index < 0:
+		focusable[focusable.size() - 1 if event.shift_pressed else 0].grab_focus()
+		get_viewport().set_input_as_handled()
+	elif event.shift_pressed and index == 0:
+		focusable.back().grab_focus()
+		get_viewport().set_input_as_handled()
+	elif not event.shift_pressed and index == focusable.size() - 1:
+		focusable.front().grab_focus()
+		get_viewport().set_input_as_handled()
+
+func _create_navigation_drawer() -> void:
+	var overlay := ColorRect.new()
+	overlay.name = "NavigationOverlay"
+	overlay.color = Color(0.015, 0.025, 0.045, 0.76)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.visible = false
+	overlay.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed:
+			close_navigation_drawer()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventScreenTouch and event.pressed:
+			close_navigation_drawer()
+			get_viewport().set_input_as_handled()
+	)
+	add_child(overlay)
+	navigation_overlay = overlay
+	var drawer := PanelContainer.new()
+	drawer.name = "PrimaryNavigation"
+	drawer.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	drawer.offset_left = 0
+	drawer.offset_top = 0
+	drawer.offset_bottom = 0
+	drawer.offset_right = clampf(size.x * 0.82, 280.0, 340.0)
+	drawer.mouse_filter = Control.MOUSE_FILTER_STOP
+	drawer.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 0, 16))
+	overlay.add_child(drawer)
+	navigation_drawer = drawer
+	var content := stack(drawer, 10)
+	var heading := row(content)
+	var title := label("Navigation", 22)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.add_child(title)
+	var close_button := action(heading, "Close", close_navigation_drawer)
+	close_button.custom_minimum_size = Vector2(72, 44)
+	var nav_scroll := ScrollContainer.new()
+	nav_scroll.name = "NavigationScroll"
+	nav_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	nav_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content.add_child(nav_scroll)
+	var nav_list := stack(nav_scroll, 8)
+	nav_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var icons := ["▦", "⌕", "▤", "◫", "¤", "◉"]
+	for index in NAV.size():
+		var target: String = NAV[index]
+		var item := action(nav_list, "%s  %s" % [icons[index], "Orders" if target == "Order" else target], func():
+			close_navigation_drawer(false)
+			navigate(target)
+		)
+		item.name = "Primary_" + target
+		item.tooltip_text = target
+		item.custom_minimum_size.y = 50
+		item.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		item.focus_mode = Control.FOCUS_ALL
+		if target == primary_category(page):
+			Style.primary(item)
+		else:
+			Style.secondary(item)
 
 func secondary_navigation(parent: Node) -> void:
 	var category := primary_category(page)
 	var routes: Array = []
 	match category:
-		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Management", "Management"], ["Product Listings", "Store Listings"]]
+		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Management", "Management"]]
 		"Order": routes = [["Customer Orders", "Orders"], ["Pre-orders", "Pre-orders"], ["Returns and Service", "Returns & Service"]]
 		"Business": routes = [["Company Profile", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
 		"Finance": routes = [["Statements", "Finance"], ["Expense Management", "Expense Management"], ["Store Profitability", "Store Profitability"]]
 		_: return
-	var strip := FlowContainer.new()
-	strip.add_theme_constant_override("h_separation", 6)
-	strip.add_theme_constant_override("v_separation", 4)
-	parent.add_child(strip)
+	var scroller := ScrollContainer.new()
+	scroller.name = "SecondaryNavigationScroll"
+	scroller.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroller.custom_minimum_size.y = 46
+	scroller.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroller.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	parent.add_child(scroller)
+	var strip := HBoxContainer.new()
+	strip.name = "SecondaryNavigationTabs"
+	strip.add_theme_constant_override("separation", 6)
+	strip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	scroller.add_child(strip)
 	for route in routes:
 		var title: String = route[0]
 		var target: String = route[1]
@@ -1017,10 +1195,17 @@ func secondary_navigation(parent: Node) -> void:
 		elif target == "Customer Orders": selected = page == "Orders" and orders_tab != 1
 		elif target == "Store Profitability": selected = page == "Store Profitability"
 		else: selected = page == target
-		secondary_tab(strip, title, route_secondary.bind(target), selected)
+		var tab := secondary_tab(strip, title, route_secondary.bind(target), selected)
+		tab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		_style_secondary_navigation_tab(tab, selected)
 
 func render() -> void:
 	edit_checks.clear()
+	navigation_overlay = null
+	navigation_drawer = null
+	navigation_toggle = null
+	bank_balance_label = null
+	navigation_open = false
 	page_shell = null
 	page_wide = null
 	page_grid = null
@@ -1057,7 +1242,28 @@ func render() -> void:
 	page_shell.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
 	var shell := page_shell
+	var masthead := stack(shell, 3)
+	if screen != "Title":
+		masthead.add_child(label("ONLINE BUSINESS TYCOON", 13, Style.GOLD))
+	if screen == "Game":
+		primary_navigation(masthead)
+		var heading := row(masthead)
+		var page_title := "Ads Analytics" if page == "Advertising Analytics" else page
+		var title := label(page_title, 26 if viewport_width < 600.0 else 30)
+		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		heading.add_child(title)
+		action(heading, "Save Game", open_screen.bind("Save")).size_flags_horizontal = Control.SIZE_SHRINK_END
+		action(heading, "Menu", leave_game).size_flags_horizontal = Control.SIZE_SHRINK_END
+	elif screen == "Title":
+		Menu.brand(self, masthead)
+	else:
+		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
+			"Campaign Manager": "Campaign Manager", "Campaign Details": "Campaign Details",
+			"Advertising Analytics": "Ads Analytics", "Management": "Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
+			"CEO identity conflict": "Identity choice"}
+		masthead.add_child(label(titles.get(screen, screen), 30))
 	var scroll := ScrollContainer.new()
+	scroll.name = "GameContentScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1068,29 +1274,6 @@ func render() -> void:
 	var right_space := Control.new()
 	right_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(right_space)
-	var masthead := stack(body, 3)
-	if screen != "Title":
-		masthead.add_child(label("ONLINE BUSINESS TYCOON", 13, Style.GOLD))
-	if screen == "Game":
-		var heading := row(masthead)
-		var page_title := "Ads Analytics" if page == "Advertising Analytics" else page
-		var title := label(page_title, 30)
-		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		heading.add_child(title)
-		action(heading, "Save Game", open_screen.bind("Save")).size_flags_horizontal = Control.SIZE_SHRINK_END
-		action(heading, "Menu", leave_game).size_flags_horizontal = Control.SIZE_SHRINK_END
-		var game_date := label("%s  /  %s" % [Calendar.format(sim.state.day), Catalog.COUNTRIES[sim.state.country]], 14, Style.MUTED)
-		game_date.name = "GameDate"
-		masthead.add_child(game_date)
-		primary_navigation(masthead)
-	elif screen == "Title":
-		Menu.brand(self, masthead)
-	else:
-		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
-			"Campaign Manager": "Campaign Manager", "Campaign Details": "Campaign Details",
-			"Advertising Analytics": "Ads Analytics", "Management": "Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
-			"CEO identity conflict": "Identity choice"}
-		masthead.add_child(label(titles.get(screen, screen), 30))
 	if screen == "Game":
 		secondary_navigation(body)
 	divider(body)

@@ -36,6 +36,14 @@ static func ensure_state(state: Dictionary) -> void:
 	var ads: Dictionary = state.advertising
 	ads.merge(initial_state())
 	if not ads.get("campaigns") is Dictionary: ads.campaigns = {}
+	for raw_id in ads.campaigns:
+		var legacy_campaign: Variant = ads.campaigns[raw_id]
+		if not legacy_campaign is Dictionary: continue
+		# Older saves predate archival and scheduled completion. Keep every campaign,
+		# adding only the new archival flag so the old history remains addressable.
+		if not legacy_campaign.has("deleted"): legacy_campaign.deleted = false
+		if not legacy_campaign.has("status"): legacy_campaign.status = "stopped"
+		ads.campaigns[raw_id] = legacy_campaign
 	if not ads.get("history") is Array: ads.history = []
 	for record in ads.history:
 		if not record is Dictionary: continue
@@ -137,14 +145,14 @@ static func create(state: Dictionary, config: Dictionary) -> String:
 		"channel": Stores.channel(store), "product": product, "objective": objective,
 		"daily_budget": budget, "start_day": start, "end_day": end,
 		"audience": audience, "bid_strategy": bid_strategy, "bid": bid,
-		"creative": creative, "status": "draft" if config.get("draft", false) else "active", "learning": 1.0,
+		"creative": creative, "status": "draft" if config.get("draft", false) else "active", "deleted": false, "learning": 1.0,
 		"created": state.day,
 	}
 	return ""
 
 static func edit(state: Dictionary, id: int, changes: Dictionary) -> String:
 	var campaign: Dictionary = state.advertising.campaigns.get(id, {}).duplicate(true)
-	if campaign.is_empty() or campaign.status == "stopped": return "This campaign cannot be edited."
+	if campaign.is_empty() or bool(campaign.get("deleted", false)) or campaign.status in ["stopped", "completed"]: return "This campaign cannot be edited. Duplicate it to create a new campaign."
 	for key in changes:
 		if key in ["name", "platform", "store_id", "product", "objective", "daily_budget", "end_day", "audience", "bid_strategy", "bid", "creative"]:
 			campaign[key] = changes[key]
@@ -159,35 +167,47 @@ static func edit(state: Dictionary, id: int, changes: Dictionary) -> String:
 	if campaign.bid_strategy != 0 and campaign.bid < 1: return "Enter a positive bid limit for Cost cap or Bid cap."
 	if bool(changes.get("save_as_draft", false)):
 		campaign.status = "draft"
-	if campaign.end_day > 0 and campaign.end_day < state.day: campaign.status = "stopped"
+	if campaign.end_day > 0 and campaign.end_day < state.day: campaign.status = "completed"
 	state.advertising.campaigns[id] = campaign
 	return ""
 
 static func set_status(state: Dictionary, id: int, status: String) -> String:
 	if status not in ["draft", "active", "paused", "stopped"]: return "Choose a valid campaign status."
 	var campaign: Dictionary = state.advertising.campaigns.get(id, {})
-	if campaign.is_empty() or campaign.status == "stopped": return "This campaign cannot be resumed."
+	if campaign.is_empty() or bool(campaign.get("deleted", false)): return "This campaign is archived and cannot be changed."
+	if campaign.status == "completed": return "This campaign has completed and cannot be reactivated."
 	if campaign.status == "draft" and status == "paused":
 		return "Launch a draft before pausing it."
+	if campaign.status == "stopped" and status != "active":
+		return "A stopped campaign can only be reactivated or duplicated."
 	if campaign.status == "active" and status == "active":
 		return "This campaign is already active."
 	if campaign.status == "paused" and status == "paused":
 		return "This campaign is already paused."
 	if status == "active":
+		if int(campaign.get("end_day", 0)) > 0 and int(campaign.end_day) < state.day:
+			return "This campaign's scheduled end date has passed. Duplicate it to create a new campaign."
 		var store := Stores.get_store(state, campaign.store_id)
 		if store.is_empty() or not store.active or not Stores.listing(state, campaign.store_id, campaign.product).get("listed", false):
 			return "Campaign launch requires an active store and listed product."
-		if campaign.end_day > 0 and campaign.end_day < state.day:
-			return "Campaign end date has passed."
-		campaign.start_day = maxi(campaign.start_day, state.day)
+		if not platform_available(state.country, int(campaign.platform), store):
+			return "Campaign launch requires an advertising platform compatible with this store and country."
 	campaign.status = status
+	state.advertising.campaigns[id] = campaign
+	return ""
+
+static func archive(state: Dictionary, id: int) -> String:
+	var campaign: Dictionary = state.advertising.campaigns.get(id, {})
+	if campaign.is_empty(): return "Campaign not found."
+	if bool(campaign.get("deleted", false)): return "This campaign is already archived."
+	campaign.deleted = true
 	state.advertising.campaigns[id] = campaign
 	return ""
 
 static func duplicate_stopped(state: Dictionary, id: int) -> String:
 	var source: Dictionary = state.advertising.campaigns.get(id, {})
-	if source.get("status") != "stopped":
-		return "Only stopped campaigns can be duplicated."
+	if source.get("status") not in ["stopped", "completed"] or bool(source.get("deleted", false)):
+		return "Only stopped or completed campaigns can be duplicated."
 	var campaign := source.duplicate(true)
 	campaign.id = state.advertising.next_campaign
 	campaign.name += " (copy)"
@@ -207,7 +227,12 @@ static func simulate_day(sim: RefCounted, rng: RandomNumberGenerator) -> void:
 	ids.sort()
 	for id in ids:
 		var campaign: Dictionary = state.advertising.campaigns[id]
-		if campaign.status != "active" or campaign.start_day > state.day or (campaign.end_day > 0 and state.day > campaign.end_day): continue
+		if bool(campaign.get("deleted", false)): continue
+		if campaign.status != "completed" and campaign.end_day > 0 and state.day > campaign.end_day:
+			campaign.status = "completed"
+			state.advertising.campaigns[id] = campaign
+			continue
+		if campaign.status != "active" or campaign.start_day > state.day: continue
 		var store := Stores.get_store(state, campaign.store_id)
 		var listing := Stores.listing(state, campaign.store_id, campaign.product)
 		if store.is_empty() or not store.active or not listing.get("listed", false): continue

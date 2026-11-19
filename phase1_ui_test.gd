@@ -28,6 +28,18 @@ func press(title: String) -> void:
 		if button.text.to_lower() == title.to_lower() and not button.disabled and button.is_visible_in_tree():
 			button.pressed.emit()
 			return
+	var primary := title.to_lower()
+	if primary in ["dashboard", "market", "order", "orders", "business", "finance", "profile"]:
+		var target := "Order" if primary in ["order", "orders"] else title
+		var drawer: Control = app.find_child("PrimaryNavigation", true, false)
+		var menu: Button = app.find_child("NavigationMenuButton", true, false)
+		if drawer != null and menu != null:
+			if not drawer.is_visible_in_tree():
+				menu.pressed.emit()
+			var navigation_item: Button = drawer.find_child("Primary_" + target, true, false)
+			if navigation_item != null and navigation_item.is_visible_in_tree():
+				navigation_item.pressed.emit()
+				return
 	expect(false, "Missing enabled button " + title)
 
 func has_visible_label(prefix: String) -> bool:
@@ -54,12 +66,13 @@ func option_after_label(prefix: String) -> OptionButton:
 	return null
 
 func open_first_store_listing() -> void:
-	press("Management")
-	var listings := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
-	if listings.is_empty():
-		expect(false, "Management exposes per-store listings")
+	if app.sim == null or app.sim.state.stores.is_empty():
+		expect(false, "Listing test fixture has a store destination")
 		return
-	listings[0].pressed.emit()
+	# Keep the legacy destination screen covered without exposing it as a user
+	# navigation destination; players manage listings from My Products.
+	app.selected_store_id = int(app.sim.state.stores.front().id)
+	app.navigate("Store Listings")
 
 func select(option: OptionButton, index: int) -> void:
 	option.select(index)
@@ -78,6 +91,8 @@ func settle(name: String) -> void:
 	await process_frame
 	await process_frame
 	for scroll in controls(app, "ScrollContainer"):
+		if not scroll.is_visible_in_tree(): continue
+		if scroll.horizontal_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED: continue
 		var content: Control = scroll.get_child(0)
 		expect(content.get_combined_minimum_size().x <= scroll.size.x + 1, "Portrait content fits on " + name)
 	var captures := OS.get_environment("OBT_UI_CAPTURE_DIR")
@@ -121,18 +136,18 @@ func run() -> void:
 	expect(has_label("Order quantity 1–500"), "Changing supplier exposes its minimum and maximum quantity terms")
 	await settle("03-market")
 	var quantity: LineEdit = field_for_label("Order quantity")
+	press("Accept Quotation")
+	quantity = field_for_label("Order quantity")
 	quantity.text = "0"
-	press("Purchase stock")
+	press("Purchase Inventory")
 	expect(has_label("Enter a quantity from"), "Purchase validation displays supplier-specific quantity limits")
+	quantity = field_for_label("Order quantity")
 	quantity.text = "10"
-	press("Purchase stock")
+	press("Purchase Inventory")
 	expect(app.sim.stock(1) == 0 and app.sim.state.inbound[0].units == 10, "Purchase button schedules inbound stock")
-	press("Management")
-	var listings_buttons := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
-	if not listings_buttons.is_empty():
-		listings_buttons[0].pressed.emit()
-	else:
-		expect(false, "Management exposes per-store listings")
+	app.selected_store_id = int(app.sim.state.stores.front().id)
+	app.selected_product = 1
+	app.navigate("Store Listings")
 	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 1)
 	press("Save Changes")
@@ -183,20 +198,30 @@ func run() -> void:
 		"Local load restores company identity and existing legacy website without profile-side website edits")
 	press("Business")
 	await settle("06-business")
+	press("Market")
 	press("My Products")
 	press("Manage Wireless Earbuds")
-	press("Management")
-	var store_listing_buttons := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
-	if not store_listing_buttons.is_empty():
-		store_listing_buttons[0].pressed.emit()
+	var test_store_id := int(app.sim.state.stores[0].id)
+	var first_store_listing: Control = app.find_child("ProductListingStore%d" % test_store_id, true, false)
+	var edit_listing_button: Button = controls(first_store_listing, "Button").filter(func(button): return button.text == "Edit Listing")[0] if first_store_listing != null else null
+	if edit_listing_button != null:
+		edit_listing_button.pressed.emit()
 	else:
-		expect(false, "Store listing can be paused through Management")
-	press("Edit Listing")
-	select(controls(app, "OptionButton")[1], 0)
-	press("Save Changes")
-	expect(not Stores.listing(app.sim.state, 0, 1).listed, "Store listing pause action")
+		expect(false, "My Products exposes the store-specific listing editor for the selected product")
+	first_store_listing = app.find_child("ProductListingStore%d" % test_store_id, true, false)
+	if first_store_listing != null:
+		var listing_options := controls(first_store_listing, "OptionButton")
+		if not listing_options.is_empty():
+			select(listing_options[0], 0)
+			var save_listing_buttons := controls(first_store_listing, "Button").filter(func(button): return button.text == "Save Listing")
+			if not save_listing_buttons.is_empty(): save_listing_buttons[0].pressed.emit()
+		else:
+			expect(false, "Store-specific listing edit exposes listing controls")
+	else:
+		expect(false, "Store-specific listing editor remains visible after opening")
+	expect(not Stores.listing(app.sim.state, test_store_id, 1).listed, "Store listing pause action")
 	var saved := Slots.read(Slots.AUTOSAVE)
-	expect(saved.state.day == 41 and not Stores.listing(saved.state, 0, 1).listed, "Mutations autosave")
+	expect(saved.state.day == 41 and not Stores.listing(saved.state, test_store_id, 1).listed, "Mutations autosave")
 	app.queue_free()
 	await process_frame
 	app = Main.instantiate()

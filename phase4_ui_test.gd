@@ -2,6 +2,8 @@ extends "res://phase1_ui_test.gd"
 
 const CEO = preload("res://ceo_profile.gd")
 const Sim = preload("res://simulation.gd")
+const Catalog = preload("res://catalog.gd")
+const Style = preload("res://corporate_theme.gd")
 
 func run() -> void:
 	if OS.get_environment("OBT_ISOLATED_TEST_PROFILE") != "1" or not Slots.latest().is_empty():
@@ -17,17 +19,50 @@ func run() -> void:
 	fields[1].text = "Harbor Works"
 	press("Register company")
 	await process_frame
-	var nav: GridContainer = app.find_child("PrimaryNavigation", true, false)
+	var nav: PanelContainer = app.find_child("PrimaryNavigation", true, false)
 	var game_date: Label = app.find_child("GameDate", true, false)
-	expect(nav != null and game_date != null and nav.get_parent() == game_date.get_parent()
-		and nav.get_index() == game_date.get_index() + 1,
-		"Primary navigation sits immediately after the game date in the masthead")
+	var menu_button: Button = app.find_child("NavigationMenuButton", true, false)
+	var bank_balance: Label = app.find_child("CompanyBankBalance", true, false)
+	expect(nav != null and game_date != null and menu_button != null and bank_balance != null
+		and menu_button.get_parent() == game_date.get_parent() and bank_balance.get_parent() == game_date.get_parent()
+		and game_date.text.contains(" | ") and bank_balance.text.contains(app.money(app.sim.state.cash)),
+		"Header groups the hamburger, date/location, and actual available company bank balance on one row")
+	var content_scroll: ScrollContainer = app.find_child("GameContentScroll", true, false)
+	expect(content_scroll != null and not content_scroll.is_ancestor_of(game_date),
+		"Date, menu, and balance stay outside the page scroll area while content scrolls")
+	var current_cash: int = app.sim.state.cash
+	app.sim.state.cash = current_cash - 12345
+	app.set_notice("Balance refresh check")
+	bank_balance = app.find_child("CompanyBankBalance", true, false)
+	expect(bank_balance.text.contains(app.money(app.sim.state.cash)), "Header balance refreshes immediately after company cash changes")
+	app.sim.state.cash = current_cash
+	app.set_notice("")
+	expect(nav != null and not nav.is_visible_in_tree(), "Primary navigation drawer is hidden by default")
+	press("☰")
+	expect(nav != null and nav.is_visible_in_tree(), "Hamburger opens the left navigation overlay")
 	_check_primary_tabs_within_viewport(Vector2i(1280, 720))
 	for tab in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
-		expect(nav != null and controls(nav, "Button").any(func(button): return button.text == tab), "%s is present in the top navigation" % tab)
-	expect(nav != null and nav.columns == 6, "Desktop shows all six primary categories in one row")
-	expect(controls(app, "Button").filter(func(button): return button.text in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]).size() == 6,
-		"There is one primary navigation set; no bottom duplicate remains")
+		var route_name: String = "Order" if tab in ["Order", "Orders"] else tab
+		expect(nav != null and nav.find_child("Primary_" + route_name, true, false) != null, "%s is present in the navigation drawer" % tab)
+	expect(controls(nav, "Button").filter(func(button): return str(button.name).begins_with("Primary_")).size() == 6,
+		"Drawer includes all six categories without horizontal primary tabs")
+	var outside_click := InputEventMouseButton.new()
+	outside_click.button_index = MOUSE_BUTTON_LEFT
+	outside_click.pressed = true
+	app.navigation_overlay.gui_input.emit(outside_click)
+	expect(not app.navigation_open and not nav.is_visible_in_tree(), "Clicking the page overlay closes the drawer")
+	press("☰")
+	var tab_key := InputEventKey.new()
+	tab_key.keycode = KEY_TAB
+	tab_key.pressed = true
+	app._unhandled_key_input(tab_key)
+	var keyboard_focus := app.get_viewport().gui_get_focus_owner()
+	expect(keyboard_focus != null and nav.is_ancestor_of(keyboard_focus), "Keyboard focus remains inside the open navigation drawer")
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.pressed = true
+	app._unhandled_key_input(escape)
+	expect(not app.navigation_open, "Escape closes the drawer on desktop")
 
 	press("Dashboard")
 	expect(app.page == "Dashboard" and has_label("Business Alerts"), "Dashboard category works")
@@ -51,16 +86,16 @@ func run() -> void:
 	app.navigate("Store Management")
 	expect(app.page == "Management", "Legacy Store Management navigation safely redirects to Management")
 	app.selected_store_id = marketplace_id
-	press("Product Listings")
+	app.navigate("Store Listings")
 	expect(app.page == "Store Listings" and has_label("Harbor Marketplace · Product listings"),
-		"Market Product Listings still opens the selected marketplace destination")
+		"Legacy product-listing route remains callable for compatibility without a secondary navigation tab")
 	app.navigate("Management")
-	var listing_actions := controls(app, "Button").filter(func(button): return button.text == "Manage Listings")
-	expect(listing_actions.size() == 2, "Marketplace and website destinations both expose listing management")
-	if listing_actions.size() == 2:
-		listing_actions[1].pressed.emit()
-		expect(app.page == "Store Listings" and app.selected_store_id == website_id
-			and has_label("Harbor Website · Product listings"), "Website listings open through Management with the website ID")
+	var listing_actions := controls(app, "Button").filter(func(button): return button.text == "My Products")
+	expect(listing_actions.size() >= 3 and controls(app, "Button").filter(func(button): return button.text == "Manage Listings").is_empty(),
+		"Marketplace and website cards link to My Products without duplicate listing editors")
+	if listing_actions.size() >= 3:
+		listing_actions.back().pressed.emit()
+		expect(app.page == "My Products" and has_label("Product portfolio"), "Store Management directs product work to My Products")
 	app.navigate("Management")
 	var deactivate_actions := controls(app, "Button").filter(func(button): return button.text == "Deactivate")
 	expect(deactivate_actions.size() == 2, "Management exposes activation controls for both destinations")
@@ -95,10 +130,20 @@ func run() -> void:
 	press("Business")
 	expect(app.page == "Business" and has_label("Owned Stores"), "Business category opens Company Profile")
 	var company_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Company Profile")[0]
-	var dashboard_primary: Button = controls(nav, "Button").filter(func(button): return button.text == "Dashboard")[0]
+	var unselected_subtab: Button = controls(app, "Button").filter(func(button): return button.text == "Advertising")[0]
+	var dashboard_primary: Button = nav.find_child("Primary_Dashboard", true, false)
 	expect(company_subtab.custom_minimum_size.y == 44 and dashboard_primary.custom_minimum_size.y >= 44
 		and company_subtab.get_theme_font_size("font_size") < dashboard_primary.get_theme_font_size("font_size"),
-		"Secondary navigation is visually smaller than primary tabs while keeping a 44 px touch target")
+		"Secondary navigation is visually smaller than drawer navigation while keeping a 44 px touch target")
+	var selected_tab_style := company_subtab.get_theme_stylebox("normal") as StyleBoxFlat
+	var unselected_tab_style := unselected_subtab.get_theme_stylebox("normal") as StyleBoxFlat
+	var focus_tab_style := unselected_subtab.get_theme_stylebox("focus") as StyleBoxFlat
+	expect(company_subtab.flat and selected_tab_style != null and selected_tab_style.bg_color.a == 0.0
+		and selected_tab_style.border_width_bottom == 2 and selected_tab_style.border_color == Style.GOLD
+		and unselected_subtab.flat and unselected_tab_style != null and unselected_tab_style.bg_color.a == 0.0
+		and unselected_tab_style.border_width_bottom == 0 and focus_tab_style != null
+		and focus_tab_style.border_color == Style.GOLD and focus_tab_style.border_width_left == 1,
+		"Secondary navigation uses a gold selected underline, transparent unselected tabs, and visible keyboard focus")
 	press("Advertising")
 	expect(app.page == "Advertising" and has_label("Advertising Overview"), "Business secondary route opens Advertising")
 	press("Campaign Manager")
@@ -226,6 +271,9 @@ func run() -> void:
 		expect(str(app.sim.state.company_id) == str(second_company.company_id)
 			and app.sim.state.company == "Harbor Digital" and app.ceo_profile.full_name == "Kai Global CEO",
 			"Company switching restores a separate save and keeps CEO progression linked")
+		var switched_balance: Label = app.find_child("CompanyBankBalance", true, false)
+		expect(switched_balance != null and switched_balance.text.contains(app.money(app.sim.state.cash)),
+			"Header balance updates to the newly active company cash after switching")
 		app.navigate("Profile")
 		switch_buttons = controls(app, "Button").filter(func(button): return button.text == "Switch")
 		if switch_buttons.size() == 1:
@@ -245,6 +293,12 @@ func run() -> void:
 		and absf(ceo_avatar.custom_minimum_size.y / ceo_avatar.custom_minimum_size.x - 4.0 / 3.0) < 0.01
 		and ceo_avatar.size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
 		"CEO avatar keeps its centered portrait aspect ratio on mobile")
+	app.navigate("Finance")
+	var secondary_scroll: ScrollContainer = app.find_child("SecondaryNavigationScroll", true, false)
+	expect(secondary_scroll != null and secondary_scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO
+		and secondary_scroll.get_parent() is VBoxContainer and secondary_scroll.get_parent().get_parent() is ScrollContainer,
+		"Secondary tabs scroll horizontally inside the page and never remain sticky")
+	app.navigate("Profile")
 	for target in ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]:
 		press(target)
 		expect(app.primary_category(app.page) == target or (target == "Order" and app.primary_category(app.page) == "Order"),
@@ -252,6 +306,22 @@ func run() -> void:
 	for viewport in [Vector2i(1920, 1080), Vector2i(1280, 720), Vector2i(768, 1024), Vector2i(390, 844), Vector2i(375, 812)]:
 		root.size = viewport
 		await settle("phase4-%dx%d" % [viewport.x, viewport.y])
+		var header_balance: Label = app.find_child("CompanyBankBalance", true, false)
+		var header_date: Label = app.find_child("GameDate", true, false)
+		var header_scale: float = float(viewport.x) / app.get_viewport_rect().size.x
+		expect(header_balance != null and header_date != null and header_date.text.contains(Catalog.COUNTRIES[app.sim.state.country])
+			and header_date.text.contains(" | ") and header_balance.get_global_rect().position.x * header_scale >= 0
+			and header_balance.get_global_rect().end.x * header_scale <= float(viewport.x) + 1.0,
+			"Header date, location, and bank balance remain visible at %dx%d" % [viewport.x, viewport.y])
+		if viewport.x == 375:
+			var previous_cash: int = app.sim.state.cash
+			app.sim.state.cash = 9876543210123
+			app.set_notice("Large balance layout check")
+			header_balance = app.find_child("CompanyBankBalance", true, false)
+			expect(header_balance.text.contains(app.money(app.sim.state.cash)) and not header_balance.clip_text,
+				"A 10+ digit mobile balance is displayed in full without clipping")
+			app.sim.state.cash = previous_cash
+			app.set_notice("")
 		_check_primary_tabs_within_viewport(viewport)
 		expect(app.page_grid.columns == (2 if viewport.x >= 900 else 1),
 			"Page panels use the intended responsive column count at %dx%d" % [viewport.x, viewport.y])
@@ -292,14 +362,29 @@ func run() -> void:
 func _check_primary_tabs_within_viewport(viewport: Vector2i) -> void:
 	var nav: Control = app.find_child("PrimaryNavigation", true, false)
 	if nav == null:
-		expect(false, "Primary navigation remains present at %dx%d" % [viewport.x, viewport.y])
+		expect(false, "Navigation drawer remains reachable at %dx%d" % [viewport.x, viewport.y])
 		return
+	var opened_here := not nav.is_visible_in_tree()
+	if opened_here:
+		var menu_button: Button = app.find_child("NavigationMenuButton", true, false)
+		if menu_button != null: menu_button.pressed.emit()
+	expect(nav.is_visible_in_tree(), "Navigation drawer opens at %dx%d" % [viewport.x, viewport.y])
+	var drawer_scroll: ScrollContainer = nav.find_child("NavigationScroll", true, false)
+	if drawer_scroll != null and drawer_scroll.get_child_count() > 0:
+		expect(drawer_scroll.size.x > 0 and drawer_scroll.get_child(0).get_combined_minimum_size().x <= drawer_scroll.size.x + 1,
+			"Navigation drawer content fits its internal scroller at %dx%d" % [viewport.x, viewport.y])
 	var button_count := 0
 	var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
 	for item in controls(nav, "Button"):
 		var button: Button = item
+		if not str(button.name).begins_with("Primary_"):
+			continue
 		var button_bounds: Rect2 = button.get_global_rect()
 		button_count += 1
-		expect(button_bounds.position.x * scale_x >= 0 and button_bounds.end.x * scale_x <= float(viewport.x) + 1.0,
+		expect(button_bounds.position.x * scale_x >= 0 and button_bounds.end.x * scale_x <= float(viewport.x) + 1.0
+			and button_bounds.position.x >= nav.get_global_rect().position.x - 1.0
+			and button_bounds.end.x <= nav.get_global_rect().end.x + 1.0,
 			"%s remains reachable within the viewport" % button.text)
-	expect(button_count == 6, "All six primary tabs remain present without requiring horizontal scrolling")
+	expect(button_count == 6, "All six primary navigation items fit inside the drawer")
+	if opened_here:
+		app.close_navigation_drawer(false)

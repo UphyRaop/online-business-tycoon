@@ -294,7 +294,14 @@ func test_campaign_controls_and_simulation() -> void:
 	retarget.start_day = state.day
 	expect(Ads.create(state, retarget) == "", "Retargeting becomes available after enough visits")
 	expect(Ads.set_status(state, second, "stopped") == "", "Stop a campaign independently")
-	expect(Ads.set_status(state, second, "active") != "", "Stopped campaigns cannot be restarted")
+	var stopped_history_size: int = state.advertising.history.size()
+	var reactivation_day: int = state.day
+	expect(Ads.set_status(state, second, "active") == "", "An eligible manually stopped campaign can be restarted")
+	sim.advance(1)
+	var resumed_history: Array = state.advertising.history.filter(func(record: Dictionary): return int(record.campaign_id) == second)
+	expect(resumed_history.size() > 0 and int(resumed_history.back().day) == reactivation_day
+		and state.advertising.history.size() > stopped_history_size,
+		"Reactivated campaign resumes on the next simulated day without retroactive delivery")
 	reconcile(sim, "Campaign simulation")
 	var cash_limited := game(0, 999)
 	cash_limited.state.cash = 500
@@ -626,6 +633,7 @@ func test_campaign_lifecycle() -> void:
 	expect(Ads.edit(state, id, {"daily_budget": 4000}) != "", "Stopped campaigns reject edits while retaining their history")
 	expect(Ads.duplicate_stopped(state, id).is_empty(), "Stopped campaign can be duplicated")
 	expect(state.advertising.campaigns[state.advertising.next_campaign - 1].status == "draft", "Duplicate starts as a draft")
+	expect(Ads.set_status(state, id, "active").is_empty(), "An eligible stopped campaign can be reactivated without losing its past metrics")
 	expect(Saves.valid(state), "Campaign lifecycle state remains valid after transitions")
 
 func test_supplier_direct_fulfillment() -> void:

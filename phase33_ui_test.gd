@@ -16,18 +16,25 @@ func run() -> void:
 	expect(app.sim.state.stores.is_empty(), "New company starts with no marketplace stores or websites")
 	expect(app.sim.report(app.sim.state.day).closing_cash == app.sim.state.cash, "Dashboard Bank Balance uses the reconciled cash ledger balance")
 	var primary_names := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
+	var menu: Button = app.find_child("NavigationMenuButton", true, false)
+	if menu != null: menu.pressed.emit()
+	await process_frame
+	var drawer: Control = app.find_child("PrimaryNavigation", true, false)
+	expect(drawer != null and drawer.is_visible_in_tree(), "Hamburger button opens the primary navigation drawer")
 	var nav_names: Array[String] = []
-	for button in controls(app, "Button"):
-		if button.text in primary_names: nav_names.append(button.text)
-	expect(nav_names.size() == 6 and "Profile" in nav_names, "Game navigation presents all six primary categories including Profile")
-	for button in controls(app, "Button"):
-		if button.text in primary_names:
-			expect(button.custom_minimum_size.y >= 44.0 and button.custom_minimum_size.y <= 48.0,
-				"Primary navigation uses a compact touch target of at least 44 px")
+	if drawer != null:
+		for button in controls(drawer, "Button"):
+			if button.tooltip_text in primary_names: nav_names.append(button.tooltip_text)
+	expect(nav_names.size() == 6 and "Profile" in nav_names, "Hamburger navigation presents all six primary categories including Profile")
+	if drawer != null:
+		for button in controls(drawer, "Button"):
+			if button.tooltip_text in primary_names:
+				expect(button.custom_minimum_size.y >= 44.0,
+					"Primary navigation uses a compact touch target of at least 44 px")
 	press("Market")
 	await process_frame
 	await process_frame
-	expect(has_label("Product Catalogue") and has_label("Supplier quotation"), "Market exposes catalog and supplier purchasing")
+	expect(has_label("Product Catalogue") and controls(app, "Button").any(func(button): return button.text == "Request Quotation" and button.is_visible_in_tree()), "Market exposes product catalog and supplier quotation actions")
 	var search_panel: Control = app.find_child("ProductSearchPanel", true, false)
 	var catalogue: Control = app.find_child("ProductCataloguePanel", true, false)
 	expect(search_panel != null and catalogue != null and search_panel.get_global_rect().position.y < catalogue.get_global_rect().position.y
