@@ -14,6 +14,7 @@ const StoresView = preload("res://stores_view.gd")
 const StoreManager = preload("res://store_manager.gd")
 const CEOProfile = preload("res://ceo_profile.gd")
 const Saves = preload("res://save_store.gd")
+const AvatarCrop = preload("res://avatar_crop_viewport.gd")
 const NAV := ["Dashboard", "Market", "Order", "Business", "Finance", "Profile"]
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
 const TOUCH_HEIGHT := 54
@@ -62,6 +63,13 @@ var ceo_profile: Dictionary = {}
 var ceo_profile_corrupt := false
 var identity_conflict_record: Dictionary = {}
 var avatar_picker_callback: JavaScriptObject
+var profile_editing := false
+var company_profile_editing := false
+var store_listing_editing := false
+var campaign_editing := false
+var shipping_settings_editing := false
+var display_settings_editing := false
+var avatar_crop_source: Image
 
 func _ready() -> void:
 	theme = Style.build()
@@ -119,6 +127,18 @@ func action(parent: Node, title: String, callback: Callable, accent: bool = fals
 	elif action_name == "cancel" or action_name == "back" or action_name == "close" or action_name.begins_with("discard") or action_name == "previous" or action_name == "next":
 		Style.secondary(node)
 	parent.add_child(node)
+	return node
+
+func secondary_tab(parent: Node, title: String, callback: Callable, selected: bool = false) -> Button:
+	var node := action(parent, title, callback)
+	node.custom_minimum_size = Vector2(120, 44)
+	node.add_theme_font_size_override("font_size", 12)
+	Style.secondary(node)
+	node.add_theme_stylebox_override("normal", Style.box(Style.SURFACE, Style.GOLD if selected else Style.LINE, 8, 7))
+	node.add_theme_stylebox_override("hover", Style.box(Style.SURFACE.lightened(0.08), Style.GOLD if selected else Style.LINE.lightened(0.16), 8, 7))
+	if selected:
+		node.add_theme_color_override("font_color", Style.GOLD)
+		node.add_theme_color_override("font_hover_color", Style.GOLD)
 	return node
 
 func action_title(value: String) -> String:
@@ -348,6 +368,7 @@ func open_screen(target: String) -> void:
 	discard_form_then(func(): show_screen(target))
 
 func show_screen(target: String) -> void:
+	_reset_edit_modes()
 	screen = target
 	set_notice("")
 	render()
@@ -514,64 +535,99 @@ func switch_company(company_id: String) -> void:
 
 func profile_page() -> void:
 	if ceo_profile_corrupt:
-		var damaged := card("CEO profile unavailable")
-		damaged.add_child(label("The profile file and its backup are unreadable. Company saves remain intact. Recover the browser profile data before editing the CEO identity or switching companies.", 15, Style.RED))
-		damaged.add_child(label("The game will not replace these files with a new profile automatically.", 14, Style.MUTED))
+		var damaged := wide_card("CEO Profile Unavailable")
+		damaged.add_child(label("The CEO profile could not be read. Your company saves are safe. Recover this browser profile before editing identity details or switching companies.", 15, Style.RED))
+		damaged.add_child(label("This profile will not be replaced automatically.", 14, Style.MUTED))
 		return
-	var info := card("CEO identity")
+	var info := wide_card("CEO Profile")
+	var identity_layout: BoxContainer = HBoxContainer.new() if size.x >= 600.0 else VBoxContainer.new()
+	identity_layout.add_theme_constant_override("separation", 18)
+	info.add_child(identity_layout)
+	var portrait := VBoxContainer.new()
+	portrait.add_theme_constant_override("separation", 8)
+	portrait.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	identity_layout.add_child(portrait)
 	var avatar := TextureRect.new()
 	avatar.name = "CEOAvatar"
-	avatar.custom_minimum_size = Vector2(128, 128)
+	avatar.custom_minimum_size = Vector2(144, 192)
 	avatar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	avatar.texture = _profile_avatar_texture()
-	info.add_child(avatar)
-	var full_name := field(info, "Full name", str(ceo_profile.get("full_name", sim.state.get("owner", ""))))
-	var residence := field(info, "Country of residence", str(ceo_profile.get("country", "")))
-	var title := field(info, "Entrepreneur title", str(ceo_profile.get("title", "Entrepreneur")))
-	watch_edits([full_name, residence, title])
-	var save_identity := func():
-		if full_name.text.strip_edges().is_empty() or title.text.strip_edges().is_empty():
-			set_notice("Enter a name and entrepreneur title.", true)
-			return
-		ceo_profile.full_name = full_name.text.strip_edges()
-		ceo_profile.country = residence.text.strip_edges()
-		ceo_profile.title = title.text.strip_edges()
-		sim.state.owner = ceo_profile.full_name
-		_sync_ceo_profile()
-		var result := CEOProfile.save_profile(ceo_profile)
-		if result != OK:
-			set_notice("The CEO profile could not be saved. " + error_string(result), true)
-			return
-		write_progress(Slots.AUTOSAVE, "CEO profile updated.")
-		refresh_view()
-	action(info, "Save Profile", save_identity, true)
-	action(info, "Choose Photo", open_avatar_picker)
+	portrait.add_child(avatar)
+	action(portrait, "Change Photo", open_avatar_picker)
 	if not str(ceo_profile.get("avatar_data", "")).is_empty():
-		action(info, "Remove Photo", func():
+		action(portrait, "Remove Photo", func():
 			CEOProfile.clear_avatar(ceo_profile)
 			if write_progress(Slots.AUTOSAVE, "Profile photo removed."):
 				set_notice("Profile photo removed.")
 			refresh_view()
 		)
-	info.add_child(label("Photo stays in this browser profile. Clearing browser data or using private browsing may remove it; it is never uploaded.", 14, Style.MUTED))
-	var career := card("Career progression")
-	career.add_child(label("Level %d · %d XP" % [CEOProfile.level(ceo_profile), int(ceo_profile.get("xp", 0))], 20, Style.GOLD))
-	career.add_child(label("%d XP to the next level" % CEOProfile.xp_to_next_level(ceo_profile), 15, Style.MUTED))
-	career.add_child(label("Personal reputation: %d / 100" % int(ceo_profile.get("personal_reputation", 0)), 15, Style.MUTED))
+	portrait.add_child(label("Stored in this browser only; never uploaded.", 13, Style.MUTED))
+	var details := VBoxContainer.new()
+	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	details.add_theme_constant_override("separation", 8)
+	identity_layout.add_child(details)
+	if profile_editing:
+		var full_name := field(details, "Full Name", str(ceo_profile.get("full_name", sim.state.get("owner", ""))))
+		var residence := field(details, "Country of Residence", str(ceo_profile.get("country", "")))
+		var title := field(details, "Professional Title", str(ceo_profile.get("title", "Entrepreneur")))
+		watch_edits([full_name, residence, title])
+		action(details, "Save Changes", func():
+			if full_name.text.strip_edges().is_empty() or title.text.strip_edges().is_empty():
+				set_notice("Enter a name and professional title.", true)
+				return
+			var previous := ceo_profile.duplicate(true)
+			var previous_owner: String = sim.state.owner
+			ceo_profile.full_name = full_name.text.strip_edges()
+			ceo_profile.country = residence.text.strip_edges()
+			ceo_profile.title = title.text.strip_edges()
+			sim.state.owner = ceo_profile.full_name
+			_sync_ceo_profile()
+			var result := CEOProfile.save_profile(ceo_profile)
+			if result != OK:
+				ceo_profile = previous
+				sim.state.owner = previous_owner
+				set_notice("Profile changes could not be saved. " + error_string(result), true)
+				return
+			profile_editing = false
+			if write_progress(Slots.AUTOSAVE, "CEO profile updated."):
+				set_notice("Profile changes saved.")
+			refresh_view()
+		, true)
+		action(details, "Cancel", func():
+			profile_editing = false
+			edit_checks.clear()
+			set_notice("")
+			refresh_view()
+		)
+	else:
+		var country_name := str(ceo_profile.get("country", "")).strip_edges()
+		if country_name.is_empty(): country_name = "Not provided"
+		var professional_title := str(ceo_profile.get("title", "Entrepreneur")).strip_edges()
+		if professional_title.is_empty(): professional_title = "Entrepreneur"
+		metric(details, "Full Name", str(ceo_profile.get("full_name", sim.state.get("owner", ""))), Style.GOLD)
+		metric(details, "Country of Residence", country_name)
+		metric(details, "Professional Title", professional_title)
+		action(details, "Edit Profile", func():
+			profile_editing = true
+			refresh_view()
+		)
+	var career := card("Career Progression")
+	metric(career, "Career Level", "%d · %d XP" % [CEOProfile.level(ceo_profile), int(ceo_profile.get("xp", 0))], Style.GOLD)
+	metric(career, "XP Until Next Level", str(CEOProfile.xp_to_next_level(ceo_profile)))
+	metric(career, "Personal Reputation", "%d / 100" % int(ceo_profile.get("personal_reputation", 0)))
 	var achievements := card("Achievements")
 	var earned: Array = ceo_profile.get("achievements", [])
 	if earned.is_empty():
-		achievements.add_child(label("Achievements are awarded for career milestones.", 15, Style.MUTED))
+		achievements.add_child(label("Achievements recognize career milestones.", 15, Style.MUTED))
 	for item in earned:
-		achievements.add_child(label("• %s" % str(item.get("title", item.get("id", "Achievement"))), 15))
-	var finance_card := card("Personal finance")
-	finance_card.add_child(label("Personal cash: Unavailable · personal compensation accounting is not implemented.", 14, Style.MUTED))
-	finance_card.add_child(label("Personal net worth: Unavailable · company assets are excluded.", 14, Style.MUTED))
-	finance_card.add_child(label("Company funds and profits are separate from your personal finances.", 14, Style.MUTED))
-	var companies := card("Owned companies")
-	companies.add_child(label("Each company keeps its own save, operations, and accounts.", 14, Style.MUTED))
+		achievements.add_child(label("• %s" % _title_case(str(item.get("title", item.get("id", "Achievement")))), 15))
+	var finance_card := card("Personal Finance")
+	finance_card.add_child(label("Personal cash and net worth are not currently tracked.", 14, Style.MUTED))
+	finance_card.add_child(label("Company funds and profit remain separate from personal finances.", 14, Style.MUTED))
+	var companies := card("Owned Companies")
+	companies.add_child(label("Each company keeps separate operations, accounts, and save data.", 14, Style.MUTED))
 	for entry in ceo_profile.get("companies", []):
 		var company_row := VBoxContainer.new()
 		company_row.add_theme_constant_override("separation", 8)
@@ -580,10 +636,20 @@ func profile_page() -> void:
 		description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		company_row.add_child(description)
 		if str(entry.get("company_id", "")) == str(sim.state.get("company_id", "")):
-			company_row.add_child(label("Current company", 14, Style.GREEN))
+			company_row.add_child(label("Current Company", 14, Style.GREEN))
 		else:
 			action(company_row, "Switch", switch_company.bind(str(entry.get("company_id", ""))))
 	action(companies, "Start Another Company", start_new_game, true)
+
+func _title_case(value: String) -> String:
+	var words := value.split(" ", false)
+	for index in words.size():
+		var word: String = words[index]
+		if word.to_upper() in ["XP", "CEO", "ID", "UI"]:
+			words[index] = word.to_upper()
+		else:
+			words[index] = word.capitalize()
+	return " ".join(words)
 
 func _profile_avatar_texture() -> Texture2D:
 	var encoded := str(ceo_profile.get("avatar_data", ""))
@@ -595,11 +661,96 @@ func _profile_avatar_texture() -> Texture2D:
 		return load("res://icon.svg")
 	return ImageTexture.create_from_image(image)
 
+func open_avatar_crop(image: Image) -> void:
+	if image == null or image.is_empty() or image.get_width() <= 0 or image.get_height() <= 0:
+		set_notice("Choose a readable photo file.", true)
+		return
+	avatar_crop_source = image.duplicate()
+	screen = "Avatar Crop"
+	set_notice("")
+	render()
+
+func _avatar_crop_screen() -> void:
+	var editor_card := wide_card("Crop Your Profile Photo")
+	editor_card.add_child(label("Drag the photo to reposition it. Use the zoom slider for a closer crop. The portrait frame is 3:4.", 15, Style.MUTED))
+	var composition := FlowContainer.new()
+	composition.add_theme_constant_override("h_separation", 18)
+	composition.add_theme_constant_override("v_separation", 18)
+	editor_card.add_child(composition)
+	var crop_width := minf(320.0, maxf(220.0, size.x - 88.0))
+	var crop := AvatarCrop.new()
+	crop.name = "AvatarCropViewport"
+	crop.custom_minimum_size = Vector2(crop_width, crop_width * 4.0 / 3.0)
+	crop.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	crop.set_image(avatar_crop_source)
+	composition.add_child(crop)
+	var controls := VBoxContainer.new()
+	controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	controls.custom_minimum_size.x = 220.0
+	controls.add_theme_constant_override("separation", 10)
+	composition.add_child(controls)
+	controls.add_child(label("Live Preview", 17, Style.GOLD))
+	var preview := TextureRect.new()
+	preview.name = "AvatarCropPreview"
+	preview.custom_minimum_size = Vector2(120, 160)
+	preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	controls.add_child(preview)
+	crop.preview_changed.connect(func(image: Image):
+		preview.texture = ImageTexture.create_from_image(image)
+	)
+	controls.add_child(label("Zoom", 14, Style.MUTED))
+	var zoom := HSlider.new()
+	zoom.name = "AvatarCropZoom"
+	zoom.min_value = 1.0
+	zoom.max_value = 3.0
+	zoom.step = 0.05
+	zoom.value = 1.0
+	zoom.custom_minimum_size.y = TOUCH_HEIGHT
+	zoom.value_changed.connect(func(value: float): crop.set_zoom(value))
+	controls.add_child(zoom)
+	action(controls, "Reset", func():
+		crop.reset_crop()
+		zoom.value = 1.0
+	)
+	var buttons := row(editor_card)
+	action(buttons, "Cancel", func():
+		avatar_crop_source = null
+		screen = "Game"
+		page = "Profile"
+		set_notice("")
+		render()
+	)
+	action(buttons, "Save Photo", func():
+		var finalized := crop.crop_image()
+		var previous := ceo_profile.duplicate(true)
+		var error := CEOProfile.set_avatar_image(ceo_profile, finalized)
+		if error != OK:
+			set_notice("The cropped photo could not be stored. Choose a smaller image.", true)
+			return
+		if not write_progress(Slots.AUTOSAVE, "Profile photo saved locally."):
+			ceo_profile = previous
+			return
+		avatar_crop_source = null
+		screen = "Game"
+		page = "Profile"
+		set_notice("Profile photo saved.")
+		render()
+	, true)
+
+func _load_avatar_image(mime: String, data: PackedByteArray) -> Image:
+	if mime not in ["image/jpeg", "image/png", "image/webp"] or data.is_empty() or data.size() > 8 * 1024 * 1024:
+		return null
+	var image := Image.new()
+	var result := image.load_jpg_from_buffer(data) if mime == "image/jpeg" else (image.load_png_from_buffer(data) if mime == "image/png" else image.load_webp_from_buffer(data))
+	return image if result == OK and not image.is_empty() else null
+
 func open_avatar_picker() -> void:
 	if OS.has_feature("web"):
 		avatar_picker_callback = JavaScriptBridge.create_callback(_on_web_avatar_selected)
 		JavaScriptBridge.get_interface("window").obtAvatarSelected = avatar_picker_callback
-		JavaScriptBridge.eval("(function(){const i=document.createElement('input');i.type='file';i.accept='image/jpeg,image/png,image/webp';i.onchange=function(){const f=i.files&&i.files[0];if(!f)return;if(f.size>8388608){window.obtAvatarSelected('error:Photo must be 8 MB or smaller.');return;}if(!['image/jpeg','image/png','image/webp'].includes(f.type)){window.obtAvatarSelected('error:Choose a JPEG, PNG, or WebP image.');return;}const r=new FileReader();r.onerror=function(){window.obtAvatarSelected('error:The selected image could not be read.');};r.onload=function(){const im=new Image();im.onerror=function(){window.obtAvatarSelected('error:The selected image is invalid.');};im.onload=function(){const n=256,c=document.createElement('canvas');c.width=n;c.height=n;const x=c.getContext('2d'),s=Math.min(im.width,im.height),l=(im.width-s)/2,t=(im.height-s)/2;x.drawImage(im,l,t,s,s,0,0,n,n);window.obtAvatarSelected(c.toDataURL('image/jpeg',0.82));};im.src=r.result;};r.readAsDataURL(f);};i.click();})();")
+		JavaScriptBridge.eval("(function(){const i=document.createElement('input');i.type='file';i.accept='image/jpeg,image/png,image/webp';i.onchange=function(){const f=i.files&&i.files[0];if(!f)return;if(f.size>8388608){window.obtAvatarSelected('error:Choose a photo under 8 MB.');return;}if(!['image/jpeg','image/png','image/webp'].includes(f.type)){window.obtAvatarSelected('error:Choose a JPEG, PNG, or WebP photo.');return;}const r=new FileReader();r.onerror=function(){window.obtAvatarSelected('error:The selected photo could not be read.');};r.onload=function(){window.obtAvatarSelected(f.type+','+String(r.result).split(',')[1]);};r.readAsDataURL(f);};i.click();})();")
 		return
 	var dialog := FileDialog.new()
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
@@ -607,18 +758,18 @@ func open_avatar_picker() -> void:
 	dialog.add_filter("*.jpg, *.jpeg, *.png, *.webp", "Images")
 	add_child(dialog)
 	dialog.file_selected.connect(func(path: String):
-		var image := Image.new()
-		var error := image.load(path)
-		if error != OK:
-			set_notice("Could not read the selected image.", true)
+		var bytes := FileAccess.get_file_as_bytes(path)
+		if bytes.size() > 8 * 1024 * 1024:
+			set_notice("Choose a photo under 8 MB.", true)
 		else:
-			var data := image.save_png_to_buffer()
-			error = CEOProfile.add_avatar(ceo_profile, "image/png", data)
-			if error != OK:
-				set_notice("Could not store this photo. Try an image under 512 KB.", true)
+			var image := Image.new()
+			var error := image.load(path)
+			if error != OK or image.is_empty():
+				set_notice("The selected photo could not be read.", true)
 			else:
-				write_progress(Slots.AUTOSAVE, "Profile photo saved locally.")
-				refresh_view()
+				avatar_crop_source = image.duplicate()
+				screen = "Avatar Crop"
+				render()
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
@@ -636,12 +787,11 @@ func _on_web_avatar_selected(args: Array) -> void:
 		set_notice("The selected image could not be decoded.", true)
 		return
 	var mime := parts[0].trim_prefix("data:").get_slice(";", 0)
-	var result := CEOProfile.add_avatar(ceo_profile, mime, Marshalls.base64_to_raw(parts[1]))
-	if result != OK:
-		set_notice("Could not store the selected image. Choose another photo.", true)
+	var image := _load_avatar_image(mime, Marshalls.base64_to_raw(parts[1]))
+	if image == null:
+		set_notice("The selected photo could not be read. Choose another JPEG, PNG, or WebP image under 8 MB.", true)
 		return
-	write_progress(Slots.AUTOSAVE, "Profile photo saved locally.")
-	refresh_view()
+	open_avatar_crop(image)
 
 func enter_game(data: Dictionary) -> void:
 	sim = Sim.new(data)
@@ -694,6 +844,7 @@ func apply_text_setting(enabled: bool) -> void:
 	settings.set_value("display", "large_text", enabled)
 	var result := settings.save(PREFERENCES)
 	large_text = enabled
+	display_settings_editing = false
 	theme.default_font_size = 18 if enabled else 16
 	set_notice("Settings saved." if result == OK else "Applied for this session. Settings could not be saved.", result != OK)
 	render()
@@ -720,6 +871,8 @@ func navigate(target: String) -> void:
 			target = str(category_last_page.get(target, target))
 	if target != "Management": show_new_store_form = false
 	discard_form_then(func():
+		if target != page:
+			_reset_edit_modes()
 		page = target
 		category_last_page[primary_category(target)] = target
 		set_notice("")
@@ -748,6 +901,14 @@ func route_secondary(target: String) -> void:
 		target = "Orders"
 	navigate(target)
 
+func _reset_edit_modes() -> void:
+	profile_editing = false
+	company_profile_editing = false
+	store_listing_editing = false
+	campaign_editing = false
+	shipping_settings_editing = false
+	display_settings_editing = false
+
 func primary_navigation(parent: Node) -> void:
 	var viewport_width := size.x
 	var nav := GridContainer.new()
@@ -775,7 +936,7 @@ func secondary_navigation(parent: Node) -> void:
 	match category:
 		"Market": routes = [["Product Catalogue", "Market"], ["My Products", "My Products"], ["Management", "Management"], ["Product Listings", "Store Listings"]]
 		"Order": routes = [["Customer Orders", "Orders"], ["Pre-orders", "Pre-orders"], ["Returns and Service", "Returns & Service"]]
-		"Business": routes = [["Company Profile", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Advertising Analytics", "Advertising Analytics"]]
+		"Business": routes = [["Company Profile", "Business"], ["Advertising", "Advertising"], ["Campaign Manager", "Campaign Manager"], ["Ads Analytics", "Advertising Analytics"]]
 		"Finance": routes = [["Statements", "Finance"], ["Store Profitability", "Store Profitability"]]
 		_: return
 	var strip := FlowContainer.new()
@@ -791,8 +952,7 @@ func secondary_navigation(parent: Node) -> void:
 		elif target == "Customer Orders": selected = page == "Orders" and orders_tab != 1
 		elif target == "Store Profitability": selected = page == "Store Profitability"
 		else: selected = page == target
-		var tab: Button = action(strip, title, route_secondary.bind(target), selected)
-		tab.custom_minimum_size.x = 150
+		secondary_tab(strip, title, route_secondary.bind(target), selected)
 
 func render() -> void:
 	edit_checks.clear()
@@ -854,7 +1014,7 @@ func render() -> void:
 	else:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
 			"Campaign Manager": "Campaign Manager", "Campaign Details": "Campaign Details",
-			"Advertising Analytics": "Advertising Analytics", "Management": "Management", "Store Listings": "Store Listings",
+			"Advertising Analytics": "Ads Analytics", "Management": "Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
 			"CEO identity conflict": "Identity choice"}
 		masthead.add_child(label(titles.get(screen, screen), 30))
 	if screen == "Game":
@@ -888,6 +1048,7 @@ func render() -> void:
 			"Load": Menu.slots(self, false)
 			"Save": Menu.slots(self, true)
 			"Settings": Menu.settings(self)
+			"Avatar Crop": _avatar_crop_screen()
 			"Campaign Manager": AdsView.manager(self)
 			"Campaign Details": AdsView.details(self)
 			"Advertising Analytics": AdsView.analytics(self)
@@ -1080,26 +1241,52 @@ func price_cents(value: String) -> int:
 	return roundi(price * 100.0)
 
 func business() -> void:
-	var profile := card("Company profile")
-	metric(profile, "Owned stores", str(sim.state.stores.size()))
+	var profile := card("Company Profile")
+	metric(profile, "Owned Stores", str(sim.state.stores.size()))
 	metric(profile, "Registration", "Active")
 	metric(profile, "Difficulty", Catalog.DIFFICULTIES[sim.state.difficulty])
-	var owner := field(profile, "Entrepreneur / CEO", str(ceo_profile.get("full_name", sim.state.owner)))
-	var company := field(profile, "Company name", sim.state.company)
-	var names_saved := watch_edits([owner, company])
-	action(profile, "Save company profile", func():
-		var owner_name := owner.text.strip_edges()
-		var company_name := company.text.strip_edges()
-		if owner_name.is_empty() or company_name.is_empty():
-			set_notice("Enter an entrepreneur name and company name.", true)
-			return
-		ceo_profile.full_name = owner_name
-		sim.state.owner = owner_name
-		sim.state.company = company_name
-		_sync_ceo_profile()
-		names_saved.call()
-		persist("Company profile saved.")
-	)
+	if company_profile_editing:
+		var owner := field(profile, "Entrepreneur / CEO", str(ceo_profile.get("full_name", sim.state.owner)))
+		var company := field(profile, "Company Name", sim.state.company)
+		watch_edits([owner, company])
+		action(profile, "Save Changes", func():
+			var owner_name := owner.text.strip_edges()
+			var company_name := company.text.strip_edges()
+			if owner_name.is_empty() or company_name.is_empty():
+				set_notice("Enter an entrepreneur name and company name.", true)
+				return
+			var previous_profile := ceo_profile.duplicate(true)
+			var previous_owner: String = sim.state.owner
+			var previous_company: String = sim.state.company
+			ceo_profile.full_name = owner_name
+			sim.state.owner = owner_name
+			sim.state.company = company_name
+			_sync_ceo_profile()
+			var result := CEOProfile.save_profile(ceo_profile)
+			if result != OK:
+				ceo_profile = previous_profile
+				sim.state.owner = previous_owner
+				sim.state.company = previous_company
+				set_notice("Company details could not be saved. " + error_string(result), true)
+				return
+			company_profile_editing = false
+			if write_progress(Slots.AUTOSAVE, "Company profile saved."):
+				set_notice("Company details saved.")
+			refresh_view()
+		, true)
+		action(profile, "Cancel", func():
+			company_profile_editing = false
+			edit_checks.clear()
+			set_notice("")
+			refresh_view()
+		)
+	else:
+		metric(profile, "Entrepreneur / CEO", str(ceo_profile.get("full_name", sim.state.owner)))
+		metric(profile, "Company Name", sim.state.company)
+		action(profile, "Edit Company Details", func():
+			company_profile_editing = true
+			refresh_view()
+		)
 	action(card("Management"), "Management", navigate.bind("Management"), true)
 	action(card("Inventory and listings"), "My Products", navigate.bind("My Products"))
 	action(card("Business advertising"), "Advertising", navigate.bind("Advertising"))

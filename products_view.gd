@@ -11,7 +11,7 @@ static func show(app: Control) -> void:
 	var overview: VBoxContainer = app.card("Product portfolio")
 	app.metric(overview, "Active products", str(sim.active_product_count()), Style.GOLD)
 	app.metric(overview, "Default outbound delivery", app.money(Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)) + " / order")
-	app.action(overview, "Browse catalog", app.navigate.bind("Market"))
+	app.secondary_tab(overview, "Browse Catalog", app.navigate.bind("Market"), false)
 	var activity := Summary.collect(state)
 	var count := 0
 	for id in Catalog.PRODUCTS.size():

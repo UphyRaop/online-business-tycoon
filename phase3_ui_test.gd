@@ -22,11 +22,20 @@ func run() -> void:
 	expect(not app.sim.channel_enabled(0) and not app.sim.channel_enabled(1), "Legacy channel flags do not create a marketplace or website")
 	expect(has_label("Mira Founder, CEO"), "Dashboard displays the registered entrepreneur as CEO")
 	press("Business")
-	expect(has_label("Owned stores") and not has_label("Website domain") and not has_label("Website inactive")
+	expect(has_label("Owned Stores") and not has_label("Website domain") and not has_label("Website inactive")
 		and controls(app, "OptionButton").is_empty(), "Company Profile shows zero stores and no legacy website or channel controls")
+	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Company Details"),
+		"Saved company details are read-only until editing is explicitly activated")
+	press("Edit Company Details")
+	inputs = controls(app, "LineEdit")
+	inputs[0].text = "Discarded Name"
+	press("Cancel")
+	expect(app.sim.state.owner == "Mira Founder" and not has_button("Save Changes"),
+		"Cancel discards unsaved company profile changes")
+	press("Edit Company Details")
 	inputs = controls(app, "LineEdit")
 	inputs[0].text = "Mira Rouf Kalil"
-	press("Save company profile")
+	press("Save Changes")
 	expect(app.sim.state.owner == "Mira Rouf Kalil" and app.sim.state.company == "Aster Labs", "Company Profile edits CEO identity independently")
 	press("Management")
 	expect(not has_label("Open a new store"), "New-store form is collapsed by default")
@@ -74,13 +83,23 @@ func run() -> void:
 	await settle("phase3-manager")
 	press("Manage campaign")
 	expect(has_label("Portrait launch"), "Manager opens the selected campaign details")
+	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Campaign"),
+		"Saved campaign details are read-only until editing is explicitly activated")
+	press("Edit Campaign")
+	inputs = controls(app, "LineEdit")
+	inputs[0].text = "Discarded campaign edit"
+	press("Cancel")
+	expect(app.sim.state.advertising.campaigns[1].name == "Portrait launch",
+		"Cancel discards unsaved campaign edits")
+	press("Campaign Manager")
+	press("Manage campaign")
 	press("Pause")
 	expect(app.sim.state.advertising.campaigns[1].status == "paused", "Campaign pause button changes campaign state")
 	press("Resume")
 	expect(app.sim.state.advertising.campaigns[1].status == "active", "Campaign resume button changes campaign state")
 	app.sim.advance(8)
-	press("Advertising Analytics")
-	expect(has_label("Advertising Analytics"), "Campaign details opens advertising analytics")
+	press("Ads Analytics")
+	expect(has_label("Ads Analytics"), "Campaign details opens ads analytics")
 	expect(has_label("Campaigns matched") and has_label("Portrait launch") and has_label("CPM")
 		and has_label("Advertising Platform") and has_label("Reporting Period") and has_label("Destination"),
 		"Analytics labels its filters and renders complete cost metrics")
@@ -125,6 +144,14 @@ func run() -> void:
 	else:
 		expect(false, "Created store exposes its Manage listings control")
 	expect(has_label("Aster Direct · Product listings"), "Store management opens store-specific product listings")
+	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Listing"),
+		"Saved store listings display read-only details by default")
+	var original_listing_price: int = Stores.listing(app.sim.state, store_id, 0).price
+	press("Edit Listing")
+	field_for_label("Store Selling Price").text = "123.45"
+	press("Cancel")
+	expect(Stores.listing(app.sim.state, store_id, 0).price == original_listing_price,
+		"Cancel discards unsaved store listing changes")
 	await settle("phase3-store-listings")
 	expect(Slots.latest().state.advertising.campaigns.size() == 1 and Slots.latest().state.stores.size() == 2
 		and Slots.latest().state.stores[1].domain == "direct.aster.shop"

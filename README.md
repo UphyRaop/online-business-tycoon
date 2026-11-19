@@ -17,7 +17,7 @@ Use **Save Game** in the gameplay header to save, load, or delete a slot. Three 
 
 ## Phase 3: Advertising and store expansion
 
-Open **Business → Advertising** for campaign management and advertising analytics. Campaigns use locally simulated Meta, Google, TikTok, or Marketplace Sponsored Ads inventory. Select an active store, a published product, objective, daily budget, audience, bidding strategy, and creative. Retargeting unlocks after 15 recorded visits; lookalikes unlock after five delivered purchases. Pause, resume, edit, or stop campaigns. Campaign analytics separate placed-order attribution from delivered revenue recognized in the financial statements.
+Open **Business → Advertising** for campaign management and **Ads Analytics**. Campaigns use locally simulated Meta, Google, TikTok, or Marketplace Sponsored Ads inventory. Select an active store, a published product, objective, daily budget, audience, bidding strategy, and creative. Retargeting unlocks after 15 recorded visits; lookalikes unlock after five delivered purchases. Pause, resume, edit, or stop campaigns. Campaign analytics separate placed-order attribution from delivered revenue recognized in the financial statements.
 
 Open **Management** under Market to create marketplace stores or websites. Setup prices are shown before creation; new destinations charge a type- and country-scaled setup fee and daily operating fee. Legacy Phase 1/2 stores retain their original cost model. Stores share company inventory, with independent names, brands, website domains, product listing prices, and sales reporting. Bundle quantities are limited to 2–10 units.
 

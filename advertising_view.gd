@@ -11,8 +11,8 @@ static func overview(app: Control) -> void:
 	view.add_child(app.label("Simulated platforms · Local budgets · Campaign-attributed orders", 14, Style.MUTED))
 	app.action(view, "Campaign Manager", app.navigate.bind("Campaign Manager"), true)
 	var actions: HBoxContainer = app.row(view)
-	app.action(actions, "Advertising Analytics", app.navigate.bind("Advertising Analytics"))
-	app.action(actions, "Management", app.navigate.bind("Management"))
+	app.secondary_tab(actions, "Ads Analytics", app.navigate.bind("Advertising Analytics"), false)
+	app.secondary_tab(actions, "Management", app.navigate.bind("Management"), false)
 	var campaigns: Dictionary = app.sim.state.advertising.campaigns
 	var active := 0
 	var totals := Ads.empty_metrics()
@@ -37,8 +37,8 @@ static func overview(app: Control) -> void:
 static func manager(app: Control) -> void:
 	var view: VBoxContainer = app.card("Campaign Manager")
 	var links: HBoxContainer = app.row(view)
-	app.action(links, "Overview", app.navigate.bind("Advertising"))
-	app.action(links, "Analytics", app.navigate.bind("Advertising Analytics"))
+	app.secondary_tab(links, "Overview", app.navigate.bind("Advertising"), app.page == "Advertising")
+	app.secondary_tab(links, "Ads Analytics", app.navigate.bind("Advertising Analytics"), app.page == "Advertising Analytics")
 	app.action(view, "Create campaign", func():
 		app.campaign_id = 0
 		app.navigate("Campaign Details")
@@ -71,7 +71,10 @@ static func details(app: Control) -> void:
 		app.navigate("Campaign Manager")
 		return
 	var view: VBoxContainer = app.card("Create campaign" if creating else existing.name)
-	app.action(view, "Campaign Manager", app.navigate.bind("Campaign Manager"))
+	app.secondary_tab(view, "Campaign Manager", app.navigate.bind("Campaign Manager"), true)
+	if not creating and not app.campaign_editing:
+		_campaign_summary(app, view, state, existing)
+		return
 	if not creating and existing.status == "stopped":
 		view.add_child(app.label("Stopped campaigns are read-only. Duplicate this campaign to create a new Draft.", 14, Style.MUTED))
 		var stopped_metrics: Dictionary = _lifetime(state, app.campaign_id)
@@ -95,12 +98,12 @@ static func details(app: Control) -> void:
 			store_names.append(str(store.name))
 	if store_ids.is_empty():
 		view.add_child(app.label("Create a store before launching an advertising campaign.", 14, Style.MUTED))
-		app.action(view, "Management", app.navigate.bind("Management"))
+		app.secondary_tab(view, "Management", app.navigate.bind("Management"), false)
 		return
 	var selected_store: int = int(existing.get("store_id", store_ids[0])) if not creating else store_ids[0]
 	if selected_store not in store_ids:
 		view.add_child(app.label("This campaign's destination is inactive. Activate an eligible store before editing it.", 14, Style.MUTED))
-		app.action(view, "Management", app.navigate.bind("Management"))
+		app.secondary_tab(view, "Management", app.navigate.bind("Management"), false)
 		return
 	var store_index := maxi(0, store_ids.find(selected_store))
 	view.add_child(app.label("Destination store", 14, Style.MUTED))
@@ -207,60 +210,89 @@ static func details(app: Control) -> void:
 		app.action(view, "Create campaign", save_campaign.bind(false), true)
 		app.action(view, "Save Draft", save_campaign.bind(true))
 	else:
-		app.action(view, "Save campaign", save_campaign.bind(existing.status == "draft"), true)
+		app.action(view, "Save Changes", save_campaign.bind(existing.status == "draft"), true)
 		if existing.status != "stopped":
 			app.action(view, "Save as Draft", save_campaign.bind(true))
-	var cancel_edit := func(return_to_manager: bool):
-		if app.has_form_edits():
-			app.confirm_action("Discard unsaved changes?", "Your campaign settings have not been saved.", "Discard Changes", func():
-				app.edit_checks.clear()
-				if return_to_manager: app.navigate("Campaign Manager")
-				else: app.refresh_view()
-			)
+	app.action(view, "Cancel", func():
+		app.edit_checks.clear()
+		app.campaign_editing = false
+		app.set_notice("")
+		if creating:
+			app.campaign_id = 0
+			app.page = "Campaign Manager"
+			app.category_last_page["Business"] = "Campaign Manager"
+			app.render()
 		else:
-			app.edit_checks.clear()
-			if return_to_manager: app.navigate("Campaign Manager")
-			else: app.refresh_view()
-	app.action(view, "Cancel", cancel_edit.bind(true))
-	app.action(view, "Discard Changes", func(): cancel_edit.call(false))
+			app.refresh_view()
+	)
 	if not creating:
-		var control_row: HBoxContainer = app.row(view)
-		var next_status: String = "Pause" if existing.status == "active" else ("Launch" if existing.status == "draft" else "Resume")
-		if existing.status != "stopped":
-			app.action(control_row, next_status, func():
-				Ads.set_status(state, app.campaign_id, "paused" if existing.status == "active" else "active")
-				app.persist("Campaign %s." % ("paused" if existing.status == "active" else "resumed"))
-				app.refresh_view()
-			)
-			app.action(control_row, "Stop", func():
-				app.confirm_action("Stop campaign?", "This campaign cannot be resumed. Its history will be retained.", "Stop campaign", func():
-					Ads.set_status(state, app.campaign_id, "stopped")
-					app.persist("Campaign stopped.")
-					app.refresh_view()
-				)
-			)
-		else:
-			app.action(control_row, "Duplicate", func():
-				var error := Ads.duplicate_stopped(state, app.campaign_id)
-				if not error.is_empty():
-					app.set_notice(error, true)
-					return
-				app.campaign_id = state.advertising.next_campaign - 1
-				app.persist("Campaign duplicated as a draft.")
-				app.refresh_view()
-			)
-		var metrics: Dictionary = _lifetime(state, app.campaign_id)
-		app.metric(view, "Lifetime ad spend", app.money(metrics.spend))
-		app.metric(view, "Attributed purchases · revenue", "%d · %s" % [metrics.purchases, app.money(metrics.attributed_revenue - metrics.attributed_refunds)])
-		app.metric(view, "ROAS · CPA", "%.2f× · %s" % [metrics.roas, _average_cost(app, metrics.spend, metrics.purchases)])
-		app.action(view, "Advertising Analytics", app.navigate.bind("Advertising Analytics"))
+		_campaign_controls(app, view, state, existing)
+
+static func _campaign_summary(app: Control, view: VBoxContainer, state: Dictionary, existing: Dictionary) -> void:
+	var store := Stores.get_store(state, int(existing.store_id))
+	var product_index := int(existing.get("product", 0))
+	var platform_index := int(existing.get("platform", 0))
+	app.metric(view, "Status", str(existing.status).capitalize(), Style.GOLD)
+	app.metric(view, "Destination Store", str(store.get("name", "Missing store")))
+	app.metric(view, "Product", Catalog.PRODUCTS[product_index].name if product_index in range(Catalog.PRODUCTS.size()) else "Unavailable")
+	app.metric(view, "Advertising Platform", Ads.PLATFORMS[platform_index].name if platform_index in range(Ads.PLATFORMS.size()) else "Unavailable")
+	app.metric(view, "Objective", Ads.OBJECTIVES[int(existing.objective)])
+	app.metric(view, "Daily Budget", app.money(int(existing.daily_budget)))
+	app.metric(view, "Audience", Ads.AUDIENCES[int(existing.audience)])
+	app.metric(view, "Bidding Strategy", Ads.BIDS[int(existing.bid_strategy)])
+	app.metric(view, "Bid Limit", app.money(int(existing.bid)))
+	app.metric(view, "Creative Format", Ads.CREATIVES[int(existing.creative)])
+	app.metric(view, "Campaign Schedule", "Day %d%s" % [int(existing.start_day), " · End day %d" % int(existing.end_day) if int(existing.end_day) > 0 else " · No end date"])
+	if existing.status == "stopped":
+		view.add_child(app.label("This campaign has ended. Its history is retained.", 14, Style.MUTED))
+		app.action(view, "Duplicate", func():
+			var error := Ads.duplicate_stopped(state, app.campaign_id)
+			if not error.is_empty():
+				app.set_notice(error, true)
+				return
+			app.campaign_id = state.advertising.next_campaign - 1
+			app.campaign_editing = false
+			app.persist("Campaign duplicated as a draft.")
+			app.refresh_view()
+		)
+	else:
+		app.action(view, "Edit Campaign", func():
+			app.campaign_editing = true
+			app.refresh_view()
+		)
+	_campaign_controls(app, view, state, existing)
+	var metrics: Dictionary = _lifetime(state, app.campaign_id)
+	app.metric(view, "Lifetime Ad Spend", app.money(metrics.spend))
+	app.metric(view, "Attributed Purchases · Revenue", "%d · %s" % [metrics.purchases, app.money(metrics.attributed_revenue - metrics.attributed_refunds)])
+	app.metric(view, "ROAS · CPA", "%.2f× · %s" % [metrics.roas, _average_cost(app, metrics.spend, metrics.purchases)])
+	app.secondary_tab(view, "Ads Analytics", app.navigate.bind("Advertising Analytics"), false)
+
+static func _campaign_controls(app: Control, view: VBoxContainer, state: Dictionary, existing: Dictionary) -> void:
+	if existing.status == "stopped":
+		return
+	var control_row: HBoxContainer = app.row(view)
+	var next_status: String = "Pause" if existing.status == "active" else ("Launch" if existing.status == "draft" else "Resume")
+	app.action(control_row, next_status, func():
+		Ads.set_status(state, app.campaign_id, "paused" if existing.status == "active" else "active")
+		app.campaign_editing = false
+		app.persist("Campaign %s." % ("paused" if existing.status == "active" else "resumed"))
+		app.refresh_view()
+	)
+	app.action(control_row, "Stop", func():
+		app.confirm_action("Stop campaign?", "This campaign cannot be resumed. Its history will be retained.", "Stop Campaign", func():
+			Ads.set_status(state, app.campaign_id, "stopped")
+			app.campaign_editing = false
+			app.persist("Campaign stopped.")
+			app.refresh_view()
+		)
+	)
 
 static func analytics(app: Control) -> void:
 	var state: Dictionary = app.sim.state
-	var view: VBoxContainer = app.card("Advertising Analytics")
+	var view: VBoxContainer = app.card("Ads Analytics")
 	var nav: HBoxContainer = app.row(view)
-	app.action(nav, "Overview", app.navigate.bind("Advertising"))
-	app.action(nav, "Campaigns", app.navigate.bind("Campaign Manager"))
+	app.secondary_tab(nav, "Overview", app.navigate.bind("Advertising"), false)
+	app.secondary_tab(nav, "Campaigns", app.navigate.bind("Campaign Manager"), app.page == "Campaign Manager")
 	var period_choices := ["Today", "Last 7 Days", "Last 30 Days", "All Time"]
 	view.add_child(app.label("Reporting Period", 14, Style.MUTED))
 	var periods: OptionButton = app.dropdown(view, period_choices, clampi(app.ad_period, 0, 3))
