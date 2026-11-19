@@ -27,9 +27,12 @@ func run() -> void:
 	expect(quantity.text.to_int() > 0, "Forecast fills the quantity field")
 	quantity.text = "20"
 	quantity.text_changed.emit("20")
-	press("Negotiate quote")
-	expect(has_label("Negotiated quote received.") and has_label("MYR 39.01 per unit"), "Negotiation updates the selected quotation")
-	press("Purchase stock")
+	press("Request Quotation")
+	expect(has_label("Product quotation received.") and has_label("MYR 39.01 per unit"), "Negotiation updates the quotation for the selected product")
+	press("Accept Quotation")
+	quantity = field_for_label("Order quantity")
+	quantity.text = "20"
+	press("Purchase Inventory")
 	expect(has_label("PO-0001") and has_label("0 available · 20 inbound"), "Purchase updates forecast and inbound tracking")
 	open_first_store_listing()
 	press("Edit Listing")
@@ -42,7 +45,8 @@ func run() -> void:
 	select(choices[2], 0)
 	quantity = field_for_label("Order quantity")
 	quantity.text = "20"
-	press("Purchase stock")
+	press("Accept Quotation")
+	press("Purchase Inventory")
 	open_first_store_listing()
 	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 1)

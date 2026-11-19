@@ -101,9 +101,9 @@ func run() -> void:
 	press("Ads Analytics")
 	expect(has_label("Ads Analytics"), "Campaign details opens ads analytics")
 	expect(has_label("Total Ad Spend") and has_label("Attributed Revenue") and has_label("ROAS")
-		and has_label("Impressions") and has_label("Clicks") and has_label("Conversions")
+		and has_label("Impressions") and has_label("Clicks") and has_label("Purchases")
 		and has_label("Ad Spend vs. Attributed Revenue") and has_label("ROAS Trend")
-		and has_label("Clicks and Conversions") and has_label("Campaign Performance")
+		and has_label("Clicks and Purchases") and has_label("Campaign Performance")
 		and has_label("Portrait launch") and has_label("Advertising Platform")
 		and has_label("Reporting Period") and has_label("Destination Store"),
 		"Analytics dashboard uses recorded campaign data, KPI cards, trends, and accessible filters")
@@ -148,20 +148,30 @@ func run() -> void:
 		and app.sim.state.ledger.back().store_setup == store_setup_before + website_setup_cost,
 		"Website activates only after its required setup cost is charged and recorded")
 	await settle("phase3-stores")
-	var manage_buttons := controls(app, "Button").filter(func(button): return button.text.to_lower() == "manage listings")
-	if not manage_buttons.is_empty():
-		manage_buttons.back().pressed.emit()
-	else:
-		expect(false, "Created store exposes its Manage listings control")
-	expect(has_label("Aster Direct · Product listings"), "Store management opens store-specific product listings")
+	press("My Products")
+	press("Manage " + Catalog.PRODUCTS[0].name)
+	var website_listing: Control = app.find_child("ProductListingStore%d" % int(app.sim.state.stores[1].id), true, false)
+	expect(app.page == "My Products" and website_listing != null and has_label("Store Listings"),
+		"Selected product owns the store-specific listing management interface")
 	expect(controls(app, "LineEdit").filter(func(field): return field.is_visible_in_tree()).is_empty() and has_button("Edit Listing"),
 		"Saved store listings display read-only details by default")
+	var listing_edit_buttons := controls(website_listing, "Button").filter(func(button): return button.text == "Edit Listing") if website_listing != null else []
+	if not listing_edit_buttons.is_empty():
+		listing_edit_buttons[0].pressed.emit()
+	else:
+		expect(false, "The selected product exposes an Edit Listing action for the website")
+	expect(has_label("Store Selling Price"), "Store-specific listing price becomes editable only after selecting Edit Listing")
 	var original_listing_price: int = Stores.listing(app.sim.state, store_id, 0).price
+	press("Cancel")
+	expect(Stores.listing(app.sim.state, int(app.sim.state.stores[1].id), 0).price > 0,
+		"Existing websites retain their independent listing prices through the My Products transition")
+	app.navigate("My Products")
+	press("Manage " + Catalog.PRODUCTS[0].name)
 	press("Edit Listing")
 	field_for_label("Store Selling Price").text = "123.45"
 	press("Cancel")
 	expect(Stores.listing(app.sim.state, store_id, 0).price == original_listing_price,
-		"Cancel discards unsaved store listing changes")
+		"Cancel discards unsaved store listing changes in My Products")
 	await settle("phase3-store-listings")
 	expect(Slots.latest().state.advertising.campaigns.size() == 1 and Slots.latest().state.stores.size() == 2
 		and Slots.latest().state.stores[1].domain == "direct.aster.shop"

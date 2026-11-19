@@ -51,7 +51,7 @@ static func show(app: Control) -> void:
 		app.metric(view, "Supplier", Catalog.SUPPLIERS[int(item.supplier)].name)
 		var totals: Dictionary = activity.get(id, {"units": 0, "revenue": 0, "profit": 0})
 		app.metric(view, "Units sold · Net revenue", "%s · %s" % [format_count(int(totals.units)), app.money(int(totals.revenue))])
-		app.action(view, "Manage Product", func():
+		app.action(view, "Manage " + Catalog.PRODUCTS[id].name, func():
 			app.set_meta(DETAIL_META, id)
 			app.refresh_view()
 		)

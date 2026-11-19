@@ -90,12 +90,12 @@ func run() -> void:
 	expect(app.page == "Store Listings" and has_label("Harbor Marketplace · Product listings"),
 		"Legacy product-listing route remains callable for compatibility without a secondary navigation tab")
 	app.navigate("Management")
-	var listing_actions := controls(app, "Button").filter(func(button): return button.text == "Manage Listings")
-	expect(listing_actions.size() == 2, "Marketplace and website destinations both expose listing management")
-	if listing_actions.size() == 2:
-		listing_actions[1].pressed.emit()
-		expect(app.page == "Store Listings" and app.selected_store_id == website_id
-			and has_label("Harbor Website · Product listings"), "Website listings open through Management with the website ID")
+	var listing_actions := controls(app, "Button").filter(func(button): return button.text == "My Products")
+	expect(listing_actions.size() >= 3 and controls(app, "Button").filter(func(button): return button.text == "Manage Listings").is_empty(),
+		"Marketplace and website cards link to My Products without duplicate listing editors")
+	if listing_actions.size() >= 3:
+		listing_actions.back().pressed.emit()
+		expect(app.page == "My Products" and has_label("Product portfolio"), "Store Management directs product work to My Products")
 	app.navigate("Management")
 	var deactivate_actions := controls(app, "Button").filter(func(button): return button.text == "Deactivate")
 	expect(deactivate_actions.size() == 2, "Management exposes activation controls for both destinations")

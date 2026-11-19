@@ -29,9 +29,8 @@ static func management(app: Control) -> void:
 			app.money(result.advertising), app.money(result.setup), app.money(result.operating)], Style.MUTED)
 		app.metric(card, "Store profit", app.money(profit), app.profit_color(profit))
 		var actions: HBoxContainer = app.row(card)
-		app.action(actions, "Manage listings", func():
-			app.selected_store_id = id
-			app.navigate("Store Listings")
+		app.action(actions, "My Products", func():
+			app.navigate("My Products")
 		)
 		var status: String = "Deactivate" if store.active else "Activate"
 		app.action(actions, status, app.set_store_active.bind(id, not store.active))
