@@ -29,6 +29,9 @@ func button(title: String, scope: Node = null) -> Button:
 		if candidate.text.to_lower() == title.to_lower() and candidate.is_visible_in_tree(): return candidate
 	return null
 
+func has_validation_label(prefix: String) -> bool:
+	return controls(app, "Label").any(func(candidate): return candidate.text.begins_with(prefix) and candidate.is_visible_in_tree())
+
 func run() -> void:
 	root.size = Vector2i(1280, 720)
 	app = Main.instantiate()
@@ -61,6 +64,22 @@ func run() -> void:
 	expect(quantity != null, "Purchase quantity appears only in supplier details")
 	var payment_labels := controls(app.find_child("SelectedSupplierDetails", true, false), "OptionButton")
 	expect(not payment_labels.is_empty(), "Supplier Details offers an upfront or supplier-credit payment choice")
+	var accept := button("Accept Offer")
+	if accept != null and quantity is LineEdit:
+		accept.pressed.emit()
+		await process_frame
+		await process_frame
+		var accepted_details := app.find_child("SelectedSupplierDetails", true, false)
+		var accepted_quantity := accepted_details.find_child("SupplierPurchaseQuantity", true, false) as LineEdit
+		accepted_quantity.text = "0"
+		accepted_quantity.text_changed.emit("0")
+		var accepted_label := controls(accepted_details, "Label").any(func(candidate): return candidate.text == "Offer accepted")
+		expect(accepted_label and button("Purchase").disabled and has_validation_label("Enter a quantity from"),
+			"Changing quantity preserves accepted supplier terms while invalid quantities remain blocked with an inline message")
+		accepted_quantity.text = str(int(Catalog.SUPPLIERS[first_supplier].minimum))
+		accepted_quantity.text_changed.emit(accepted_quantity.text)
+		expect(button("Purchase") != null and not button("Purchase").disabled,
+			"A valid quantity can use the accepted offer without forcing another acceptance action")
 	var back := button("Back")
 	if back != null:
 		back.pressed.emit()

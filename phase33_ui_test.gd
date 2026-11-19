@@ -32,7 +32,7 @@ func run() -> void:
 	press("Market")
 	await process_frame
 	await process_frame
-	expect(has_label("Product Catalogue") and controls(app, "Button").any(func(button): return button.text == "Request Quotation" and button.is_visible_in_tree()), "Market exposes product catalog and supplier quotation actions")
+	expect(has_label("Product Catalogue") and controls(app, "Button").any(func(button): return button.text == "View Details" and button.is_visible_in_tree()), "Market exposes the product catalogue and compact supplier details workflow")
 	var search_panel: Control = app.find_child("ProductSearchPanel", true, false)
 	var catalogue: Control = app.find_child("ProductCataloguePanel", true, false)
 	expect(search_panel != null and catalogue != null and search_panel.get_global_rect().position.y < catalogue.get_global_rect().position.y
@@ -62,7 +62,7 @@ func run() -> void:
 	search.text_changed.emit(search.text)
 	await settle("phase33-mobile-market")
 	press("Order")
-	expect(app.page == "Orders" and has_label("Store operations"), "Order opens the existing fulfillment workspace")
+	expect(app.page == "Orders" and has_label("Store Operations"), "Order opens the existing fulfillment workspace")
 	press("Pre-orders")
 	expect(has_label("No customer pre-orders yet"), "Pre-orders route has a clear empty state")
 	press("Business")

@@ -84,6 +84,7 @@ static func build(sim: RefCounted, mobile: bool = false) -> PanelContainer:
 	var data := summary(sim)
 	var panel := PanelContainer.new()
 	panel.name = "DashboardInventoryOverview"
+	panel.set_meta("mobile_layout", mobile)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 12, 14))
 	var content := VBoxContainer.new()
@@ -95,6 +96,7 @@ static func build(sim: RefCounted, mobile: bool = false) -> PanelContainer:
 	content.add_child(heading)
 	var note := Label.new()
 	note.text = "Low stock is based on %d or fewer available units; reserved units are shown separately." % LOW_STOCK_THRESHOLD
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	note.add_theme_font_size_override("font_size", 12)
 	note.add_theme_color_override("font_color", Style.MUTED)
 	content.add_child(note)
@@ -113,6 +115,7 @@ static func build(sim: RefCounted, mobile: bool = false) -> PanelContainer:
 	var demand := Label.new()
 	demand.name = "PreorderDemandSummary"
 	demand.text = "Pending pre-order demand: %s units" % _number(data.preorder_demand)
+	demand.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	demand.add_theme_font_size_override("font_size", 13)
 	demand.add_theme_color_override("font_color", Style.GOLD if data.preorder_demand > 0 else Style.MUTED)
 	content.add_child(demand)

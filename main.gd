@@ -249,13 +249,18 @@ func divider(parent: Node) -> void:
 	parent.add_child(line)
 
 func metric(parent: Node, caption: String, value: String, color: Color = Style.TEXT) -> void:
-	var line := row(parent)
+	var line: BoxContainer = VBoxContainer.new() if size.x < 600.0 else row(parent)
+	if line is VBoxContainer:
+		line.add_theme_constant_override("separation", 2)
+		parent.add_child(line)
 	var name := label(caption, 15, Style.MUTED)
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	line.add_child(name)
 	var amount := label(value, 15, color)
 	amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	amount.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	amount.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	line.add_child(amount)
 
 func amount_text(cents: int, trim_zero: bool = false) -> String:
@@ -278,6 +283,20 @@ func profit_color(cents: int) -> Color:
 
 func _update_responsive_layout() -> void:
 	var viewport_width := size.x
+	var inventory_panel := find_child("DashboardInventoryOverview", true, false) as PanelContainer
+	var mobile_layout := viewport_width < 600.0
+	if inventory_panel != null and bool(inventory_panel.get_meta("mobile_layout", false)) != mobile_layout:
+		var inventory_parent := inventory_panel.get_parent()
+		var inventory_index := inventory_panel.get_index()
+		inventory_parent.remove_child(inventory_panel)
+		inventory_panel.queue_free()
+		var replacement := InventoryOverview.build(sim, mobile_layout)
+		inventory_parent.add_child(replacement)
+		inventory_parent.move_child(replacement, inventory_index)
+	var date_label := find_child("GameDate", true, false) as Label
+	if date_label != null and sim != null:
+		date_label.text = _game_date_text(viewport_width)
+		date_label.tooltip_text = Calendar.format(sim.state.day) + " | " + Catalog.COUNTRIES[sim.state.country]
 	if page == "Profile":
 		var identity_layout := find_child("CEOIdentityLayout", true, false) as BoxContainer
 		if identity_layout != null:
@@ -293,8 +312,10 @@ func _update_responsive_layout() -> void:
 	if is_instance_valid(navigation_drawer):
 		var drawer_width := clampf(viewport_width * 0.78, 260.0, 320.0)
 		navigation_drawer.offset_right = drawer_width
+	if is_instance_valid(navigation_toggle):
+		navigation_toggle.custom_minimum_size.x = 72 if viewport_width < 600.0 else 92
 	if is_instance_valid(bank_balance_label):
-		bank_balance_label.custom_minimum_size.x = 152 if viewport_width < 600.0 else 245
+		bank_balance_label.custom_minimum_size.x = 128 if viewport_width < 600.0 else 245
 		_refresh_bank_balance()
 	var kpis := find_child("DashboardKpis", true, false) as GridContainer
 	if kpis != null:
@@ -1254,15 +1275,16 @@ func primary_navigation(parent: Node) -> Button:
 	var heading := row(parent)
 	var menu_button := action(heading, "Menu", toggle_navigation_drawer, false)
 	menu_button.name = "NavigationMenuButton"
-	menu_button.custom_minimum_size = Vector2(92, 48)
+	menu_button.custom_minimum_size = Vector2(72 if size.x < 600.0 else 92, 48)
 	menu_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	menu_button.tooltip_text = "Open navigation menu"
 	_apply_drawer_icon(menu_button, DRAWER_ICON_PATHS.Menu, 20)
 	navigation_toggle = menu_button
 	var viewport_width := size.x
-	var date_text := "%s | %s" % [Calendar.format(sim.state.day), Catalog.COUNTRIES[sim.state.country]]
+	var date_text := _game_date_text(viewport_width)
 	var game_date := label(date_text, 13 if viewport_width < 600.0 else 14, Style.MUTED)
 	game_date.name = "GameDate"
+	game_date.custom_minimum_size.x = 0
 	game_date.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	game_date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	game_date.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -1281,6 +1303,13 @@ func primary_navigation(parent: Node) -> Button:
 	_refresh_bank_balance()
 	_create_navigation_drawer()
 	return menu_button
+
+func _game_date_text(viewport_width: float) -> String:
+	var country: String = Catalog.COUNTRIES[int(sim.state.country)]
+	if viewport_width < 600.0:
+		var date := Calendar.date_at(sim.state.day)
+		return "D%d · %d %s | %s" % [sim.state.day, int(date.day), str(Calendar.MONTHS[int(date.month) - 1]), country]
+	return "%s | %s" % [Calendar.format(sim.state.day), country]
 
 func toggle_navigation_drawer() -> void:
 	if not is_instance_valid(navigation_overlay):
@@ -1664,7 +1693,7 @@ func dashboard() -> void:
 	_add_kpi(kpis, "Store reputation", "%d / 100" % sim.state.reputation)
 	_add_kpi(kpis, "Marketplace stores · Websites", "%d · %d" % [active_marketplaces, active_websites])
 	_add_kpi(kpis, "Active campaigns · Lifetime spend", "%d · %s" % [active_campaigns, money(totals.advertising)])
-	page_grid.add_child(InventoryOverview.build(sim, size.x < 600.0))
+	page_wide.add_child(InventoryOverview.build(sim, size.x < 600.0))
 	action(overview, "My Products", navigate.bind("My Products"))
 	var alerts: VBoxContainer = card("Business Alerts")
 	if active_marketplaces == 0 and active_websites == 0:

@@ -16,6 +16,11 @@ func run() -> void:
 	root.add_child(app)
 	create_new_game_for_test("Kai Founder", "Harbor Works")
 	await process_frame
+	var dashboard_inventory := app.find_child("DashboardInventoryOverview", true, false) as PanelContainer
+	expect(dashboard_inventory != null and dashboard_inventory.is_visible_in_tree()
+		and dashboard_inventory.find_child("InventorySummaryMetrics", true, false) != null
+		and dashboard_inventory.find_child("PreorderDemandSummary", true, false) != null,
+		"Dashboard includes responsive stock, reservation, low/out-of-stock, and pre-order inventory summaries")
 	var nav: PanelContainer = app.find_child("PrimaryNavigation", true, false)
 	var game_date: Label = app.find_child("GameDate", true, false)
 	var menu_button: Button = app.find_child("NavigationMenuButton", true, false)
@@ -132,7 +137,7 @@ func run() -> void:
 		expect(Stores.get_store(app.sim.state, store_id).active, "Management reactivates destination %d" % store_id)
 
 	press("Order")
-	expect(app.page == "Orders" and has_label("Store operations"), "Order category opens customer orders")
+	expect(app.page == "Orders" and has_label("Store Operations"), "Order category opens customer orders")
 	press("Pre-orders")
 	expect(app.page == "Pre-orders" and has_label("Pre-orders"), "Order secondary route opens pre-order management")
 	press("Returns and Service")
@@ -217,7 +222,8 @@ func run() -> void:
 	expect(controls(app, "LineEdit").is_empty() and has_button("Edit Profile"),
 		"Profile details are read-only until editing is explicitly activated")
 	var portrait: TextureRect = app.find_child("CEOAvatar", true, false)
-	expect(portrait != null and absf(portrait.custom_minimum_size.y / portrait.custom_minimum_size.x - 4.0 / 3.0) < 0.01,
+	var portrait_frame := app.find_child("CEOAvatarFrame", true, false) as PanelContainer
+	expect(portrait_frame != null and portrait != null and absf(portrait.custom_minimum_size.y / portrait.custom_minimum_size.x - 4.0 / 3.0) < 0.01,
 		"CEO portrait preserves the 3:4 frame on desktop")
 	var existing_photo := Image.create(48, 64, false, Image.FORMAT_RGBA8)
 	existing_photo.fill(Color("#dfb777"))
@@ -312,9 +318,10 @@ func run() -> void:
 	var ceo_avatar := app.find_child("CEOAvatar", true, false) as TextureRect
 	expect(mobile_current_labels.size() == 1 and mobile_current_labels[0].get_parent() is VBoxContainer,
 		"Mobile owned-company rows stack the company name and current status without narrow wrapping")
-	expect(ceo_avatar != null and ceo_avatar.custom_minimum_size.x <= 150.0
+	var mobile_portrait_frame := app.find_child("CEOAvatarFrame", true, false) as PanelContainer
+	expect(mobile_portrait_frame != null and mobile_portrait_frame.custom_minimum_size.x <= 170.0 and ceo_avatar != null and ceo_avatar.custom_minimum_size.x <= 158.0
 		and absf(ceo_avatar.custom_minimum_size.y / ceo_avatar.custom_minimum_size.x - 4.0 / 3.0) < 0.01
-		and ceo_avatar.size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
+		and mobile_portrait_frame.get_parent().size_flags_horizontal == Control.SIZE_SHRINK_CENTER,
 		"CEO avatar keeps its centered portrait aspect ratio on mobile")
 	app.navigate("Finance")
 	var secondary_scroll: ScrollContainer = app.find_child("SecondaryNavigationScroll", true, false)

@@ -111,6 +111,7 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			supply.add_child(app.label("Existing purchases from %s remain in your history. Choose a currently available supplier for new orders." % str(item.legacy_supplier.name), 12, Style.MUTED))
 	else:
 		var provider: Dictionary = Catalog.SUPPLIERS[selected_supplier]
+		var quantity_key := "%s_quantity_%d" % [route_key, selected_supplier]
 		var title: VBoxContainer = app.card("Supplier Details · %s" % str(provider.name))
 		title.name = "SelectedSupplierDetails"
 		var terms: Dictionary = Supply.quote(state, product, selected_supplier)
@@ -121,7 +122,7 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		app.metric(title, "Landed Cost Per Unit", app.money(Catalog.quote(state.country, product, selected_supplier) + Catalog.inbound_freight(state.country, selected_supplier)))
 		var quote_status: Label = app.label("", 14, Style.GOLD)
 		title.add_child(quote_status)
-		quantity = app.field(title, "Purchase Quantity", str(int(provider.minimum)), 10)
+		quantity = app.field(title, "Purchase Quantity", str(app.get_meta(quantity_key, str(int(provider.minimum)))), 10)
 		quantity.name = "SupplierPurchaseQuantity"
 		quantity.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
 		var total_label: Label = app.label("", 16, Style.TEXT)
@@ -166,8 +167,8 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 				buy_state.button.disabled = not accepted_now or int(breakdown.total) > int(eligibility.available)
 			else:
 				buy_state.button.disabled = not accepted_now
-		quantity.text_changed.connect(func(_value: String):
-			app.set_meta(accepted_key, -1)
+		quantity.text_changed.connect(func(value: String):
+			app.set_meta(quantity_key, value)
 			update_detail.call()
 		)
 		payment.item_selected.connect(func(_index: int): update_detail.call())
@@ -195,11 +196,13 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			if payment.selected == 1:
 				result = SupplierCredit.purchase_on_credit(state, product, selected_supplier, units_from(quantity.text))
 				if str(result.get("error", "")).is_empty():
+					app.remove_meta(quantity_key)
 					app.persist("Inventory purchased on supplier credit. Repayment is due %s." % str(result.obligation.due_date))
 			else:
 				var cash_error: String = app.sim.buy(product, selected_supplier, units_from(quantity.text))
 				result = {"error": cash_error}
 				if cash_error.is_empty():
+					app.remove_meta(quantity_key)
 					app.persist("Purchase order placed. Track it below.")
 			if not str(result.get("error", "")).is_empty():
 				app.set_notice(str(result.error), true)
