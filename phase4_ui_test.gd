@@ -358,7 +358,9 @@ func run() -> void:
 		press(target)
 		expect(app.primary_category(app.page) == target or (target == "Order" and app.primary_category(app.page) == "Order"),
 			"Mobile navigation opens %s" % target)
-	for viewport in [Vector2i(1920, 1080), Vector2i(1280, 720), Vector2i(768, 1024), Vector2i(390, 844), Vector2i(375, 812)]:
+	for viewport in [Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(1280, 720),
+		Vector2i(1024, 768), Vector2i(768, 1024), Vector2i(390, 844),
+		Vector2i(375, 812), Vector2i(375, 667), Vector2i(844, 390)]:
 		root.size = viewport
 		await settle("phase4-%dx%d" % [viewport.x, viewport.y])
 		var header_balance: Label = app.find_child("CompanyBankBalance", true, false)
@@ -387,13 +389,15 @@ func run() -> void:
 			"Card layout reflows without unused columns at %dx%d" % [viewport.x, viewport.y])
 		press("Dashboard")
 		var kpis: GridContainer = app.find_child("DashboardKpis", true, false)
-		expect(kpis != null and kpis.columns == (4 if viewport.x >= 900 else 2),
+		expect(kpis != null and kpis.columns == (4 if app.size.x >= 900.0 else 2),
 			"Dashboard KPI cards use the intended responsive columns at %dx%d" % [viewport.x, viewport.y])
 		_check_primary_tabs_within_viewport(viewport)
 		var shell_bounds: Rect2 = app.page_shell.get_global_rect()
 		var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
 		expect(shell_bounds.position.x * scale_x >= 0 and shell_bounds.end.x * scale_x <= float(viewport.x) + 1.0,
 			"Centered content shell fits %dx%d" % [viewport.x, viewport.y])
+	root.size = Vector2i(390, 844)
+	await settle("phase4-mobile-profile")
 	app.navigate("Profile")
 	press("Edit Profile")
 	app.open_avatar_crop(replacement_photo)
