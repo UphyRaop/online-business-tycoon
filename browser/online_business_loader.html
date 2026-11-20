@@ -25,16 +25,14 @@
 		#preview-host { position: fixed; inset: 0; overflow: hidden; display: grid; place-items: center; }
 		#game-preview-frame { position: relative; width: 100vw; height: 100vh; transform-origin: top left; overflow: hidden; }
 		#canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: transparent; }
-		#dev-launcher, #dev-toolbar { position: fixed; z-index: 5; right: 12px; color: #f1eee5; font: 600 13px/1.2 Inter, ui-sans-serif, system-ui, sans-serif; }
-		#dev-launcher { top: 12px; }
-		#dev-toolbar { top: 0; left: 0; right: 0; min-height: 48px; display: none; align-items: center; justify-content: center; gap: 8px; padding: 6px 12px; background: rgba(7, 12, 20, .96); border-bottom: 1px solid rgba(217,180,104,.45); box-shadow: 0 4px 20px rgba(0,0,0,.3); }
+		#dev-toolbar { position: fixed; z-index: 5; top: env(safe-area-inset-top, 0px); left: 0; right: 0; min-height: 48px; display: none; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; padding: 6px 12px; background: rgba(7, 12, 20, .98); border-bottom: 1px solid rgba(217,180,104,.45); box-shadow: 0 4px 20px rgba(0,0,0,.3); color: #f1eee5; font: 600 13px/1.2 Inter, ui-sans-serif, system-ui, sans-serif; }
 		#dev-toolbar.is-visible { display: flex; }
 		.dev-button { appearance: none; min-height: 36px; padding: 0 12px; border: 1px solid rgba(217,180,104,.55); border-radius: 6px; background: #111e2e; color: #f1eee5; font: inherit; cursor: pointer; }
 		.dev-button[aria-pressed="true"] { background: #d9b468; color: #11151b; }
 		#dev-preview-name { color: #d9b468; min-width: 90px; text-align: center; }
-		body.dev-preview #preview-host { inset: 48px 0 0; }
+		body.dev-preview #preview-host { inset: var(--dev-toolbar-bottom, 48px) 0 0; }
 		body.dev-preview #game-preview-frame { position: absolute; }
-		@media (max-width: 520px) { #dev-toolbar { gap: 4px; padding-inline: 4px; } .dev-button { padding: 0 7px; font-size: 12px; } #dev-preview-name { min-width: 60px; font-size: 11px; } }
+		@media (max-width: 520px) { #dev-toolbar { gap: 4px; padding-inline: 4px; } .dev-button { min-height: 38px; padding: 0 8px; font-size: 12px; } #dev-preview-name { display: none; } }
 		.loader {
 			position: fixed; inset: 0; z-index: 2; display: grid; place-items: center;
 			padding: max(24px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left));
@@ -120,13 +118,12 @@
 </head>
 <body>
 	<div id="preview-host"><div id="game-preview-frame"><canvas id="canvas" aria-label="Online Business Tycoon game">Your browser does not support the canvas tag.</canvas></div></div>
-	<button id="dev-launcher" class="dev-button" type="button" hidden>Dev Mode</button>
-	<div id="dev-toolbar" role="toolbar" aria-label="Responsive preview controls">
+	<div id="dev-toolbar" role="toolbar" aria-label="Developer device preview controls" hidden>
 		<span id="dev-preview-name">Desktop</span>
 		<button class="dev-button" type="button" data-preview="desktop" aria-pressed="true">Desktop</button>
 		<button class="dev-button" type="button" data-preview="tablet" aria-pressed="false">Tablet</button>
 		<button class="dev-button" type="button" data-preview="mobile" aria-pressed="false">Mobile</button>
-		<button id="dev-exit" class="dev-button" type="button">Exit Dev Mode</button>
+		<button id="dev-exit" class="dev-button" type="button">Exit Preview</button>
 	</div>
 	<noscript><p style="position:fixed;z-index:4;inset:0;background:#080d15;color:#fff;padding:2rem">Online Business Tycoon requires JavaScript to run.</p></noscript>
 	<div id="loader" class="loader" role="region" aria-label="Loading Online Business Tycoon">
@@ -181,7 +178,6 @@
 		let startAttempted = false;
 		const previewFrame = document.getElementById('game-preview-frame');
 		const previewHost = document.getElementById('preview-host');
-		const devLauncher = document.getElementById('dev-launcher');
 		const devToolbar = document.getElementById('dev-toolbar');
 		const devPreviewName = document.getElementById('dev-preview-name');
 		const previewPresets = { desktop: [900, 1200], tablet: [768, 1024], mobile: [390, 844] };
@@ -190,15 +186,12 @@
 		let selectedPreview = 'desktop';
 		let savedWindowSize = null;
 
-		function actualDesktop() {
-			const ua = navigator.userAgent || '';
-			const touchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
-			return matchMedia('(pointer: fine) and (hover: hover)').matches && !/(Android|iPhone|iPad|iPod|Mobile)/i.test(ua) && !touchMac;
-		}
 		function applyPreview() {
 			if (!previewActive) return;
 			const [width, height] = previewPresets[selectedPreview];
 			const hostRect = previewHost.getBoundingClientRect();
+			const toolbarHeight = devToolbar.getBoundingClientRect().height;
+			document.body.style.setProperty('--dev-toolbar-bottom', (toolbarHeight + parseFloat(getComputedStyle(devToolbar).top || '0')) + 'px');
 			const scale = Math.min(hostRect.width / width, hostRect.height / height);
 			Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
 			Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
@@ -233,22 +226,22 @@
 			previewFrame.style.transform = '';
 			previewHost.style.inset = '';
 			devToolbar.classList.remove('is-visible');
-			devLauncher.hidden = false;
+			devToolbar.hidden = true;
 			window.dispatchEvent(new Event('resize'));
 		}
-		devLauncher.addEventListener('click', () => {
-			if (!devEnabled || !actualDesktop()) return;
-			previewActive = true;
-			selectedPreview = 'desktop';
-			savedWindowSize = { width: window.innerWidth, height: window.innerHeight,
+		function openPreview(name = 'desktop') {
+			if (!devEnabled || !previewPresets[name]) return;
+			if (!previewActive) savedWindowSize = { width: window.innerWidth, height: window.innerHeight,
 				widthDescriptor: Object.getOwnPropertyDescriptor(window, 'innerWidth'),
 				heightDescriptor: Object.getOwnPropertyDescriptor(window, 'innerHeight') };
+			previewActive = true;
+			selectedPreview = name;
 			document.body.classList.add('dev-preview');
-			devLauncher.hidden = true;
+			devToolbar.hidden = false;
 			devToolbar.classList.add('is-visible');
 			applyPreview();
 			notifyGameResize();
-		});
+		}
 		devToolbar.querySelectorAll('[data-preview]').forEach(button => button.addEventListener('click', () => {
 			if (!previewActive) return;
 			selectedPreview = button.dataset.preview;
@@ -257,7 +250,13 @@
 		}));
 		document.getElementById('dev-exit').addEventListener('click', exitPreview);
 		window.addEventListener('resize', () => { if (previewActive) applyPreview(); });
-		window.OBTDevPreview = { enable() { if (actualDesktop()) { devEnabled = true; devLauncher.hidden = false; } }, disable: exitPreview };
+		window.OBTDevPreview = {
+			enable() { devEnabled = true; },
+			open() { openPreview(selectedPreview); },
+			select(name) { if (previewActive) { selectedPreview = name; applyPreview(); notifyGameResize(); } else openPreview(name); },
+			exit() { exitPreview(); },
+			disable() { devEnabled = false; exitPreview(); }
+		};
 
 		function setStatus(message) {
 			statusText.textContent = message;

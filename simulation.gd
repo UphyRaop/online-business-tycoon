@@ -10,7 +10,7 @@ const Stores = preload("res://store_manager.gd")
 const Advertising = preload("res://advertising.gd")
 const SupplierCredit = preload("res://supplier_credit.gd")
 const PERIODS := [1, 7, 30, 365]
-const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "credit_purchases", "credit_inbound_freight", "supplier_repayments", "supplier_credit_adjustments", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses", "inventory_returns", "supplier_refunds"]
+const FIELDS := ["sales", "cogs", "direct_cogs", "fees", "overhead", "hosting", "legacy", "purchases", "credit_purchases", "credit_inbound_freight", "supplier_repayments", "supplier_credit_adjustments", "direct_purchases", "direct_inbound_freight", "capital", "shipping", "refunds", "deposits", "advertising", "store_setup", "store_expenses", "inventory_returns", "supplier_refunds", "dev_cash_adjustment", "dev_inventory_adjustment"]
 const CHANNEL_FIELDS := ["orders", "sales", "cogs", "fees", "hosting", "shipping", "refunds",
 	"placed", "dispatched", "tracked_deliveries", "on_time", "checkouts", "abandoned", "stockouts", "bundles", "upsells", "refunded"]
 const VERSION := 6
@@ -323,7 +323,7 @@ static func net(row: Dictionary) -> int:
 	return row.sales - row.refunds - row.cogs - row.fees - row.overhead - row.hosting - row.shipping - row.legacy - row.get("advertising", 0) - row.get("store_setup", 0) - row.get("store_expenses", 0) + row.get("supplier_refunds", 0) - row.get("inventory_returns", 0)
 
 static func cash_change(row: Dictionary) -> int:
-	return net(row) + row.cogs - (row.purchases - row.get("credit_purchases", 0)) - row.get("direct_purchases", 0) - row.get("supplier_repayments", 0) - row.get("supplier_credit_adjustments", 0) + row.capital + row.deposits + row.get("inventory_returns", 0)
+	return net(row) + row.cogs - (row.purchases - row.get("credit_purchases", 0)) - row.get("direct_purchases", 0) - row.get("supplier_repayments", 0) - row.get("supplier_credit_adjustments", 0) + row.capital + row.deposits + row.get("inventory_returns", 0) + row.get("dev_cash_adjustment", 0)
 
 func calendar_report(period: int, anchor: int) -> Dictionary:
 	var boundaries := Calendar.bounds(period, clampi(anchor, 1, state.day))
@@ -370,9 +370,9 @@ func report(days: int, end_day: int = 0) -> Dictionary:
 	var deposits := 0
 	for i in range(end):
 		var row: Dictionary = state.ledger[i]
-		inventory += row.purchases - (row.cogs - row.get("direct_cogs", 0)) - row.get("inventory_returns", 0)
+		inventory += row.purchases - (row.cogs - row.get("direct_cogs", 0)) - row.get("inventory_returns", 0) + row.get("dev_inventory_adjustment", 0)
 		goods_in_transit += row.get("direct_purchases", 0) - row.get("direct_cogs", 0)
-		capital += row.capital
+		capital += row.capital + row.get("dev_cash_adjustment", 0) + row.get("dev_inventory_adjustment", 0)
 		retained += net(row)
 		deposits += row.deposits
 		if i < start - 1:
