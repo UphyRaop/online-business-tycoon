@@ -10,37 +10,47 @@ const LOGO = preload("res://icon.svg")
 
 static func brand(app: Control, parent: Node) -> void:
 	var header: HBoxContainer = app.row(parent)
-	header.add_theme_constant_override("separation", 14)
+	header.add_theme_constant_override("separation", 10)
 	var mark := TextureRect.new()
 	mark.texture = LOGO
-	mark.custom_minimum_size = Vector2(72, 72)
+	mark.custom_minimum_size = Vector2(48, 48)
 	mark.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	mark.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header.add_child(mark)
-	var name: Label = app.label("Online Business Tycoon", 30, Style.GOLD)
+	var name: Label = app.label("Online Business Tycoon", 23, Style.GOLD)
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	header.add_child(name)
 
 static func title(app: Control) -> void:
-	var play: VBoxContainer = app.card("Build Your Business")
-	play.add_child(app.label("Each New Game has its own CEO identity, companies, finances, and save slots.", 14, Style.MUTED))
-	app.action(play, "New Game", app.start_new_game, true)
+	var play: VBoxContainer = app.wide_card("Continue Playing")
+	var actions: HBoxContainer = app.row(play)
+	app.action(actions, "New Game", app.start_new_game, true)
+	app.action(actions, "Load Game", app.open_screen.bind("Load"))
+	app.action(actions, "Settings", app.open_screen.bind("Settings"))
 	var games := GameStore.list_games()
 	if games.is_empty():
 		play.add_child(app.label("No saved games yet. Start a New Game to begin.", 15, Style.MUTED))
 	else:
+		var game_names := {}
 		for game in games:
-			_game_card(app, game, true)
-	app.action(play, "Load Game", app.open_screen.bind("Load"))
-	app.action(play, "Settings", app.open_screen.bind("Settings"))
+			var latest := GameStore.latest(str(game.game_id))
+			var company_name := str(latest.get("state", {}).get("company", ""))
+			if not company_name.is_empty(): game_names[company_name] = int(game_names.get(company_name, 0)) + 1
+		var cards := GridContainer.new()
+		cards.name = "SavedGameCards"
+		cards.columns = 3 if app.size.x >= 900.0 else (2 if app.size.x >= 600.0 else 1)
+		cards.add_theme_constant_override("h_separation", 10)
+		cards.add_theme_constant_override("v_separation", 10)
+		play.add_child(cards)
+		for game in games:
+			_game_card(app, game, true, cards, game_names)
 
 static func slots(app: Control, saving: bool) -> void:
-	var back: VBoxContainer = app.card("Game Saves" if not app.active_game_id.is_empty() else "Saved Games")
-	app.action(back, "Back", app.open_screen.bind("Game" if app.sim != null else "Title"))
-	if saving:
-		back.add_child(app.label("Save a snapshot to a manual slot. Committed gameplay changes also update Autosave.", 14, Style.MUTED))
+	var back: VBoxContainer = app.wide_card("")
+	var back_row: HBoxContainer = app.row(back)
+	app.action(back_row, "Back", app.open_screen.bind("Game" if app.sim != null else "Title"))
 	if app.active_game_id.is_empty():
 		if saving:
 			back.add_child(app.label("Choose a game before saving.", 14, Style.RED))
@@ -48,13 +58,25 @@ static func slots(app: Control, saving: bool) -> void:
 		var games := GameStore.list_games()
 		if games.is_empty():
 			back.add_child(app.label("No saved games are available.", 14, Style.MUTED))
+		var cards := GridContainer.new()
+		cards.name = "LoadGameCards"
+		cards.columns = 3 if app.size.x >= 900.0 else (2 if app.size.x >= 600.0 else 1)
+		cards.add_theme_constant_override("h_separation", 10)
+		cards.add_theme_constant_override("v_separation", 10)
+		back.add_child(cards)
 		for game in games:
-			_game_card(app, game, false)
+			_game_card(app, game, true, cards, {})
 		return
 	var order := [1, 2, 3, 0] if saving else [0, 1, 2, 3]
+	var slots_grid := GridContainer.new()
+	slots_grid.name = "GameSaveSlots"
+	slots_grid.columns = 3 if app.size.x >= 900.0 else (2 if app.size.x >= 600.0 else 1)
+	slots_grid.add_theme_constant_override("h_separation", 10)
+	slots_grid.add_theme_constant_override("v_separation", 10)
+	back.add_child(slots_grid)
 	for id in order:
 		var slot := Slots.read_for_game(app.active_game_id, id)
-		var view: VBoxContainer = app.card(Slots.name_for(id))
+		var view: VBoxContainer = app._create_card(slots_grid, Slots.name_for(id))
 		if slot.is_empty():
 			view.add_child(app.label("Unreadable save" if Slots.occupied_for_game(app.active_game_id, id) else "Empty", 15, Style.MUTED))
 		else:
@@ -70,34 +92,45 @@ static func slots(app: Control, saving: bool) -> void:
 static func describe(app: Control, parent: Node, slot: Dictionary) -> void:
 	var state: Dictionary = slot.state
 	var metadata: Dictionary = slot.get("metadata", {})
-	var game_label := GameStore.save_label(slot) if not metadata.is_empty() else ""
-	if not game_label.is_empty(): parent.add_child(app.label(game_label, 13, Style.GOLD))
 	parent.add_child(app.label(state.company, 18, Style.GOLD))
-	parent.add_child(app.label("%s · %s" % [Calendar.format(state.day), Catalog.COUNTRIES[state.country]], 15, Style.MUTED))
-	parent.add_child(app.label("Saved %s" % Slots.timestamp_text(slot.saved_at) if slot.saved_at > 0 else Slots.timestamp_text(slot.saved_at), 14, Style.MUTED))
+	parent.add_child(app.label(str(metadata.get("ceo_name", state.get("owner", "CEO not recorded"))), 14, Style.MUTED))
+	app.metric(parent, "Country", str(Catalog.COUNTRIES[int(state.country)]))
+	app.metric(parent, "Simulation Date", Calendar.format(int(state.day)))
+	app.metric(parent, "Save Type", str(metadata.get("slot_name", Slots.name_for(int(slot.get("slot", Slots.AUTOSAVE))))))
+	app.metric(parent, "Last Saved", Slots.timestamp_text(float(slot.saved_at)))
 	if slot.get("recovered", false):
 		parent.add_child(app.label("Recovered backup", 14, Style.GOLD))
 
-static func _game_card(app: Control, game: Dictionary, show_slot_summary: bool) -> void:
+static func _game_card(app: Control, game: Dictionary, show_slot_summary: bool, parent: Node, duplicate_company_names: Dictionary) -> void:
 	var game_id := str(game.get("game_id", ""))
 	if game_id.is_empty(): return
-	var view: VBoxContainer = app.card(str(game.get("game_name", "Saved Game")))
-	app.metric(view, "CEO", str(game.get("ceo_name", "CEO not recorded")), Style.GOLD)
 	var latest := GameStore.latest(game_id)
+	var profile := CEOProfile.load_game_profile(game_id)
+	var companies: Array = profile.get("companies", [])
+	var company_name := str(latest.get("state", {}).get("company", ""))
+	if company_name.is_empty() and not companies.is_empty(): company_name = str(companies[0].get("name", ""))
+	if company_name.is_empty(): company_name = "New Game Setup"
+	if int(duplicate_company_names.get(company_name, 0)) > 1:
+		company_name += " · %s" % game_id.right(6)
+	var view: VBoxContainer = app._create_card(parent, company_name)
+	view.name = "SavedGame_%s" % game_id
+	view.add_child(app.label(str(game.get("ceo_name", "CEO not recorded")), 14, Style.MUTED))
 	if latest.is_empty():
-		var profile := CEOProfile.load_game_profile(game_id)
 		if profile.get("companies", []).is_empty():
-			view.add_child(app.label("No company has been registered in this game yet.", 14, Style.MUTED))
+			app.metric(view, "Status", "No company registered")
 			app.action(view, "Continue Setup", app.resume_setup.bind(game_id), true)
 		else:
-			view.add_child(app.label("No slot save is available. Choose an owned company archive.", 14, Style.MUTED))
+			app.metric(view, "Status", "Choose an owned company")
 			app.action(view, "Choose Company", app.choose_company_in_game.bind(game_id), true)
 	else:
-		if show_slot_summary: describe(app, view, latest)
-		else: app.metric(view, "Last Played", Slots.timestamp_text(float(latest.get("saved_at", 0))))
+		var state: Dictionary = latest.state
+		app.metric(view, "Country", str(Catalog.COUNTRIES[int(state.country)]))
+		app.metric(view, "Simulation Date", Calendar.format(int(state.day)))
+		app.metric(view, "Last Saved", Slots.timestamp_text(float(latest.saved_at)))
+		app.metric(view, "Save Type", str(latest.get("metadata", {}).get("slot_name", "Autosave")))
 		app.action(view, "Continue Game", app.resume_game.bind(game_id), true)
 		app.action(view, "Choose Company", app.choose_company_in_game.bind(game_id))
-	app.action(view, "Load Saves", app.open_game_slots.bind(game_id))
+		if show_slot_summary: app.action(view, "Load Saves", app.open_game_slots.bind(game_id))
 	app.action(view, "Delete Game", app.delete_game.bind(game_id))
 
 static func settings(app: Control) -> void:

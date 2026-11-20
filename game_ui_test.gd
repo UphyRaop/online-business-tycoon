@@ -9,6 +9,7 @@ var legacy_game_id := ""
 var first_game_id := ""
 var second_game_id := ""
 var sibling_company_id := ""
+var duplicate_company_id := ""
 var legacy_blank_company_id := ""
 var legacy_stores: Array = []
 var legacy_products: Dictionary = {}
@@ -43,6 +44,12 @@ func test_legacy_game_is_visible() -> void:
 	var card := _game_card(legacy_game_id)
 	expect(card != null and _button_in(card, "Continue Game") != null and _button_in(card, "Load Saves") != null,
 		"Migrated game exposes resume and game-scoped load actions")
+	var legacy_card_labels := controls(card, "Label").map(func(node): return str(node.text)) if card != null else []
+	var latest_legacy_slot := Games.latest(legacy_game_id)
+	var latest_legacy_company := str(latest_legacy_slot.get("state", {}).get("company", ""))
+	expect(card != null and card.get_child(0) is Label and str(card.get_child(0).text) == latest_legacy_company
+		and legacy_card_labels.count(latest_legacy_company) == 1 and legacy_card_labels.count("Legacy UI Founder") == 1,
+		"Main Menu company card uses one company title and one CEO line without repeating save/game labels")
 	app.open_game_slots(legacy_game_id)
 	app.load_slot(1)
 	if app.confirmation != null: app.confirmation.confirmed.emit()
@@ -90,6 +97,12 @@ func test_required_new_game_identity() -> void:
 		and Saves.save(sibling, CEO.company_path_for_game(first_game_id, str(sibling.company_id))) == OK
 		and Slots.write_for_game(first_game_id, 2, sibling, sibling_profile) == OK,
 		"A second owned company has its own archive and manual save in the same game")
+	var duplicate := Sim.register("Avery Founder", "Avery Retail", "", 2, 1, 0, 1003)
+	duplicate_company_id = str(duplicate.company_id)
+	sibling_profile = CEO.register_company(sibling_profile, duplicate)
+	expect(Games.update_game_profile(first_game_id, sibling_profile) == OK
+		and Saves.save(duplicate, CEO.company_path_for_game(first_game_id, duplicate_company_id)) == OK,
+		"An identically named company is saved as a distinct owned company record")
 	Games.write_slot(first_game_id, Slots.AUTOSAVE, app.sim.state, sibling_profile)
 	app.ceo_profile = sibling_profile
 	app.leave_game()
@@ -155,8 +168,10 @@ func test_independent_game_saves_and_profiles() -> void:
 	expect(app.active_game_id == first_game_id and not has_label("Riley Commerce"),
 		"Load Saves is scoped to the selected game")
 	var slot_card := _slot_card(3)
-	expect(slot_card != null and has_label(Games.save_label(Games.read_slot(first_game_id, 3))),
-		"Manual slot list shows the current game, CEO, company, and slot label")
+	var slot_labels := controls(slot_card, "Label").map(func(node): return str(node.text)) if slot_card != null else []
+	expect(slot_card != null and "Avery Retail" in slot_labels and "Avery Updated" in slot_labels
+		and "Country" in slot_labels and "Simulation Date" in slot_labels and "Save Type" in slot_labels and "Last Saved" in slot_labels,
+		"Manual slot card shows company, CEO, country, simulation date, save type, and last saved date without a concatenated duplicate label")
 	app.load_slot(3)
 	expect(app.screen == "Game" and app.active_game_id == first_game_id and app.sim.state.owner == "Avery Updated" and app.sim.state.company == "Avery Retail",
 		"Loading a manual slot restores only its owning game's company")
@@ -165,6 +180,9 @@ func test_delete_confirmation_is_scoped() -> void:
 	app.leave_game()
 	app.choose_company_in_game(first_game_id)
 	var company_card := _company_card("Avery Wholesale")
+	var duplicate_card := _company_card("Avery Retail · " + duplicate_company_id.right(6))
+	expect(duplicate_card != null and _company_card("Avery Retail") == null,
+		"Duplicate company names receive a stable short identifier in Choose Company")
 	var company_delete := _button_in(company_card, "Delete Company") if company_card != null else null
 	expect(company_delete != null, "Company selection exposes Delete Company only for owned businesses")
 	if company_delete != null:
@@ -175,8 +193,9 @@ func test_delete_confirmation_is_scoped() -> void:
 		await process_frame
 		var first_profile := CEO.load_game_profile(first_game_id)
 		expect(CEO.company_index(first_profile, sibling_company_id) == -1
-			and first_profile.companies.size() == 1 and first_profile.companies[0].name == "Avery Retail",
-			"Deleting an owned company removes its portfolio entry while preserving the other same-game company and CEO career")
+				and first_profile.companies.size() == 2 and first_profile.companies.any(func(entry): return entry.name == "Avery Retail")
+				and first_profile.companies.any(func(entry): return str(entry.company_id) == duplicate_company_id),
+				"Deleting one owned company removes only its portfolio entry while preserving both distinct Avery Retail records and CEO career")
 		expect(Games.read_slot(first_game_id, 2).is_empty() and not Games.read_slot(first_game_id, 1).is_empty()
 			and Games.read_slot(second_game_id, 1).state.company == "Riley Commerce"
 			and Saves.load_state(CEO.company_path_for_game(first_game_id, str(sibling_company_id))).is_empty(),
@@ -234,10 +253,7 @@ func _company_card(company_name: String) -> Control:
 func _game_card(game_id: String) -> Control:
 	var game := Games.get_game(game_id)
 	if game.is_empty(): return null
-	for node in controls(app, "VBoxContainer"):
-		if node.get_parent() is PanelContainer and node.get_child_count() > 0 and node.get_child(0) is Label and node.get_child(0).text == str(game.game_name):
-			return node
-	return null
+	return app.find_child("SavedGame_%s" % game_id, true, false) as Control
 
 func _button_in(node: Node, title: String) -> Button:
 	if node == null: return null

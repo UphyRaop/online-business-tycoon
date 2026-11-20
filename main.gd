@@ -252,7 +252,8 @@ func _create_card(parent: Node, title: String) -> VBoxContainer:
 	if parent == page_grid:
 		page_cards.append(surface)
 	var content := stack(surface)
-	content.add_child(label(title, 20))
+	if not title.is_empty():
+		content.add_child(label(title, 20))
 	return content
 
 func divider(parent: Node) -> void:
@@ -301,7 +302,7 @@ func _update_responsive_layout() -> void:
 		var inventory_index := inventory_panel.get_index()
 		inventory_parent.remove_child(inventory_panel)
 		inventory_panel.queue_free()
-		var replacement := InventoryOverview.build(sim, mobile_layout)
+		var replacement := InventoryOverview.build(sim, mobile_layout, self)
 		inventory_parent.add_child(replacement)
 		inventory_parent.move_child(replacement, inventory_index)
 	var date_label := find_child("GameDate", true, false) as Label
@@ -328,12 +329,17 @@ func _update_responsive_layout() -> void:
 		navigation_drawer.offset_right = drawer_width
 	if is_instance_valid(navigation_toggle):
 		navigation_toggle.custom_minimum_size.x = 52 if viewport_width < 600.0 else 76
-	if is_instance_valid(bank_balance_label):
-		bank_balance_label.custom_minimum_size.x = 112 if viewport_width < 600.0 else 225
-		_refresh_bank_balance()
+	if is_instance_valid(bank_balance_label): _refresh_bank_balance()
 	var kpis := find_child("DashboardKpis", true, false) as GridContainer
 	if kpis != null:
 		kpis.columns = 4 if viewport_width >= 900.0 else 2
+	var shortcuts := find_child("DashboardShortcuts", true, false) as GridContainer
+	if shortcuts != null:
+		shortcuts.columns = 3 if viewport_width >= 900.0 else (2 if viewport_width >= 600.0 else 1)
+	for grid_name in ["SavedGameCards", "LoadGameCards", "GameSaveSlots", "ChooseCompanyCards"]:
+		var grid := find_child(grid_name, true, false) as GridContainer
+		if grid != null:
+			grid.columns = 3 if viewport_width >= 900.0 else (2 if viewport_width >= 600.0 else 1)
 
 func _reflow_page_cards() -> void:
 	if not is_instance_valid(page_grid):
@@ -386,25 +392,10 @@ func set_notice(message: String, error: bool = false) -> void:
 	_refresh_bank_balance()
 
 func _refresh_bank_balance() -> void:
-	if not is_instance_valid(bank_balance_label) or sim == null or screen != "Game":
+	if not is_instance_valid(bank_balance_label) or sim == null or screen != "Game" or page != "Dashboard":
 		return
-	var balance := money(int(sim.state.get("cash", 0)))
-	if size.x < 600.0:
-		bank_balance_label.text = "Bank Balance\n" + balance
-		bank_balance_label.tooltip_text = "Available bank balance"
-		var compact_font := 12
-		var mobile_font_resource := bank_balance_label.get_theme_default_font()
-		while compact_font > 8 and mobile_font_resource.get_string_size(balance, HORIZONTAL_ALIGNMENT_LEFT, -1, compact_font).x > bank_balance_label.custom_minimum_size.x - 4:
-			compact_font -= 1
-		bank_balance_label.add_theme_font_size_override("font_size", compact_font)
-	else:
-		var display_text := "Bank Balance  ·  " + balance
-		bank_balance_label.text = display_text
-		var desktop_font := 14
-		var desktop_font_resource := bank_balance_label.get_theme_default_font()
-		while desktop_font > 9 and desktop_font_resource.get_string_size(display_text, HORIZONTAL_ALIGNMENT_LEFT, -1, desktop_font).x > bank_balance_label.custom_minimum_size.x - 4:
-			desktop_font -= 1
-		bank_balance_label.add_theme_font_size_override("font_size", desktop_font)
+	bank_balance_label.text = money(int(sim.state.get("cash", 0)))
+	bank_balance_label.add_theme_color_override("font_color", Style.RED if int(sim.state.get("cash", 0)) < 0 else Style.GOLD)
 
 func persist(message: String) -> void:
 	_sync_ceo_profile()
@@ -813,31 +804,49 @@ func _company_entry_country_index(entry: Dictionary) -> int:
 	return Catalog.COUNTRIES.find(saved_country)
 
 func company_selection() -> void:
-	var view := wide_card("Choose a Company")
-	view.add_child(label("Each owned company keeps separate operations, accounts, and saved progress.", 14, Style.MUTED))
+	var view := wide_card("")
+	var actions := row(view)
+	var start_action := action(actions, "Start a New Company", func(): show_screen("Setup"), true)
+	start_action.name = "StartAnotherCompany"
+	var back_action := action(actions, "Back to Title", func(): show_screen("Title"))
+	back_action.name = "BackToTitle"
 	var owned: Array[Dictionary] = CEOProfile.owned_companies(ceo_profile)
 	if owned.is_empty():
-		view.add_child(label("You do not currently own a company. Start a new company to continue your career.", 15, Style.MUTED))
-		action(view, "Start a New Company", func(): show_screen("Setup"), true)
+		view.add_child(label("You do not currently own a company.", 15, Style.MUTED))
 	else:
+		var name_counts := {}
 		for entry in owned:
-			var row := card(str(entry.get("name", "Company")))
-			metric(row, "Country", company_entry_country(entry))
-			metric(row, "Lifetime net sales", sale_money(int(entry.get("lifetime_sales", 0)), company_entry_currency(entry)))
-			metric(row, "Lifetime net profit", sale_money(int(entry.get("lifetime_profit", 0)), company_entry_currency(entry)))
-			action(row, "Open Company", switch_company.bind(str(entry.get("company_id", ""))), true)
-			action(row, "Delete Company", delete_company.bind(str(entry.get("company_id", ""))))
-		action(view, "Start Another Company", func(): show_screen("Setup"))
+			var company_name := str(entry.get("name", "Company"))
+			name_counts[company_name] = int(name_counts.get(company_name, 0)) + 1
+		var companies_grid := GridContainer.new()
+		companies_grid.name = "ChooseCompanyCards"
+		companies_grid.columns = 2 if size.x >= 768.0 else 1
+		companies_grid.add_theme_constant_override("h_separation", 12)
+		companies_grid.add_theme_constant_override("v_separation", 10)
+		view.add_child(companies_grid)
+		for entry in owned:
+			var company_name := str(entry.get("name", "Company"))
+			var company_id := str(entry.get("company_id", ""))
+			if int(name_counts.get(company_name, 0)) > 1:
+				var short_id := company_id.right(6) if company_id.length() > 6 else company_id
+				company_name += " · %s" % short_id
+			var company_card := _create_card(companies_grid, company_name)
+			company_card.name = "OwnedCompany_%s" % company_id
+			metric(company_card, "Country", company_entry_country(entry))
+			metric(company_card, "Lifetime Net Sales", sale_money(int(entry.get("lifetime_sales", 0)), company_entry_currency(entry)))
+			metric(company_card, "Lifetime Net Profit", sale_money(int(entry.get("lifetime_profit", 0)), company_entry_currency(entry)))
+			var card_actions := row(company_card)
+			action(card_actions, "Open Company", switch_company.bind(company_id), true)
+			action(card_actions, "Delete Company", delete_company.bind(company_id))
 	var sold: Array[Dictionary] = []
 	for entry in ceo_profile.get("companies", []):
 		if entry is Dictionary and str(entry.get("ownership_status", "owned")) == "sold": sold.append(entry)
 	if not sold.is_empty():
-		var archive := card("Sold Company Records")
+		var archive := _create_card(view, "Sold Company Records")
 		archive.add_child(label("Sold businesses remain in your career history and cannot be reopened or deleted.", 13, Style.MUTED))
 		for entry in sold:
 			var sale: Dictionary = entry.get("sale_record", {})
 			archive.add_child(label("%s · Sold for %s · %s" % [str(entry.get("name", "Company")), sale_money(int(sale.get("amount", 0)), str(sale.get("currency", ""))), str(sale.get("date", "Date unavailable"))], 14, Style.GOLD))
-	action(view, "Back to Title", func(): show_screen("Title"))
 
 func profile_page() -> void:
 	if ceo_profile_corrupt:
@@ -1386,41 +1395,21 @@ func primary_navigation(parent: Node) -> Button:
 	_apply_drawer_icon(menu_button, DRAWER_ICON_PATHS.Menu, 20)
 	navigation_toggle = menu_button
 	var viewport_width := size.x
-	var balance := label("", 12 if viewport_width < 600.0 else 14, Style.GOLD)
-	balance.name = "CompanyBankBalance"
-	balance.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	balance.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	balance.size_flags_horizontal = Control.SIZE_SHRINK_END
-	balance.custom_minimum_size.x = 112 if viewport_width < 600.0 else 225
-	balance.autowrap_mode = TextServer.AUTOWRAP_OFF
-	balance.clip_text = false
-	balance.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-	heading.add_child(balance)
-	bank_balance_label = balance
-	_refresh_bank_balance()
-	if viewport_width < 600.0:
-		var date_row := row(parent)
-		var mobile_date := label(_game_date_text(viewport_width), 12, Style.MUTED)
-		mobile_date.name = "GameDate"
-		mobile_date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		mobile_date.autowrap_mode = TextServer.AUTOWRAP_OFF
-		mobile_date.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		mobile_date.tooltip_text = _game_date_text(viewport_width)
-		date_row.add_child(mobile_date)
-	else:
-		var desktop_date := label(_game_date_text(viewport_width), 14, Style.MUTED)
-		desktop_date.name = "GameDate"
-		desktop_date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		desktop_date.autowrap_mode = TextServer.AUTOWRAP_OFF
-		heading.add_child(desktop_date)
-		heading.move_child(desktop_date, 1)
-		desktop_date.tooltip_text = _game_date_text(viewport_width)
+	var date := label(_game_date_text(viewport_width), 12 if viewport_width < 600.0 else 14, Style.MUTED)
+	date.name = "GameDate"
+	date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	date.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	date.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	date.autowrap_mode = TextServer.AUTOWRAP_OFF
+	date.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	date.tooltip_text = _game_date_text(viewport_width)
+	heading.add_child(date)
 	_create_navigation_drawer()
 	return menu_button
 
 func _game_date_text(viewport_width: float) -> String:
 	var country: String = Catalog.COUNTRIES[int(sim.state.country)]
-	return "Day %d · %s | %s" % [sim.state.day, Calendar.format(sim.state.day), country]
+	return "Day %d\n%s | %s" % [sim.state.day, Calendar.format(sim.state.day), country]
 
 func advance_day_controls(parent: Node) -> void:
 	var controls := row(parent)
@@ -1832,6 +1821,27 @@ func dashboard() -> void:
 	var totals := sim.report_completed(maxi(1, sim.state.day - 1))
 	var overview := wide_card(sim.state.company)
 	overview.add_child(label(sim.state.owner + ", CEO", 16, Style.MUTED))
+	var balance_card := PanelContainer.new()
+	balance_card.name = "DashboardBankBalanceCard"
+	balance_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	balance_card.custom_minimum_size.y = 78
+	balance_card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.GOLD, 10, 10))
+	var balance_stack := VBoxContainer.new()
+	balance_stack.add_theme_constant_override("separation", 2)
+	balance_stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	balance_card.add_child(balance_stack)
+	var balance_title := label("Bank Balance", 13, Style.GOLD)
+	balance_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	balance_stack.add_child(balance_title)
+	bank_balance_label = label(money(int(sim.state.get("cash", 0))), 22, Style.GOLD)
+	bank_balance_label.name = "DashboardBankBalanceValue"
+	bank_balance_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bank_balance_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	bank_balance_label.clip_text = false
+	bank_balance_label.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	balance_stack.add_child(bank_balance_label)
+	overview.add_child(balance_card)
+	_refresh_bank_balance()
 	var active_marketplaces := 0
 	var active_websites := 0
 	for store in sim.state.stores:
@@ -1847,32 +1857,39 @@ func dashboard() -> void:
 	kpis.add_theme_constant_override("v_separation", 8)
 	kpis.name = "DashboardKpis"
 	overview.add_child(kpis)
-	_add_kpi(kpis, "Lifetime net sales", money(totals.sales - totals.refunds))
-	_add_kpi(kpis, "Lifetime net profit", money(Sim.net(totals)), profit_color(Sim.net(totals)))
-	_add_kpi(kpis, "Orders fulfilled", str(totals.channels[0].orders + totals.channels[1].orders + totals.channels[2].orders))
-	_add_kpi(kpis, "Open orders", str(sim.state.active_orders.size()))
-	_add_kpi(kpis, "Store reputation", "%d / 100" % sim.state.reputation)
-	_add_kpi(kpis, "Marketplace stores · Websites", "%d · %d" % [active_marketplaces, active_websites])
-	_add_kpi(kpis, "Active campaigns · Lifetime spend", "%d · %s" % [active_campaigns, money(totals.advertising)])
-	page_wide.add_child(InventoryOverview.build(sim, size.x < 600.0))
-	var products_button := action(overview, "My Products   ›", navigate.bind("My Products"))
-	products_button.name = "DashboardMyProducts"
-	products_button.icon = load(NAV_ICON_PATHS.Market) as Texture2D
-	products_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_add_kpi(kpis, "Lifetime Net Sales", money(totals.sales - totals.refunds))
+	_add_kpi(kpis, "Lifetime Net Profit", money(Sim.net(totals)), profit_color(Sim.net(totals)))
+	_add_kpi(kpis, "Orders Fulfilled", str(totals.channels[0].orders + totals.channels[1].orders + totals.channels[2].orders))
+	_add_kpi(kpis, "Open Orders", str(sim.state.active_orders.size()))
+	_add_kpi(kpis, "Store Reputation", "%d / 100" % sim.state.reputation)
+	_add_kpi(kpis, "Marketplace / Website", "%d / %d" % [active_marketplaces, active_websites])
+	_add_kpi(kpis, "Active Campaigns", str(active_campaigns))
+	var ad_spend := _add_kpi(kpis, "Ad Spend", money(int(totals.advertising)))
+	ad_spend.tooltip_text = "Lifetime advertising spend from completed simulation days."
+	page_wide.add_child(InventoryOverview.build(sim, size.x < 600.0, self))
 	var channel_grid := GridContainer.new()
-	channel_grid.name = "DashboardChannelSummaries"
-	channel_grid.columns = 2 if size.x >= 600.0 else 1
+	channel_grid.name = "DashboardShortcuts"
+	channel_grid.columns = 3 if size.x >= 900.0 else (2 if size.x >= 600.0 else 1)
 	channel_grid.add_theme_constant_override("h_separation", 12)
 	channel_grid.add_theme_constant_override("v_separation", 12)
 	page_wide.add_child(channel_grid)
 	var store_card := _create_card(channel_grid, "Store Management")
 	store_card.name = "DashboardStoreManagement"
-	store_card.add_child(label("Create, manage and monitor your stores.", 14, Style.MUTED))
+	(store_card.get_parent() as Control).name = "DashboardStoreManagement"
+	store_card.add_child(label("Create and manage your stores.", 14, Style.MUTED))
 	var store_button := action(store_card, "Manage Stores", navigate.bind("Management"), true)
 	store_button.icon = load(NAV_ICON_PATHS.Business) as Texture2D
 	store_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var listing_card := _create_card(channel_grid, "Listing Products")
+	listing_card.name = "DashboardListingProducts"
+	(listing_card.get_parent() as Control).name = "DashboardListingProducts"
+	listing_card.add_child(label("Manage your published and unpublished product listings.", 14, Style.MUTED))
+	var listing_button := action(listing_card, "My Products", navigate.bind("My Products"))
+	listing_button.icon = load(NAV_ICON_PATHS.Market) as Texture2D
+	listing_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	var sourcing_card := _create_card(channel_grid, "Product Sourcing")
 	sourcing_card.name = "DashboardProductSourcing"
+	(sourcing_card.get_parent() as Control).name = "DashboardProductSourcing"
 	sourcing_card.add_child(label("Discover products, compare suppliers and purchase inventory.", 14, Style.MUTED))
 	var sourcing_button := action(sourcing_card, "Browse Product Catalogue", navigate.bind("Product Catalogue"))
 	sourcing_button.icon = load(NAV_ICON_PATHS.Market) as Texture2D
@@ -1901,7 +1918,7 @@ func dashboard() -> void:
 		alerts.add_child(label("No business alerts.", 14, Style.MUTED))
 	channel_cards(totals, "Completed days · lifetime")
 
-func _add_kpi(parent: GridContainer, caption: String, value: String, color: Color = Style.TEXT) -> void:
+func _add_kpi(parent: GridContainer, caption: String, value: String, color: Color = Style.TEXT) -> PanelContainer:
 	var panel := PanelContainer.new()
 	panel.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 9, 10))
 	panel.custom_minimum_size.x = 105
@@ -1910,6 +1927,7 @@ func _add_kpi(parent: GridContainer, caption: String, value: String, color: Colo
 	var content := stack(panel, 3)
 	content.add_child(label(caption, 12, Style.MUTED))
 	content.add_child(label(value, 16, color))
+	return panel
 
 func advance(days: int) -> void:
 	if sim == null or days not in [1, 2, 7, 30]:

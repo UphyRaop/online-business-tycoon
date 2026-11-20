@@ -4,6 +4,7 @@ const Sim = preload("res://simulation.gd")
 const Catalog = preload("res://catalog.gd")
 const InventoryOverview = preload("res://dashboard_inventory.gd")
 const PortraitFrame = preload("res://portrait_frame.gd")
+const Stores = preload("res://store_manager.gd")
 
 var failures := 0
 
@@ -22,9 +23,14 @@ func expect(condition: bool, message: String) -> void:
 func test_inventory_counts() -> void:
 	var sim := Sim.new(Sim.register("Ari Founder", "Ari Trading", "", 0, 1, 0, 991))
 	sim.add_stock(0, _lot(1000))
+	sim.add_stock(1, _lot(0))
 	sim.add_stock(2, _lot(1))
+	sim.add_stock(3, _lot(0))
 	sim.add_stock(4, _lot(2))
 	sim.add_stock(5, _lot(998))
+	var store_error := Stores.create(sim.state, "Ari Marketplace", 0, "Shopee", "", 0)
+	var store_id := int(sim.state.stores.back().id)
+	var listing_error := Stores.set_listing(sim.state, store_id, 0, 12500, true)
 	sim.state.active_orders = [1, 2, 3]
 	sim.state.orders = {
 		1: {"status": "queued", "items": [{"product": 0, "cost": 4000}, {"product": 3, "cost": 2500}, {"product": 1, "cost": 3000, "direct_supplier": 0}]},
@@ -40,11 +46,15 @@ func test_inventory_counts() -> void:
 			reserved_only = product_row
 	expect(result.total_units == 2003 and result.available_units == 2001 and result.reserved_units == 2,
 		"The dashboard distinguishes available warehouse units from warehouse units reserved for active orders")
-	expect(result.products_in_stock == 4 and result.low_stock_products == 2 and result.out_of_stock_products == Catalog.PRODUCTS.size() - 4
+	expect(result.products_in_stock == 4 and result.low_stock_products == 2 and result.out_of_stock_products == 2
 		and reserved_only.get("status", "") == "out_of_stock" and int(reserved_only.get("reserved", 0)) == 1,
-		"Stock availability excludes reserved customer orders while showing reserved units separately")
+		"Stock totals include only the six business-owned products, exclude unrelated catalogue items, and show reservations separately")
 	expect(result.preorder_demand == 3,
 		"Pending pre-order demand counts only awaiting-stock units and excludes supplier-direct fulfillment")
+	var published_row: Dictionary = result.products.filter(func(item): return int(item.id) == 0).front()
+	expect(store_error.is_empty() and listing_error.is_empty() and published_row.get("listing_status", "") == "Published"
+		and published_row.get("stock_status", "") == "In Stock" and result.products.size() == 6,
+		"Dashboard rows show actual owned listing status and do not include catalogue-only products")
 	expect(sim.state.cash == before_cash and sim.stock(0) + sim.stock(2) + sim.stock(4) + sim.stock(5) == before_units,
 		"Building inventory metrics does not change company cash or stock")
 	expect(InventoryOverview._number(1200345) == "1,200,345",
@@ -63,6 +73,14 @@ func test_mobile_layout() -> void:
 	expect(panel.size.x >= 0 and panel.get_child_count() == 1,
 		"Mobile overview builds as a single responsive panel without separate wide table columns")
 	panel.queue_free()
+	await process_frame
+	var empty_sim := Sim.new(Sim.register("Ari Founder", "Empty Trading", "", 0, 1, 0, 994))
+	var empty_panel := InventoryOverview.build(empty_sim, true)
+	expect(InventoryOverview.summary(empty_sim).products.is_empty()
+		and empty_panel.find_child("EmptyProductState", true, false) is Label
+		and empty_panel.find_child("InventoryBrowseProductCatalogue", true, false) == null,
+		"Companies with no products show the precise empty state without fabricating catalogue stock rows")
+	empty_panel.queue_free()
 	await process_frame
 
 func test_portrait_frame() -> void:

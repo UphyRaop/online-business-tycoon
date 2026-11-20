@@ -5,6 +5,7 @@ extends RefCounted
 ## in total stock units until fulfillment records COGS.
 const Catalog = preload("res://catalog.gd")
 const Style = preload("res://corporate_theme.gd")
+const ProductsView = preload("res://products_view.gd")
 
 const LOW_STOCK_THRESHOLD := 3
 const MOBILE_ROW_LIMIT := 5
@@ -12,6 +13,10 @@ const DESKTOP_ROW_LIMIT := 8
 
 static func summary(sim: RefCounted) -> Dictionary:
 	var per_product: Array[Dictionary] = []
+	var owned_products: Array[int] = ProductsView.owned_products(sim.state)
+	var owned_lookup := {}
+	for product in owned_products:
+		owned_lookup[product] = true
 	var reserved_by_product := {}
 	var preorder_by_product := {}
 	var active_orders: Array = sim.state.get("active_orders", [])
@@ -21,7 +26,7 @@ static func summary(sim: RefCounted) -> Dictionary:
 			continue
 		for line in order.get("items", []):
 			var product := int(line.get("product", -1))
-			if product not in range(Catalog.PRODUCTS.size()):
+			if product not in owned_lookup:
 				continue
 			if line.get("awaiting_stock", false):
 				if order.get("preorder", false):
@@ -37,7 +42,7 @@ static func summary(sim: RefCounted) -> Dictionary:
 	var low_stock_products := 0
 	var out_of_stock_products := 0
 	var preorder_demand := 0
-	for product in Catalog.PRODUCTS.size():
+	for product in owned_products:
 		var available: int = maxi(0, int(sim.stock(product)))
 		var reserved: int = int(reserved_by_product.get(product, 0))
 		var pending: int = int(preorder_by_product.get(product, 0))
@@ -51,6 +56,8 @@ static func summary(sim: RefCounted) -> Dictionary:
 				low_stock_products += 1
 		else:
 			out_of_stock_products += 1
+		var listing_state := ProductsView.product_status(sim.state, product, available)
+		var listing_status := "Unpublished" if listing_state == "Draft" else "Published"
 		per_product.append({
 			"id": product,
 			"name": str(Catalog.PRODUCTS[product].name),
@@ -59,6 +66,8 @@ static func summary(sim: RefCounted) -> Dictionary:
 			"units": physical_and_reserved,
 			"preorder_demand": pending,
 			"status": _status(available),
+			"listing_status": listing_status,
+			"stock_status": "Out of Stock" if available <= 0 else ("Low Stock" if available <= LOW_STOCK_THRESHOLD else "In Stock"),
 		})
 	per_product.sort_custom(func(a: Dictionary, b: Dictionary):
 		var a_rank := _priority(a)
@@ -77,10 +86,11 @@ static func summary(sim: RefCounted) -> Dictionary:
 		"low_stock_products": low_stock_products,
 		"out_of_stock_products": out_of_stock_products,
 		"preorder_demand": preorder_demand,
+		"owned_product_count": owned_products.size(),
 		"products": per_product,
 	}
 
-static func build(sim: RefCounted, mobile: bool = false) -> PanelContainer:
+static func build(sim: RefCounted, mobile: bool = false, app: Control = null) -> PanelContainer:
 	var data := summary(sim)
 	var panel := PanelContainer.new()
 	panel.name = "DashboardInventoryOverview"
@@ -128,19 +138,30 @@ static func build(sim: RefCounted, mobile: bool = false) -> PanelContainer:
 	var rows: Array = data.products
 	var row_limit := MOBILE_ROW_LIMIT if mobile else DESKTOP_ROW_LIMIT
 	var visible_count := mini(rows.size(), row_limit)
+	if rows.is_empty():
+		var empty := Label.new()
+		empty.name = "EmptyProductState"
+		empty.text = "No products added yet."
+		empty.add_theme_font_size_override("font_size", 14)
+		empty.add_theme_color_override("font_color", Style.MUTED)
+		content.add_child(empty)
 	for index in visible_count:
 		var item: Dictionary = rows[index]
 		if mobile:
 			_add_mobile_row(content, item)
 		else:
 			_add_desktop_row(content, item)
-	if rows.size() > visible_count:
-		var more := Label.new()
-		more.text = "%d more products · Open Inventory Management for all stock" % (rows.size() - visible_count)
-		more.add_theme_font_size_override("font_size", 12)
-		more.add_theme_color_override("font_color", Style.MUTED)
-		more.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		content.add_child(more)
+	var actions := FlowContainer.new()
+	actions.name = "InventoryOverviewActions"
+	actions.add_theme_constant_override("h_separation", 8)
+	actions.add_theme_constant_override("v_separation", 6)
+	content.add_child(actions)
+	if app != null:
+		if rows.is_empty():
+			var browse: Button = app.action(actions, "Browse Product Catalogue", app.navigate.bind("Product Catalogue"), true)
+			browse.name = "InventoryBrowseProductCatalogue"
+		var view_all: Button = app.action(actions, "View All Products", app.navigate.bind("My Products"))
+		view_all.name = "InventoryViewAllProducts"
 	return panel
 
 static func _add_metric(parent: GridContainer, title: String, value: String, color: Color) -> void:
@@ -178,6 +199,11 @@ static func _add_mobile_row(parent: VBoxContainer, item: Dictionary) -> void:
 	title.add_theme_color_override("font_color", Style.TEXT)
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	stack.add_child(title)
+	var status := Label.new()
+	status.text = "%s · %s" % [str(item.listing_status), str(item.stock_status)]
+	status.add_theme_font_size_override("font_size", 11)
+	status.add_theme_color_override("font_color", Style.RED if str(item.stock_status) == "Out of Stock" else (Style.GOLD if str(item.listing_status) == "Unpublished" or str(item.stock_status) == "Low Stock" else Style.GREEN))
+	stack.add_child(status)
 	var details := Label.new()
 	details.text = "Available %s  ·  Reserved %s  ·  Pre-orders %s" % [_number(item.available), _number(item.reserved), _number(item.preorder_demand)]
 	details.add_theme_font_size_override("font_size", 11)
@@ -195,7 +221,16 @@ static func _add_desktop_row(parent: VBoxContainer, item: Dictionary) -> void:
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.add_theme_font_size_override("font_size", 13)
 	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	row.add_child(name)
+	var identity := VBoxContainer.new()
+	identity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	identity.add_theme_constant_override("separation", 2)
+	identity.add_child(name)
+	var status := Label.new()
+	status.text = "%s · %s" % [str(item.listing_status), str(item.stock_status)]
+	status.add_theme_font_size_override("font_size", 11)
+	status.add_theme_color_override("font_color", Style.RED if str(item.stock_status) == "Out of Stock" else (Style.GOLD if str(item.listing_status) == "Unpublished" or str(item.stock_status) == "Low Stock" else Style.GREEN))
+	identity.add_child(status)
+	row.add_child(identity)
 	var quantities := Label.new()
 	quantities.text = "Available %s  ·  Reserved %s  ·  Pre-orders %s" % [_number(item.available), _number(item.reserved), _number(item.preorder_demand)]
 	quantities.size_flags_horizontal = Control.SIZE_SHRINK_END

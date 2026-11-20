@@ -21,16 +21,48 @@ func run() -> void:
 		and dashboard_inventory.find_child("InventorySummaryMetrics", true, false) != null
 		and dashboard_inventory.find_child("PreorderDemandSummary", true, false) != null,
 		"Dashboard includes responsive stock, reservation, low/out-of-stock, and pre-order inventory summaries")
+	expect(dashboard_inventory.find_child("EmptyProductState", true, false) != null
+		and dashboard_inventory.find_child("InventoryBrowseProductCatalogue", true, false) != null
+		and dashboard_inventory.find_child("InventoryViewAllProducts", true, false) != null,
+		"A company with no products gets the compact empty state plus Browse Product Catalogue and View All Products actions")
+	var dashboard_kpis: GridContainer = app.find_child("DashboardKpis", true, false)
+	var kpi_names: Array[String] = []
+	if dashboard_kpis != null:
+		for kpi in dashboard_kpis.get_children():
+			var labels := controls(kpi, "Label")
+			kpi_names.append(str(labels.front().text) if not labels.is_empty() else "")
+	expect(kpi_names == ["Lifetime Net Sales", "Lifetime Net Profit", "Orders Fulfilled", "Open Orders",
+		"Store Reputation", "Marketplace / Website", "Active Campaigns", "Ad Spend"]
+		and not has_label("Operating Cost") and not has_label("Active campaigns · Lifetime spend"),
+		"Dashboard presents exactly the eight approved KPIs, with Active Campaigns and Ad Spend separate")
+	var dashboard_shortcuts: GridContainer = app.find_child("DashboardShortcuts", true, false)
+	expect(dashboard_shortcuts != null and dashboard_shortcuts.get_children().map(func(item): return str(item.name))
+		== ["DashboardStoreManagement", "DashboardListingProducts", "DashboardProductSourcing"],
+		"Dashboard shortcuts appear in Store Management, Listing Products, Product Sourcing order")
+	expect(app.find_child("CompanyBankBalance", true, false) == null
+		and app.find_child("DashboardBankBalanceCard", true, false) != null,
+		"Bank Balance is on Dashboard, not in global navigation")
+	press("Manage Stores")
+	expect(app.page == "Management", "Manage Stores dashboard shortcut opens Business Store Management")
+	app.navigate("Dashboard")
+	press("My Products")
+	expect(app.page == "My Products", "Listing Products dashboard shortcut opens the existing My Products page")
+	app.navigate("Dashboard")
+	press("Browse Product Catalogue")
+	expect(app.page == "Market", "Product Sourcing dashboard shortcut opens Market Product Catalogue")
+	app.navigate("Dashboard")
 	var nav: PanelContainer = app.find_child("PrimaryNavigation", true, false)
 	var game_date: Label = app.find_child("GameDate", true, false)
 	var menu_button: Button = app.find_child("NavigationMenuButton", true, false)
-	var bank_balance: Label = app.find_child("CompanyBankBalance", true, false)
+	var bank_balance: Label = app.find_child("DashboardBankBalanceValue", true, false)
 	var advance_controls: HBoxContainer = app.find_child("GlobalAdvanceDayControls", true, false)
 	expect(nav != null and game_date != null and menu_button != null and bank_balance != null
-		and menu_button.get_parent() == game_date.get_parent() and bank_balance.get_parent() == game_date.get_parent()
-		and menu_button.icon != null and game_date.text.contains(" | ") and bank_balance.text.contains(app.money(app.sim.state.cash)),
-		"Header groups the hamburger, date/location, and actual available company bank balance on one row")
-	expect(game_date.text.begins_with("Day 1 · ") and advance_controls != null
+		and menu_button.get_parent() == game_date.get_parent() and app.find_child("CompanyBankBalance", true, false) == null
+		and menu_button.icon != null and game_date.text.contains(" | ")
+		and game_date.text.begins_with("Day 1\n") and bank_balance.text.contains(app.money(app.sim.state.cash))
+		and bank_balance.get_parent().get_parent().name == "DashboardBankBalanceCard",
+		"Header places the date at the right and keeps the full-width gold Bank Balance card on Dashboard only")
+	expect(advance_controls != null
 		and controls(advance_controls, "Button").map(func(button): return button.text) == ["+1", "+2", "+7", "+30"],
 		"Day 1 date and all four global Advance Day controls appear below the header")
 	var advance_one: Button = advance_controls.find_child("AdvanceDays1", true, false)
@@ -47,13 +79,19 @@ func run() -> void:
 	expect(page_heading != null and controls(page_heading, "Button").is_empty(),
 		"Save Game and Main Menu are not duplicated beside the page heading")
 	var content_scroll: ScrollContainer = app.find_child("GameContentScroll", true, false)
-	expect(content_scroll != null and not content_scroll.is_ancestor_of(game_date),
-		"Date, menu, and balance stay outside the page scroll area while content scrolls")
+	expect(content_scroll != null and not content_scroll.is_ancestor_of(game_date)
+		and content_scroll.is_ancestor_of(bank_balance),
+		"Date stays in the global header while the Dashboard bank balance scrolls with page content")
 	var current_cash: int = app.sim.state.cash
 	app.sim.state.cash = current_cash - 12345
 	app.set_notice("Balance refresh check")
-	bank_balance = app.find_child("CompanyBankBalance", true, false)
-	expect(bank_balance.text.contains(app.money(app.sim.state.cash)), "Header balance refreshes immediately after company cash changes")
+	bank_balance = app.find_child("DashboardBankBalanceValue", true, false)
+	expect(bank_balance.text.contains(app.money(app.sim.state.cash)), "Dashboard balance refreshes immediately after company cash changes")
+	app.sim.state.cash = -12345
+	app.set_notice("Negative balance check")
+	bank_balance = app.find_child("DashboardBankBalanceValue", true, false)
+	expect(bank_balance.text.contains(app.money(-12345)) and bank_balance.get_theme_color("font_color") == Style.RED,
+		"Dashboard displays negative bank balances with loss coloring")
 	app.sim.state.cash = current_cash
 	app.set_notice("")
 	expect(nav != null and not nav.is_visible_in_tree(), "Primary navigation drawer is hidden by default")
@@ -325,9 +363,12 @@ func run() -> void:
 		expect(str(app.sim.state.company_id) == str(second_company.company_id)
 			and app.sim.state.company == "Harbor Digital" and app.ceo_profile.full_name == "Kai Global CEO",
 			"Company switching restores a separate save and keeps CEO progression linked")
-		var switched_balance: Label = app.find_child("CompanyBankBalance", true, false)
+		expect(app.find_child("CompanyBankBalance", true, false) == null,
+			"Switching companies never adds Bank Balance to the global header")
+		app.navigate("Dashboard")
+		var switched_balance: Label = app.find_child("DashboardBankBalanceValue", true, false)
 		expect(switched_balance != null and switched_balance.text.contains(app.money(app.sim.state.cash)),
-			"Header balance updates to the newly active company cash after switching")
+			"Dashboard balance updates to the newly active company's actual cash after switching")
 		app.navigate("Profile")
 		switch_buttons = controls(app, "Button").filter(func(button): return button.text == "Switch")
 		if switch_buttons.size() == 1:
@@ -363,24 +404,12 @@ func run() -> void:
 		Vector2i(375, 812), Vector2i(375, 667), Vector2i(844, 390)]:
 		root.size = viewport
 		await settle("phase4-%dx%d" % [viewport.x, viewport.y])
-		var header_balance: Label = app.find_child("CompanyBankBalance", true, false)
 		var header_date: Label = app.find_child("GameDate", true, false)
 		var global_advance := app.find_child("GlobalAdvanceDayControls", true, false)
-		var header_scale: float = float(viewport.x) / app.get_viewport_rect().size.x
-		expect(header_balance != null and header_date != null and global_advance != null
+		expect(app.find_child("CompanyBankBalance", true, false) == null and header_date != null and global_advance != null
 			and controls(global_advance, "Button").size() == 4 and header_date.text.contains(Catalog.COUNTRIES[app.sim.state.country])
-			and header_date.text.contains(" | ") and header_balance.get_global_rect().position.x * header_scale >= 0
-			and header_balance.get_global_rect().end.x * header_scale <= float(viewport.x) + 1.0,
-			"Header date, location, and bank balance remain visible at %dx%d" % [viewport.x, viewport.y])
-		if viewport.x == 375:
-			var previous_cash: int = app.sim.state.cash
-			app.sim.state.cash = 9876543210123
-			app.set_notice("Large balance layout check")
-			header_balance = app.find_child("CompanyBankBalance", true, false)
-			expect(header_balance.text.contains(app.money(app.sim.state.cash)) and not header_balance.clip_text,
-				"A 10+ digit mobile balance is displayed in full without clipping")
-			app.sim.state.cash = previous_cash
-			app.set_notice("")
+			and header_date.text.contains(" | ") and header_date.text.begins_with("Day %d\n" % app.sim.state.day),
+			"Header date and global Advance Day controls remain visible, without bank balance, at %dx%d" % [viewport.x, viewport.y])
 		_check_primary_tabs_within_viewport(viewport)
 		expect(app.page_grid.columns == (2 if app.size.x >= 768 else 1),
 			"Page panels use the intended responsive column count at %dx%d (actual: %d columns at %.1f px / viewport %.1f px)" % [viewport.x, viewport.y, app.page_grid.columns, app.size.x, app.get_viewport_rect().size.x])
@@ -391,6 +420,20 @@ func run() -> void:
 		var kpis: GridContainer = app.find_child("DashboardKpis", true, false)
 		expect(kpis != null and kpis.columns == (4 if app.size.x >= 900.0 else 2),
 			"Dashboard KPI cards use the intended responsive columns at %dx%d" % [viewport.x, viewport.y])
+		var dashboard_balance: Label = app.find_child("DashboardBankBalanceValue", true, false)
+		var shortcuts: GridContainer = app.find_child("DashboardShortcuts", true, false)
+		expect(dashboard_balance != null and shortcuts != null
+			and shortcuts.get_children().map(func(item): return str(item.name)) == ["DashboardStoreManagement", "DashboardListingProducts", "DashboardProductSourcing"],
+			"Dashboard places Bank Balance and the three approved shortcuts in their required order at %dx%d" % [viewport.x, viewport.y])
+		if viewport.x == 375:
+			var previous_cash: int = app.sim.state.cash
+			app.sim.state.cash = 9876543210123
+			app.set_notice("Large balance layout check")
+			dashboard_balance = app.find_child("DashboardBankBalanceValue", true, false)
+			expect(dashboard_balance.text.contains(app.money(app.sim.state.cash)) and not dashboard_balance.clip_text,
+				"A 10+ digit mobile bank balance is displayed in full without clipping")
+			app.sim.state.cash = previous_cash
+			app.set_notice("")
 		_check_primary_tabs_within_viewport(viewport)
 		var shell_bounds: Rect2 = app.page_shell.get_global_rect()
 		var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
