@@ -805,11 +805,19 @@ func _company_entry_country_index(entry: Dictionary) -> int:
 
 func company_selection() -> void:
 	var view := wide_card("")
-	var actions := row(view)
+	var actions := FlowContainer.new()
+	actions.name = "CompanySelectionActions"
+	actions.add_theme_constant_override("h_separation", 8)
+	actions.add_theme_constant_override("v_separation", 8)
+	view.add_child(actions)
 	var start_action := action(actions, "Start a New Company", func(): show_screen("Setup"), true)
 	start_action.name = "StartAnotherCompany"
+	start_action.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	start_action.custom_minimum_size.x = 184
 	var back_action := action(actions, "Back to Title", func(): show_screen("Title"))
 	back_action.name = "BackToTitle"
+	back_action.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back_action.custom_minimum_size.x = 160
 	var owned: Array[Dictionary] = CEOProfile.owned_companies(ceo_profile)
 	if owned.is_empty():
 		view.add_child(label("You do not currently own a company.", 15, Style.MUTED))

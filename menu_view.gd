@@ -25,10 +25,15 @@ static func brand(app: Control, parent: Node) -> void:
 
 static func title(app: Control) -> void:
 	var play: VBoxContainer = app.wide_card("Continue Playing")
-	var actions: HBoxContainer = app.row(play)
-	app.action(actions, "New Game", app.start_new_game, true)
-	app.action(actions, "Load Game", app.open_screen.bind("Load"))
-	app.action(actions, "Settings", app.open_screen.bind("Settings"))
+	var actions := FlowContainer.new()
+	actions.name = "MainMenuActions"
+	actions.add_theme_constant_override("h_separation", 8)
+	actions.add_theme_constant_override("v_separation", 8)
+	play.add_child(actions)
+	for item in [["New Game", app.start_new_game, true], ["Load Game", app.open_screen.bind("Load"), false], ["Settings", app.open_screen.bind("Settings"), false]]:
+		var button: Button = app.action(actions, item[0], item[1], item[2])
+		button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		button.custom_minimum_size.x = 150 if app.size.x < 600.0 else 172
 	var games := GameStore.list_games()
 	if games.is_empty():
 		play.add_child(app.label("No saved games yet. Start a New Game to begin.", 15, Style.MUTED))
