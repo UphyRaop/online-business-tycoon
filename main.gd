@@ -807,6 +807,8 @@ func company_selection() -> void:
 	var view := wide_card("")
 	var actions := FlowContainer.new()
 	actions.name = "CompanySelectionActions"
+	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	actions.custom_minimum_size.x = minf(360.0, maxf(0.0, size.x - 66.0))
 	actions.add_theme_constant_override("h_separation", 8)
 	actions.add_theme_constant_override("v_separation", 8)
 	view.add_child(actions)
