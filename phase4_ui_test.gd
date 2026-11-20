@@ -105,9 +105,13 @@ func run() -> void:
 	app.sim.state.cash = current_cash
 	app.set_notice("")
 	expect(nav != null and not nav.is_visible_in_tree(), "Primary navigation drawer is hidden by default")
+	var nav_slot := app.find_child("PrimaryNavigationSlot", true, false) as Control
+	expect(nav_slot != null and nav.get_parent() == nav_slot and is_zero_approx(nav_slot.custom_minimum_size.y),
+		"Closed drawer content stays out of the page's measured height")
 	var navigation_state_before: Dictionary = app.sim.state.duplicate(true)
 	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()
-	expect(nav != null and nav.is_visible_in_tree(), "Hamburger opens Main Navigation in normal page flow")
+	expect(nav != null and nav.is_visible_in_tree() and nav_slot.custom_minimum_size.y > 0.0,
+		"Hamburger opens Main Navigation and expands its in-flow slot")
 	await _check_primary_tabs_within_viewport(Vector2i(1280, 720))
 	for tab in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]:
 		var route_name: String = "Order" if tab in ["Order", "Orders"] else tab
@@ -123,7 +127,8 @@ func run() -> void:
 	expect(action_label != null, "Drawer separates navigation from its action section")
 	var close_navigation: Button = nav.find_child("PrimaryNavigationClose", true, false)
 	if close_navigation != null: close_navigation.pressed.emit()
-	expect(not app.navigation_open and not nav.is_visible_in_tree(), "The in-flow navigation Close button collapses Main Navigation")
+	expect(not app.navigation_open and not nav.is_visible_in_tree() and is_zero_approx(nav_slot.custom_minimum_size.y),
+		"The in-flow navigation Close button collapses Main Navigation and releases its page height")
 	expect(content_scroll != null and content_scroll.is_ancestor_of(nav) and not nav.top_level,
 		"Main Navigation participates in the normal scroll layout rather than a viewport overlay")
 	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()

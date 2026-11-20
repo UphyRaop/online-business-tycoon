@@ -44,8 +44,10 @@ static func _refresh_step(app: Control) -> void:
 static func _step_header(app: Control, selected: int) -> VBoxContainer:
 	var panel: VBoxContainer = app.wide_card("Quick Purchase")
 	panel.name = "BuyInventoryWorkflow"
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var outer_panel := panel.get_parent() as PanelContainer
 	if outer_panel != null:
+		outer_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		outer_panel.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 12, 12))
 	var row := HFlowContainer.new()
 	row.name = "BuyInventoryProgress"
@@ -67,7 +69,46 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 			separator.add_theme_color_override("font_color", Style.MUTED)
 			row.add_child(separator)
 	panel.add_child(row)
-	return panel
+	var content_scroll := ScrollContainer.new()
+	content_scroll.name = "BuyInventoryStepScroll"
+	content_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	content_scroll.follow_focus = true
+	content_scroll.mouse_force_pass_scroll_events = true
+	content_scroll.scroll_deadzone = 10
+	panel.add_child(content_scroll)
+	var content := VBoxContainer.new()
+	content.name = "BuyInventoryStepContent"
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 8)
+	content_scroll.add_child(content)
+	var footer := HBoxContainer.new()
+	footer.name = "BuyInventoryNavigationFooter"
+	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_theme_constant_override("separation", 8)
+	panel.add_child(footer)
+	app.set_meta("buy_inventory_footer", footer)
+	return content
+
+static func _footer_button(app: Control, title: String, callback: Callable, name: String, disabled: bool = false) -> Button:
+	var footer := app.get_meta("buy_inventory_footer", null) as HBoxContainer
+	if footer == null:
+		return null
+	var button: Button = app.action(footer, title, callback, title == "Continue" or title == "Confirm Purchase")
+	button.name = name
+	button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	button.disabled = disabled
+	return button
+
+static func _footer_spacer(app: Control) -> void:
+	var footer := app.get_meta("buy_inventory_footer", null) as HBoxContainer
+	if footer == null:
+		return
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(spacer)
 
 static func show_categories(app: Control) -> void:
 	var workflow := _step_header(app, 0)
@@ -111,19 +152,15 @@ static func show_categories(app: Control) -> void:
 			app.set_meta("buy_selected_product", -1)
 			app.refresh_view(true)
 		card.pressed.connect(choose_category)
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 8)
-	catalogue.add_child(actions)
-	var continue_button: Button = app.action(actions, "Continue", func():
+	_footer_spacer(app)
+	_footer_button(app, "Continue", func():
 		if int(app.catalog_category) not in range(Catalog.CATEGORIES.size()):
 			app.set_notice("Select a category to continue.", true)
 			return
 		app.catalog_search = ""
 		app.set_meta(CATALOG_STAGE_META, "products")
 		_refresh_step(app)
-	, true)
-	continue_button.name = "ContinueBuyInventory"
-	continue_button.disabled = int(app.catalog_category) not in range(Catalog.CATEGORIES.size())
+	, "ContinueBuyInventory", int(app.catalog_category) not in range(Catalog.CATEGORIES.size()))
 
 static func show_products(app: Control) -> void:
 	var category_index := int(app.catalog_category)
@@ -191,14 +228,12 @@ static func show_products(app: Control) -> void:
 		empty.visible = visible_count == 0
 		count_label.text = "%d products" % visible_count
 	)
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 8)
-	catalogue.add_child(actions)
-	app.action(actions, "Back", func():
+	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "categories")
 		_refresh_step(app)
-	)
-	var continue_button: Button = app.action(actions, "Continue", func():
+	, "BackFromProducts")
+	_footer_spacer(app)
+	_footer_button(app, "Continue", func():
 		var selected_product := int(app.get_meta("buy_selected_product", -1))
 		if selected_product not in range(Catalog.PRODUCTS.size()) or str(Catalog.PRODUCTS[selected_product].category) != category:
 			app.set_notice("Select a product to continue.", true)
@@ -206,9 +241,7 @@ static func show_products(app: Control) -> void:
 		app.selected_product = selected_product
 		app.set_meta(CATALOG_STAGE_META, "suppliers")
 		_refresh_step(app)
-	, true)
-	continue_button.name = "ContinueBuyInventory"
-	continue_button.disabled = int(app.get_meta("buy_selected_product", -1)) not in range(Catalog.PRODUCTS.size())
+	, "ContinueBuyInventory", int(app.get_meta("buy_selected_product", -1)) not in range(Catalog.PRODUCTS.size()))
 
 static func show_supplier_workflow(app: Control) -> void:
 	app.set_meta(CATALOG_STAGE_META, "suppliers")
@@ -350,23 +383,19 @@ static func show_supplier_selection(app: Control) -> void:
 		choose.name = "SelectSupplier%d" % supplier
 	if _available_suppliers(state, product).is_empty():
 		panel.add_child(app.label("No supplier platforms are currently unlocked for new purchases.", 13, Style.MUTED))
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 8)
-	panel.add_child(actions)
-	app.action(actions, "Back", func():
+	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "products")
 		_refresh_step(app)
-	)
-	var next: Button = app.action(actions, "Continue", func():
+	, "BackFromSuppliers")
+	_footer_spacer(app)
+	_footer_button(app, "Continue", func():
 		var supplier := _supplier_for(app, product)
 		if supplier not in _available_suppliers(state, product):
 			app.set_notice("Select an available supplier to continue.", true)
 			return
 		app.set_meta(CATALOG_STAGE_META, "negotiate")
 		_refresh_step(app)
-	, true)
-	next.name = "ContinueBuyInventory"
-	next.disabled = selected not in _available_suppliers(state, product)
+	, "ContinueBuyInventory", selected not in _available_suppliers(state, product))
 
 static func show_negotiation(app: Control) -> void:
 	var product := int(app.selected_product)
@@ -461,20 +490,18 @@ static func show_negotiation(app: Control) -> void:
 	var active_quote := Supply.quote(state, product, supplier)
 	if int(active_quote.get("discount", 0)) > 0 and int(active_quote.get("expires", 0)) >= int(state.day) and not bool(app.get_meta("buy_negotiation_ready_%d_%d" % [product, supplier], false)):
 		result_label.text = "Existing firm supplier offer: %s per unit, valid through %s. Submit the request to review it." % [app.money(int(active_quote.cost)), Calendar.format(int(active_quote.expires))]
-	var next: Button = app.action(panel, "Continue", func():
+	_footer_button(app, "Back", func():
+		app.set_meta(CATALOG_STAGE_META, "suppliers")
+		_refresh_step(app)
+	, "BackToSuppliers")
+	_footer_spacer(app)
+	_footer_button(app, "Continue", func():
 		if not bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false)):
 			app.set_notice("Accept the current supplier terms before continuing.", true)
 			return
 		app.set_meta(CATALOG_STAGE_META, "summary")
 		_refresh_step(app)
-	, true)
-	next.name = "ContinueBuyInventory"
-	next.disabled = not bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false))
-	var back: Button = app.action(panel, "Back", func():
-		app.set_meta(CATALOG_STAGE_META, "suppliers")
-		_refresh_step(app)
-	)
-	back.name = "BackToSuppliers"
+	, "ContinueBuyInventory", not bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false)))
 
 static func show_purchase_summary(app: Control) -> void:
 	var product := int(app.selected_product)
@@ -588,14 +615,12 @@ static func show_purchase_summary(app: Control) -> void:
 	var error := str(breakdown.get("error", ""))
 	if not error.is_empty(): quote_panel.add_child(app.label(error, 12, Style.RED))
 	var funds_available := int(state.cash) >= purchase_total if payment.selected == 0 else (bool(eligibility.eligible) and int(eligibility.available) >= purchase_total)
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 8)
-	panel.add_child(actions)
-	app.action(actions, "Back", func():
+	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "negotiate")
 		app.refresh_view()
-	)
-	var confirm: Button = app.action(actions, "Confirm Purchase", func():
+	, "BackFromPurchaseSummary")
+	_footer_spacer(app)
+	_footer_button(app, "Confirm Purchase", func():
 		if bool(app.get_meta("supplier_purchase_processing", false)): return
 		var latest := Supply.purchase_breakdown(state, product, supplier, quantity)
 		if not str(latest.get("error", "")).is_empty():
@@ -642,9 +667,7 @@ static func show_purchase_summary(app: Control) -> void:
 			app.persist("Purchase order placed. The new shipment is open in Inbound Stock.")
 			app.refresh_view(true)
 		)
-	, true)
-	confirm.name = "ConfirmPurchaseOrder"
-	confirm.disabled = not error.is_empty() or not funds_available or quantity < int(provider.minimum)
+	, "ConfirmPurchaseOrder", not error.is_empty() or not funds_available or quantity < int(provider.minimum))
 	payment.item_selected.connect(func(index: int):
 		app.set_meta(payment_key, index)
 		app.refresh_view()

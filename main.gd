@@ -112,6 +112,7 @@ var shipping_settings_editing := false
 var display_settings_editing := false
 var avatar_crop_source: Image
 var navigation_panel: PanelContainer
+var navigation_slot: Control
 var navigation_open := false
 var navigation_toggle: Button
 var bank_balance_label: Label
@@ -515,6 +516,7 @@ func _update_responsive_layout() -> void:
 		page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
 	if is_instance_valid(navigation_panel):
 		navigation_panel.custom_minimum_size.x = clampf(viewport_width * 0.78, 260.0, 320.0)
+		_sync_navigation_slot_size()
 	if is_instance_valid(page_grid):
 		page_grid.columns = 2 if viewport_width >= 768.0 else 1
 		_reflow_page_cards()
@@ -1899,6 +1901,7 @@ func toggle_navigation_drawer() -> void:
 		return
 	navigation_open = not navigation_open
 	navigation_panel.visible = navigation_open
+	_sync_navigation_slot_size()
 	if navigation_open:
 		var page_scroller := find_child("GameContentScroll", true, false) as ScrollContainer
 		if page_scroller != null:
@@ -1914,12 +1917,21 @@ func close_navigation_drawer(restore_focus: bool = true) -> void:
 		return
 	navigation_open = false
 	navigation_panel.visible = false
+	_sync_navigation_slot_size()
 	if restore_focus:
 		_restore_navigation_focus()
 
 func _restore_navigation_focus() -> void:
 	if is_instance_valid(navigation_toggle) and navigation_toggle.is_inside_tree():
 		navigation_toggle.grab_focus()
+
+func _sync_navigation_slot_size() -> void:
+	if not is_instance_valid(navigation_panel):
+		return
+	navigation_panel.position = Vector2.ZERO
+	navigation_panel.size = navigation_panel.get_combined_minimum_size()
+	if is_instance_valid(navigation_slot):
+		navigation_slot.custom_minimum_size.y = navigation_panel.get_combined_minimum_size().y if navigation_open else 0.0
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
@@ -2077,6 +2089,7 @@ func render() -> void:
 	edit_checks.clear()
 	navigation_panel = null
 	navigation_toggle = null
+	navigation_slot = null
 	bank_balance_label = null
 	header_bank_balance_label = null
 	header_bank_balance_value = null
@@ -2172,8 +2185,23 @@ func render() -> void:
 	shell.add_child(scroll)
 	body = stack(scroll, 8)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if screen == "Game" and page == "Market":
+		# The Buy Inventory workflow owns its content scroll area and footer.
+		# Let the Market page fill the remaining viewport so only the workflow's
+		# middle content scrolls while its Back/Continue controls stay visible.
+		body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if is_instance_valid(navigation_panel):
-		body.add_child(navigation_panel)
+		navigation_slot = Control.new()
+		navigation_slot.name = "PrimaryNavigationSlot"
+		navigation_slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		navigation_slot.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		navigation_slot.clip_contents = true
+		body.add_child(navigation_slot)
+		body.move_child(navigation_slot, 0)
+		navigation_slot.add_child(navigation_panel)
+		navigation_panel.position = Vector2.ZERO
+		navigation_panel.size = navigation_panel.get_combined_minimum_size()
+		navigation_panel.visible = false
 	var right_space := Control.new()
 	right_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(right_space)
@@ -2182,6 +2210,8 @@ func render() -> void:
 	divider(body)
 	page_wide = stack(body, 12)
 	page_wide.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if screen == "Game" and page == "Market":
+		page_wide.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_grid = GridContainer.new()
 	page_grid.columns = 2 if size.x >= 768.0 else 1
 	page_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
