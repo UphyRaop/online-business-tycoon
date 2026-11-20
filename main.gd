@@ -236,6 +236,14 @@ func _developer_restore_original_scale() -> void:
 	if developer_original_viewport != Vector2i.ZERO and get_window().content_scale_size != developer_original_viewport:
 		get_window().content_scale_size = developer_original_viewport
 
+func _set_developer_scroll_passthrough(control: Control) -> void:
+	# Let wheel and touch-scroll input bubble through passive content and buttons
+	# to the enclosing ScrollContainer. The overlay itself still blocks gameplay.
+	control.mouse_filter = Control.MOUSE_FILTER_PASS
+	for child in control.get_children():
+		if child is Control:
+			_set_developer_scroll_passthrough(child as Control)
+
 func create_developer_backup() -> Dictionary:
 	if not developer_mode_unlocked or sim == null or active_game_id.is_empty():
 		return {"ok": false, "message": "Load an active company before backing it up."}
@@ -2248,6 +2256,8 @@ func _show_developer_console_overlay() -> void:
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.follow_focus = true
+	scroll.mouse_force_pass_scroll_events = true
+	scroll.scroll_deadzone = 12
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	viewport_margin.add_child(scroll)
@@ -2259,11 +2269,13 @@ func _show_developer_console_overlay() -> void:
 	panel.name = "DeveloperConsolePanel"
 	panel.custom_minimum_size.x = minf(920.0, maxf(300.0, size.x - 24.0))
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 12, 12))
 	center.add_child(panel)
 	var content := stack(panel, 8)
 	content.name = "DeveloperConsoleContent"
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	var heading: BoxContainer
 	var mobile_console := size.x < 600.0 or (size.x > size.y and size.y < 600.0)
 	var title := label("Developer Mode", 18 if mobile_console else 22, Style.GOLD)
@@ -2362,6 +2374,12 @@ func _show_developer_console_overlay() -> void:
 			"Company": _dev_company_controls(tools)
 			"Time": _dev_time_controls(tools)
 			"Scenarios": _dev_scenario_controls(tools)
+	var bottom_padding := Control.new()
+	bottom_padding.name = "DeveloperConsoleBottomPadding"
+	bottom_padding.custom_minimum_size.y = 16
+	bottom_padding.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(bottom_padding)
+	_set_developer_scroll_passthrough(center)
 	for tool_button in overlay.find_children("*", "Button", true, false):
 		(tool_button as Button).custom_minimum_size.y = 46
 	developer_overlay = overlay

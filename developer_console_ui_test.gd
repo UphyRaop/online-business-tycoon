@@ -17,6 +17,13 @@ func expect(condition: bool, message: String) -> void:
 func button(app: Node, name: String) -> Button:
 	return app.find_child(name, true, false) as Button
 
+func final_tool_button(app: Node) -> Button:
+	var tools := app.find_child("DeveloperActiveToolCategory", true, false) as Control
+	if tools == null:
+		return null
+	var buttons := tools.find_children("*", "Button", true, false)
+	return buttons.back() as Button if not buttons.is_empty() else null
+
 func tap(app: Node, text: String) -> void:
 	for item in app.find_children("*", "Button", true, false):
 		var candidate := item as Button
@@ -43,7 +50,9 @@ func run() -> void:
 	var original_state: Dictionary = app.sim.state.duplicate(true)
 	var original_profile: Dictionary = app.ceo_profile.duplicate(true)
 	expect(button(app, "DeveloperModeButton") != null, "Developer Mode is available in gameplay on desktop")
-	for viewport in [Vector2i(390, 844), Vector2i(375, 667), Vector2i(360, 800), Vector2i(844, 390)]:
+	for viewport in [Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(768, 1024),
+		Vector2i(1024, 768), Vector2i(390, 844), Vector2i(375, 667), Vector2i(844, 390), Vector2i(667, 375)]:
+		root.size = viewport
 		app.size = viewport
 		app.render()
 		await process_frame
@@ -139,10 +148,49 @@ func run() -> void:
 		var console_scroll := app.find_child("DeveloperConsoleScroll", true, false) as ScrollContainer
 		expect(console_scroll != null and console_scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED,
 			"Developer tools use vertical scrolling at %s" % viewport)
+		expect(console_scroll != null and console_scroll.vertical_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO
+			and console_scroll.mouse_force_pass_scroll_events and console_scroll.scroll_deadzone >= 8,
+			"Developer console forwards wheel/touch scroll and recognizes swipes at %s" % viewport)
 		if viewport.x < 600 or (viewport.x > viewport.y and viewport.y < 600):
 			var title := app.find_child("DeveloperConsoleTitle", true, false) as Label
 			expect(title != null and title.autowrap_mode == TextServer.AUTOWRAP_OFF,
 				"Mobile Developer Mode title remains on one line at %s" % viewport)
+		for category in ["Finance", "Inventory", "Sales & Orders", "Marketing", "Company", "Time", "Scenarios"]:
+			app.developer_console_tab = "Cheats"
+			app.developer_cheat_category = category
+			app.render()
+			await process_frame
+			await process_frame
+			console_scroll = app.find_child("DeveloperConsoleScroll", true, false) as ScrollContainer
+			var scroll_bar := console_scroll.get_v_scroll_bar() if console_scroll != null else null
+			var final_option := final_tool_button(app)
+			expect(scroll_bar != null and final_option != null,
+				"%s developer options expose a vertical scroll range and final action at %s" % [category, viewport])
+			if scroll_bar == null or final_option == null:
+				continue
+			var scroll_limit := maxf(0.0, scroll_bar.max_value - scroll_bar.page)
+			if viewport == Vector2i(667, 375):
+				expect(scroll_limit > 0.0,
+					"%s options exceed the small landscape viewport and provide a real scroll range" % category)
+			if scroll_limit > 0:
+				console_scroll.scroll_vertical = ceili(scroll_limit)
+				await process_frame
+				var viewport_rect := console_scroll.get_global_rect()
+				var final_rect := final_option.get_global_rect()
+				expect(final_rect.position.y >= viewport_rect.position.y - 1
+					and final_rect.end.y <= viewport_rect.end.y + 1,
+					"%s final option is fully visible at the scroll bottom for %s" % [category, viewport])
+			expect(not final_option.disabled and final_option.mouse_filter == Control.MOUSE_FILTER_PASS,
+				"%s final option remains clickable while forwarding scroll at %s" % [category, viewport])
+			console_scroll.scroll_vertical = 0
+			await process_frame
+			if category == "Scenarios":
+				final_option.pressed.emit()
+				await process_frame
+				expect(is_instance_valid(app.confirmation), "Bottom-most scenario action opens its normal confirmation")
+				if is_instance_valid(app.confirmation):
+					app.confirmation.get_cancel_button().pressed.emit()
+					await process_frame
 	app.queue_free()
 	await process_frame
 	print("Developer active-profile UI: %d failures" % failures)
