@@ -58,11 +58,18 @@ func run() -> void:
 	var bank_balance: Label = app.find_child("DashboardBankBalanceValue", true, false)
 	var header_balance: Label = app.find_child("HeaderBankBalanceValue", true, false)
 	var advance_controls: HBoxContainer = app.find_child("GlobalAdvanceDayControls", true, false)
+	var header_primary: HBoxContainer = app.find_child("GameHeaderPrimaryRow", true, false)
+	var header_title: Label = app.find_child("HeaderGameTitle", true, false)
+	var header_company: Label = app.find_child("HeaderCompanyName", true, false)
 	expect(nav != null and game_date != null and menu_button != null and bank_balance != null and header_balance != null
-		and menu_button.get_parent() == game_date.get_parent().get_parent() and app.find_child("CompanyBankBalance", true, false) != null
+		and header_primary != null and header_primary.get_child(0) == menu_button
+		and game_date.get_parent().name == "GameHeaderSecondaryRow"
+		and header_title != null and header_title.text == "ONLINE BUSINESS TYCOON"
+		and header_company != null and header_company.text == str(app.sim.state.company)
+		and app.find_child("CompanyBankBalance", true, false) != null
 		and app.find_child("DeveloperModeButton", true, false) != null
-		and menu_button.icon != null and game_date.text.contains(" | ")
-		and game_date.text.begins_with("Day 1\n") and bank_balance.text.contains(app.money(app.sim.state.cash))
+		and menu_button.icon != null and game_date.text.contains(" · ")
+		and game_date.text.begins_with("Day 1 · ") and bank_balance.text.contains(app.money(app.sim.state.cash))
 		and bank_balance.get_parent().get_parent().name == "DashboardBankBalanceCard",
 		"Header keeps company/date, Developer Mode, and live Bank Balance, alongside the Dashboard balance card")
 	expect(advance_controls != null
@@ -98,7 +105,7 @@ func run() -> void:
 	app.sim.state.cash = current_cash
 	app.set_notice("")
 	expect(nav != null and not nav.is_visible_in_tree(), "Primary navigation drawer is hidden by default")
-	press("Menu")
+	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()
 	expect(nav != null and nav.is_visible_in_tree(), "Hamburger opens the left navigation overlay")
 	_check_primary_tabs_within_viewport(Vector2i(1280, 720))
 	for tab in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]:
@@ -118,7 +125,7 @@ func run() -> void:
 	outside_click.pressed = true
 	app.navigation_overlay.gui_input.emit(outside_click)
 	expect(not app.navigation_open and not nav.is_visible_in_tree(), "Clicking the page overlay closes the drawer")
-	press("Menu")
+	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()
 	var tab_key := InputEventKey.new()
 	tab_key.keycode = KEY_TAB
 	tab_key.pressed = true
@@ -413,7 +420,7 @@ func run() -> void:
 		expect(app.find_child("CompanyBankBalance", true, false) != null and header_balance_value != null
 			and app.find_child("DeveloperModeButton", true, false) != null and header_date != null and global_advance != null
 			and controls(global_advance, "Button").size() == 4 and header_date.text.contains(Catalog.COUNTRIES[app.sim.state.country])
-			and header_date.text.contains(" | ") and header_date.text.begins_with("Day %d\n" % app.sim.state.day),
+			and header_date.text.contains(" · ") and header_date.text.begins_with("Day %d · " % app.sim.state.day),
 			"Header date, Bank Balance, Developer Mode, and global Advance Day remain visible at %dx%d" % [viewport.x, viewport.y])
 		_check_primary_tabs_within_viewport(viewport)
 		expect(app.page_grid.columns == (2 if app.size.x >= 768 else 1),
