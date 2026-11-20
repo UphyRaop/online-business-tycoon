@@ -3,7 +3,6 @@ extends SceneTree
 const MainScene = preload("res://main.tscn")
 const Sim = preload("res://simulation.gd")
 const API = preload("res://developer_test_api.gd")
-const Style = preload("res://corporate_theme.gd")
 
 var failures := 0
 
@@ -28,98 +27,121 @@ func tap(app: Node, text: String) -> void:
 
 func run() -> void:
 	if not OS.is_debug_build():
-		push_error("Developer Console UI test requires a debug build."); quit(1); return
+		push_error("Developer Console UI test requires a debug build.")
+		quit(1)
+		return
 	var app := MainScene.instantiate()
 	root.size = Vector2i(1366, 768)
 	root.add_child(app)
 	await process_frame
-	app.sim = Sim.new(Sim.register("Normal CEO", "Normal Business", "", 0, 0, 0, 6402))
+	app.sim = Sim.new(Sim.register("Normal CEO", "Normal Business", "Business Brand", 0, 0, 0, 6402))
 	app.active_game_id = "normal-source"
-	app.screen = "Game"; app.page = "Dashboard"; app.render()
-	var normal_copy: Dictionary = app.sim.state.duplicate(true)
-	expect(button(app, "DeveloperModeButton") != null, "Developer Mode is visible in gameplay on desktop")
-	button(app, "DeveloperModeButton").pressed.emit()
-	var access_dialog := app.find_child("DeveloperAccessDialog", true, false) as ColorRect
-	var access_code := app.find_child("DeveloperAccessCode", true, false) as LineEdit
-	expect(access_dialog != null and access_code != null and access_code.secret,
-		"Developer Mode button opens a masked access-code dialog instead of granting access directly")
-	if access_dialog != null and access_code != null:
-		access_code.text = "invalid"
-		var unlock := button(app, "DeveloperAccessUnlock")
-		if unlock != null: unlock.pressed.emit()
-		expect((app.find_child("DeveloperAccessError", true, false) as Label).visible,
-			"Unrecognized developer access code is rejected and shown in the dialog")
-		access_code.text = "URTN"
-		if unlock != null: unlock.pressed.emit()
-	expect(app.developer_save_active and app.screen == "Developer Mode" and app.active_game_id.is_empty(),
-		"URTN unlock starts an isolated DEV sandbox instead of using the normal game path")
-	expect(app.normal_state_snapshot.company_id == normal_copy.company_id and app.normal_state_snapshot.cash == normal_copy.cash,
-		"Opening the console preserves a recoverable normal-game snapshot")
-	var isolated_state: Dictionary = app.sim.state.duplicate(true)
-	app.switch_company(str(normal_copy.company_id))
-	app.enter_game(normal_copy)
-	expect(app.sim.state == isolated_state and app.active_game_id.is_empty(),
-		"Company switching and normal company loading are blocked while DEV isolation is active")
-	expect(button(app, "DeveloperModeButton") != null and app.find_child("DeveloperConsoleChoices", true, false) != null,
-		"Developer console preserves the global access button and presents independent Preview Device and Cheats paths")
-	tap(app, "Preview Device")
-	expect(app.screen == "Developer Mode" and app.find_child("DeveloperPreviewDevicePanel", true, false) != null,
-		"Preview Device selector is independently accessible")
-	var before_preview: Dictionary = app.sim.state.duplicate(true)
-	tap(app, "Mobile · 390 × 844")
-	expect(app.screen == "Game" and app.sim.state == before_preview,
-		"Selecting a portrait preview preserves simulation state and returns to gameplay")
-	expect(button(app, "DeveloperModeButton") != null and app.find_child("HeaderBankBalanceValue", true, false) != null,
-		"Previewed gameplay retains the Developer Mode button and global Bank Balance")
-	var api := API.new()
-	var negative_balance: Dictionary = api.execute("set_cash", {"amount": -4321}, app)
-	var displayed_balance: Label = app.find_child("HeaderBankBalanceValue", true, false) as Label
-	expect(negative_balance.ok and displayed_balance != null and displayed_balance.text == app.money(-4321)
-		and displayed_balance.get_theme_color("font_color") == Style.RED,
-		"Global Bank Balance updates immediately and warns for a negative balance")
-	for page in ["Dashboard", "Market", "My Products", "Orders", "Pre-orders", "Business", "Finance",
-		"Finance Statements", "Expense Management", "Profile", "Advertising", "Campaign Manager",
-		"Advertising Analytics", "Management", "Store Profitability", "Store Listings", "Inbound Stock",
-		"Supplier Relationships", "Supplier Returns"]:
-		app.navigate(page)
-		expect(button(app, "DeveloperModeButton") != null and app.find_child("HeaderBankBalanceValue", true, false) != null,
-			"Developer Mode and Bank Balance stay available on %s" % page)
-		displayed_balance = app.find_child("HeaderBankBalanceValue", true, false) as Label
-		expect(displayed_balance != null and displayed_balance.text == app.money(-4321),
-			"Current Bank Balance is consistent on %s" % page)
-	app.open_developer_mode()
-	tap(app, "Open Cheats")
-	expect(app.screen == "Developer Cheats" and app.find_child("DeveloperCheatTabs", true, false) != null,
-		"Cheats open independently from the preview selector")
-	for tab in ["Finance", "Inventory", "Sales & Orders", "Marketing", "Company", "Time", "Scenarios"]:
-		tap(app, tab)
-		expect(app.screen == "Developer Cheats", "Developer cheat category %s opens" % tab)
-	app.screen = "Game"; app.page = "Market"; app.render()
-	var title_result: Dictionary = api.execute("navigate", {"screen": "Title"}, app)
-	var has_dev_continue := false
-	for candidate in app.find_children("*", "Button", true, false):
-		if (candidate as Button).text == "Continue DEV Company · Normal Business": has_dev_continue = true
-	expect(title_result.ok and app.screen == "Title" and has_dev_continue
-		and app.find_child("SavedGameCards", true, false) == null,
-		"Main Menu test navigation shows only DEV saves while a DEV save is active")
-	expect(app.normal_state_snapshot.company_id == normal_copy.company_id and app.normal_state_snapshot.cash == normal_copy.cash,
-		"Navigating test screens never changes the normal company snapshot")
-	var response: Dictionary = api.execute("capture_screenshot", {"name": "dev-console-test"}, app)
-	expect(response.has("ok") and (response.ok == false or str(response.get("path", "")).contains("obt_dev_tests/screenshots")),
-		"Automation screenshot command returns a structured result for viewport capture")
-	app.screen = "Game"; app.page = "Market"; app.render()
+	app.screen = "Game"
+	app.page = "Dashboard"
+	app.render()
 	await process_frame
-	var header_menu := button(app, "NavigationMenuButton")
-	if header_menu != null: header_menu.pressed.emit()
-	var lock_action := button(app, "DrawerActionLockDeveloperMode")
-	expect(lock_action != null and lock_action.is_visible_in_tree(),
-		"Unlocked debug Developer Mode exposes a Lock Developer Mode action in Main Navigation")
-	if lock_action != null:
-		lock_action.pressed.emit()
-		if app.confirmation != null: app.confirmation.confirmed.emit()
-	expect(not app.developer_save_active and app.active_game_id == "normal-source"
-		and app.sim.state.company_id == normal_copy.company_id,
-		"Lock Developer Mode returns to the unchanged normal game and keeps the DEV save isolated")
-	print("Developer Console UI: %d failures" % failures)
-	app.queue_free(); await process_frame
+	var original_state: Dictionary = app.sim.state.duplicate(true)
+	var original_profile: Dictionary = app.ceo_profile.duplicate(true)
+	expect(button(app, "DeveloperModeButton") != null, "Developer Mode is available in gameplay on desktop")
+	for viewport in [Vector2i(390, 844), Vector2i(375, 667), Vector2i(360, 800), Vector2i(844, 390)]:
+		app.size = viewport
+		app.render()
+		await process_frame
+		button(app, "DeveloperModeButton").pressed.emit()
+		await process_frame
+		var dialog := app.find_child("DeveloperAccessDialog", true, false) as Control
+		var panel := app.find_child("DeveloperAccessPanel", true, false) as Control
+		var input := app.find_child("DeveloperAccessCode", true, false) as LineEdit
+		var unlock := button(app, "DeveloperAccessUnlock")
+		expect(dialog != null and input != null and input.secret and unlock != null,
+			"Access dialog and keyboard-focusable code field exist at %s" % viewport)
+		if panel != null:
+			var rect := panel.get_global_rect()
+			expect(rect.position.x >= -1 and rect.end.x <= viewport.x + 1,
+				"Access dialog stays within viewport width %s" % viewport)
+			var scroll := app.find_child("DeveloperAccessScroll", true, false) as ScrollContainer
+			expect(scroll != null and scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED,
+				"Access dialog supports vertical keyboard-safe scrolling without horizontal overflow at %s" % viewport)
+		if input != null:
+			input.text = "invalid"
+			unlock.pressed.emit()
+			var error_label := app.find_child("DeveloperAccessError", true, false) as Label
+			expect(error_label != null and error_label.visible and not app.developer_mode_unlocked,
+				"Incorrect access code is rejected at %s" % viewport)
+			button(app, "DeveloperAccessCancel").pressed.emit()
+			await process_frame
+		app.size = Vector2i(1366, 768)
+		app.render()
+		await process_frame
+	button(app, "DeveloperModeButton").pressed.emit()
+	var code := app.find_child("DeveloperAccessCode", true, false) as LineEdit
+	code.text = "URTN"
+	button(app, "DeveloperAccessUnlock").pressed.emit()
+	await process_frame
+	expect(app.developer_mode_unlocked and app.developer_console_visible and app.screen == "Game"
+		and app.page == "Dashboard", "URTN opens Developer Mode over the currently active gameplay screen")
+	expect(app.sim.state == original_state and app.active_game_id == "normal-source"
+		and app.ceo_profile == original_profile,
+		"Unlock retains the active game state, company ID, CEO profile, and save path")
+	expect(button(app, "DeveloperConsoleClose") != null and button(app, "DeveloperConsoleLock") != null,
+		"Console offers separate Close and Lock actions")
+	expect(app.find_child("DeveloperConsolePanel", true, false) != null and app.find_child("DeveloperPrimaryTabs", true, false) != null,
+		"Compact overlay provides Preview Device and Cheats navigation")
+	tap(app, "Preview Device")
+	expect(app.developer_console_tab == "Preview Device" and app.find_child("DeveloperPreviewDevicePanel", true, false) != null,
+		"Preview Device category is available for the current session")
+	var state_before_preview: Dictionary = app.sim.state.duplicate(true)
+	tap(app, "Mobile · 390 × 844")
+	await process_frame
+	expect(not app.developer_console_visible and app.sim.state == state_before_preview
+		and app.active_game_id == "normal-source", "Selecting a preview preserves the current page and active simulation")
+	app.set_developer_preview("exit")
+	app.request_developer_mode_access()
+	await process_frame
+	expect(app.developer_console_visible, "Unlocked header button reopens the tools without another code or reload")
+	tap(app, "Cheats")
+	for category in ["Finance", "Inventory", "Sales & Orders", "Marketing", "Company", "Time", "Scenarios"]:
+		tap(app, category)
+		await process_frame
+		expect(app.find_child("DeveloperActiveToolCategory", true, false) != null,
+			"Developer category %s opens within the active-game console" % category)
+	expect(app.sim.state == original_state and app.active_game_id == "normal-source",
+		"Opening and switching tool categories do not change player state")
+	var api := API.new()
+	var changed := api.execute("set_cash", {"amount": 432100}, app)
+	expect(changed.ok and int(app.sim.state.cash) == 432100 and app.developer_changes_active,
+		"Finance tool updates the current company and marks the change unsaved")
+	app.close_developer_console()
+	expect(not app.developer_console_visible and int(app.sim.state.cash) == 432100
+		and app.active_game_id == "normal-source", "Close hides tools without rolling back the active game's change")
+	app.request_developer_mode_access()
+	var lock := button(app, "DeveloperConsoleLock")
+	lock.pressed.emit()
+	expect(not app.developer_mode_unlocked and app.screen == "Game"
+		and int(app.sim.state.cash) == 432100 and app.active_game_id == "normal-source",
+		"Lock hides the console but leaves the changed active game and route intact")
+	app.developer_mode_unlocked = true
+	app.developer_console_visible = true
+	app.render()
+	await process_frame
+	for viewport in [Vector2i(390, 844), Vector2i(375, 667), Vector2i(360, 800), Vector2i(844, 390)]:
+		app.size = viewport
+		app.render()
+		await process_frame
+		var console_panel := app.find_child("DeveloperConsolePanel", true, false) as Control
+		expect(console_panel != null and console_panel.get_global_rect().size.x <= viewport.x + 1,
+			"Developer console avoids horizontal overflow at %s" % viewport)
+		if console_panel != null:
+			expect(console_panel.get_global_rect().position.y >= -1,
+				"Developer console top edge stays inside the viewport at %s" % viewport)
+		var console_scroll := app.find_child("DeveloperConsoleScroll", true, false) as ScrollContainer
+		expect(console_scroll != null and console_scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED,
+			"Developer tools use vertical scrolling at %s" % viewport)
+		if viewport.x < 600:
+			var title := app.find_child("DeveloperConsoleTitle", true, false) as Label
+			expect(title != null and title.autowrap_mode == TextServer.AUTOWRAP_OFF,
+				"Mobile Developer Mode title remains on one line at %s" % viewport)
+	app.queue_free()
+	await process_frame
+	print("Developer active-profile UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
