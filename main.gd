@@ -223,10 +223,19 @@ func _developer_browser_viewport_size() -> Vector2i:
 	return Vector2i(roundi(size.x), roundi(size.y))
 
 func _developer_sync_landscape_scale() -> void:
-	if not OS.has_feature("web") or developer_preview_active or developer_original_viewport == Vector2i.ZERO:
+	_sync_gameplay_landscape_scale()
+
+func _sync_gameplay_landscape_scale() -> void:
+	if not OS.has_feature("web") or developer_preview_active or sim == null:
 		return
+	var base_size := Vector2i(
+		int(ProjectSettings.get_setting("display/window/size/viewport_width", 430)),
+		int(ProjectSettings.get_setting("display/window/size/viewport_height", 760))
+	)
 	var browser_size := _developer_browser_viewport_size()
-	var target := developer_original_viewport
+	var target := base_size
+	# Scaling the portrait base by a short landscape height makes controls too
+	# small. Match the Web logical viewport to the available landscape viewport.
 	if browser_size.x > browser_size.y and browser_size.y <= 600:
 		target = browser_size
 	if get_window().content_scale_size != target:
@@ -469,8 +478,7 @@ func profit_color(cents: int) -> Color:
 	return Style.GREEN if cents >= 0 else Style.RED
 
 func _update_responsive_layout() -> void:
-	if is_instance_valid(developer_access_overlay) or (developer_mode_unlocked and developer_console_visible):
-		_developer_sync_landscape_scale()
+	_sync_gameplay_landscape_scale()
 	var viewport_width := size.x
 	Market.update_responsive_layout(self)
 	for metric_row in find_children("ResponsiveMetric", "BoxContainer", true, false):
@@ -2058,6 +2066,7 @@ func secondary_navigation(parent: Node) -> void:
 		_style_secondary_navigation_tab(tab, selected)
 
 func render() -> void:
+	if sim != null: _sync_gameplay_landscape_scale()
 	var restore_access_dialog := is_instance_valid(developer_access_overlay)
 	if restore_access_dialog:
 		var open_code := developer_access_overlay.find_child("DeveloperAccessCode", true, false) as LineEdit
