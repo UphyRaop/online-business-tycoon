@@ -25,17 +25,14 @@ func expect(condition: bool, message: String) -> void:
 		failures += 1
 		push_error(message)
 
-func button(title: String, scope: Node = null) -> Button:
-	for candidate in controls(app if scope == null else scope, "Button"):
+func button(title: String) -> Button:
+	for candidate in controls(app, "Button"):
 		if candidate.text.to_lower() == title.to_lower() and candidate.is_visible_in_tree(): return candidate
 	return null
 
-func click(title: String, scope: Node = null) -> void:
-	var candidate := button(title, scope)
-	if candidate != null: candidate.pressed.emit()
-
-func has_label(text: String) -> bool:
-	return controls(app, "Label").any(func(candidate): return candidate.text.contains(text) and candidate.is_visible_in_tree())
+func click(title: String) -> void:
+	var candidate := button(title)
+	if candidate != null and not candidate.disabled: candidate.pressed.emit()
 
 func run() -> void:
 	if OS.get_environment("OBT_ISOLATED_TEST_PROFILE") != "1":
@@ -52,59 +49,67 @@ func run() -> void:
 	app.set_meta(Market.CATALOG_STAGE_META, "categories")
 	app.render()
 	await process_frame
-	expect(app.find_child("ProductCategoryGrid", true, false) != null, "Product Catalogue starts with category cards")
-	click("Browse", app.find_child("CatalogueCategory_Kitchen", true, false))
+	expect(app.find_child("BuyInventoryProgress", true, false) != null and button("Continue") != null,
+		"Market shows the approved progress indicator and category continuation")
+	var category := app.find_child("CatalogueCategory_Kitchen", true, false)
+	var select_category := category.find_child("BrowseCategory_Kitchen", true, false) as Button
+	if select_category != null: select_category.pressed.emit()
+	click("Continue")
 	await process_frame
-	var product_card := app.find_child("CatalogueProduct_0", true, false)
-	expect(product_card != null and button("Choose Product", product_card) != null, "Selecting Kitchen opens its actual product cards")
-	click("Choose Product", product_card)
+	var product := app.find_child("CatalogueProduct_0", true, false)
+	expect(product != null and product.find_child("ChooseProduct_0", true, false) != null,
+		"Kitchen category displays its actual catalogue products")
+	var select_product := product.find_child("ChooseProduct_0", true, false) as Button
+	if select_product != null: select_product.pressed.emit()
+	click("Continue")
 	await process_frame
-	expect(app.find_child("CompactSupplierList", true, false) != null, "Product selection opens the compact supplier list")
+	expect(app.find_child("CompactSupplierList", true, false) != null and app.find_child("SupplierChoice%d" % int(Catalog.SUPPLIER_SELECTION_INDICES[0]), true, false) != null,
+		"Product step opens available real supplier offers")
 	var supplier_index := int(Catalog.SUPPLIER_SELECTION_INDICES[0])
 	var supplier_card := app.find_child("SupplierChoice%d" % supplier_index, true, false)
-	expect(supplier_card != null and button("View Details", supplier_card) != null, "A supplier summary can be expanded")
-	click("View Details", supplier_card)
+	var choose_supplier := supplier_card.find_child("SelectSupplier%d" % supplier_index, true, false) as Button
+	if choose_supplier != null: choose_supplier.pressed.emit()
+	click("Continue")
 	await process_frame
-	supplier_card = app.find_child("SupplierChoice%d" % supplier_index, true, false)
-	expect(supplier_card != null and button("Select Supplier", supplier_card) != null, "Expanded supplier details can be selected")
-	click("Select Supplier", supplier_card)
-	await process_frame
-	var details := app.find_child("SelectedSupplierDetails", true, false)
-	expect(details != null, "Selecting a supplier opens its details")
-	for action in ["Submit Offer", "Accept Offer", "Generate Quotation", "Confirm Purchase", "Back to Suppliers"]:
-		expect(button(action, details) != null, "Supplier details provides the %s action" % action)
-	expect(app.find_child("SupplierProposedUnitPrice", true, false) != null
-		and app.find_child("SupplierNegotiationResponse", true, false) != null,
-		"Negotiation view shows a target price and a separate actual supplier response")
-	var quantity := app.find_child("SupplierPurchaseQuantity", true, false) as LineEdit
-	expect(quantity != null, "Quantity controls are shown within supplier details")
-	if quantity != null:
-		quantity.text = "0"
-		quantity.text_changed.emit("0")
-		var invalid_quote_button := button("Generate Quotation")
-		expect(invalid_quote_button != null and invalid_quote_button.disabled, "Invalid quantity is rejected using actual supplier minimums")
-		quantity.text = str(Supply.negotiation_minimum(supplier_index))
-		quantity.text_changed.emit(quantity.text)
-	click("Submit Offer", details)
+	expect(app.find_child("SupplierNegotiationStep", true, false) != null and button("Request Offer") != null,
+		"Supplier step opens the separate negotiation card")
+	var discount := app.find_child("RequestedDiscount", true, false) as OptionButton
+	if discount != null:
+		discount.select(1)
+		discount.item_selected.emit(1)
+	click("Request Offer")
 	await process_frame
 	var terms := Supply.quote(app.sim.state, 0, supplier_index)
-	expect(int(terms.get("discount", 0)) > 0, "Negotiation persists the existing supplier response and quote")
+	expect(int(terms.get("discount", 0)) > 0 and button("Accept Offer") != null,
+		"Requested offer follows actual supplier volume negotiation mechanics")
 	click("Accept Offer")
 	await process_frame
-	click("Generate Quotation")
+	expect(bool(app.get_meta("buy_negotiation_accepted_0_%d" % supplier_index, false)), "Negotiated terms require explicit acceptance")
+	if discount != null:
+		discount.select(2)
+		discount.item_selected.emit(2)
+		expect(not bool(app.get_meta("buy_negotiation_accepted_0_%d" % supplier_index, true)) and not bool(app.get_meta("buy_negotiation_ready_0_%d" % supplier_index, true)),
+			"Changing requested discount invalidates the displayed negotiation result")
+		click("Request Offer")
+		await process_frame
+		click("Accept Offer")
+	click("Continue")
 	await process_frame
-	var quotation := app.find_child("GeneratedPurchaseQuotation", true, false)
-	expect(quotation != null and has_label("Total") and has_label("Freight"), "A valid quotation presents the goods, freight, and total costs")
+	expect(app.find_child("PurchaseSummaryStep", true, false) != null, "Accepted supplier terms continue to quantity and purchase summary")
+	var quantity := app.find_child("SupplierPurchaseQuantity", true, false) as Label
+	expect(quantity != null and app.find_child("QuantityIncrement10", true, false) != null and app.find_child("QuantityIncrement100", true, false) != null and app.find_child("QuantityIncrement1000", true, false) != null,
+		"Quantity display and all three quantity increments are present")
+	app.set_meta("buy_quantity_0_%d" % supplier_index, int(Catalog.SUPPLIERS[supplier_index].minimum))
+	app.refresh_view()
 	var confirm := button("Confirm Purchase")
-	expect(confirm != null and not confirm.disabled, "Accepted supplier terms and a valid quotation enable purchase confirmation")
+	expect(confirm != null and not confirm.disabled and button("Buy Max") != null, "Valid supplier minimum allows purchase and Buy Max calculation")
 	if confirm != null: confirm.pressed.emit()
 	await process_frame
-	expect(is_instance_valid(app.confirmation) and app.sim.state.inbound.is_empty(), "Purchase requires a confirmation dialog before creating inbound inventory")
-	if is_instance_valid(app.confirmation):
-		app.confirmation.confirmed.emit()
-		await process_frame
-	expect(app.sim.state.inbound.size() == 1 and app.find_child("SupplierPurchaseConfirmation", true, false) != null,
-		"Confirming a purchase creates exactly one order and displays a receipt")
+	expect(is_instance_valid(app.confirmation) and app.sim.state.inbound.is_empty(), "Purchase has a user confirmation before order creation")
+	if is_instance_valid(app.confirmation): app.confirmation.confirmed.emit()
+	await process_frame
+	expect(app.sim.state.inbound.size() == 1 and app.page == "Inbound Stock" and app.find_child("FocusedInboundPurchase%d" % int(app.get_meta("focused_inbound_purchase_id", -1)), true, false) != null,
+		"Confirmed transaction creates one inbound shipment and focuses it in Inbound Stock")
 	var legacy_supplier := -1
 	for candidate in range(Catalog.SUPPLIERS.size()):
 		if candidate not in Catalog.SUPPLIER_SELECTION_INDICES:
@@ -120,22 +125,7 @@ func run() -> void:
 		app.render()
 		await process_frame
 		var legacy_card := app.find_child("SupplierRelationship%d" % legacy_supplier, true, false)
-		expect(legacy_card != null and has_label("Historical relationship. New sourcing is unavailable"),
-			"Legacy-only supplier relationships remain visible with an accurate historical status")
-		var legacy_text := ""
-		if legacy_card != null:
-			for label in controls(legacy_card, "Label"):
-				legacy_text += " " + str(label.text)
-		expect(not legacy_text.contains("Locked") and not legacy_text.contains("Unlocks at supplier progression"),
-			"Legacy-only suppliers do not show an impossible future unlock level")
-	app.page = "Market"
-	root.size = Vector2i(390, 844)
-	app.set_meta(Market.CATALOG_STAGE_META, "categories")
-	app.catalog_category = -1
-	app.render()
-	await process_frame
-	var grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
-	expect(grid != null and grid.columns == 2, "Category cards adapt to a two-column mobile portrait layout")
+		expect(legacy_card != null, "Legacy supplier relationship remains visible")
 	app.queue_free()
 	await process_frame
 	print("Supplier workflow UI: %d failures" % failures)

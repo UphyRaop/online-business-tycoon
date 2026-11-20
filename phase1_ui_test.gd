@@ -5,6 +5,7 @@ const Saves = preload("res://save_store.gd")
 const Slots = preload("res://save_slots.gd")
 const Stores = preload("res://store_manager.gd")
 const CatalogData = preload("res://catalog.gd")
+const SupplyData = preload("res://supply.gd")
 var app: Control
 var failures := 0
 
@@ -23,6 +24,12 @@ func controls(node: Node, type: String) -> Array:
 			matches.append(child)
 		matches.append_array(controls(child, type))
 	return matches
+
+func find_button(title: String, scope: Node = null) -> Button:
+	for candidate in controls(app if scope == null else scope, "Button"):
+		if candidate.text.to_lower() == title.to_lower() and candidate.is_visible_in_tree():
+			return candidate
+	return null
 
 func press(title: String) -> void:
 	for button in controls(app, "Button"):
@@ -82,10 +89,11 @@ func press_category(category: String) -> void:
 		expect(false, "Missing category card " + category)
 		return
 	for candidate in controls(category_card, "Button"):
-		if candidate.text == "Browse" and not candidate.disabled and candidate.is_visible_in_tree():
+		if candidate.text == "Select Category" and not candidate.disabled and candidate.is_visible_in_tree():
 			candidate.pressed.emit()
+			press("Continue")
 			return
-	expect(false, "Missing Browse action for category " + category)
+	expect(false, "Missing category selection action for " + category)
 
 func has_visible_label(prefix: String) -> bool:
 	for node in controls(app, "Label"):
@@ -114,8 +122,8 @@ func browse_catalog_product(category: String, product_id: int) -> void:
 	await process_frame
 	await process_frame
 	var stage := str(app.get_meta("product_catalog_stage", "categories"))
-	if stage == "confirmation":
-		press("Continue Shopping")
+	if app.page == "Inbound Stock":
+		press("New Inventory Purchase")
 		await process_frame
 		stage = "categories"
 	if stage == "categories":
@@ -130,46 +138,40 @@ func browse_catalog_product(category: String, product_id: int) -> void:
 			return
 		var choose: Button
 		for candidate in controls(product_card, "Button"):
-			if candidate.text == "Choose Product":
+			if candidate.text == "Select Product":
 				choose = candidate
 				break
 		if choose == null:
-			expect(false, "Product card provides a Choose Product action")
+			expect(false, "Product card provides a selection action")
 			return
-		if choose != null: choose.pressed.emit()
+		if choose != null:
+			choose.pressed.emit()
+			press("Continue")
 		await process_frame
 		await process_frame
-	if str(app.get_meta("product_catalog_stage", "")) == "suppliers" and app.find_child("SelectedSupplierDetails", true, false) == null:
+	if str(app.get_meta("product_catalog_stage", "")) == "suppliers":
 		var supplier_id := int(CatalogData.SUPPLIER_SELECTION_INDICES[0])
 		var supplier_card: Control = app.find_child("SupplierChoice%d" % supplier_id, true, false)
 		if supplier_card == null:
-			expect(false, "Product selection presents the expected supplier comparison card")
+			expect(false, "Product selection presents the supplier comparison card")
 			return
-		var expand: Button
-		for candidate in controls(supplier_card, "Button"):
-			if candidate.text in ["View Details", "Hide Details"]: expand = candidate
-		if expand == null:
-			expect(false, "Supplier summary exposes its detail expansion action")
-			return
-		if expand.text == "View Details":
-			expand.pressed.emit()
-			await process_frame
-		supplier_card = app.find_child("SupplierChoice%d" % supplier_id, true, false)
-		var select_supplier: Button
-		for candidate in controls(supplier_card, "Button"):
-			if candidate.text == "Select Supplier": select_supplier = candidate
+		var select_supplier := find_button("Select Supplier", supplier_card)
 		if select_supplier == null:
-			expect(false, "Expanded supplier details expose their selection action")
+			expect(false, "Supplier card exposes its selection action")
 			return
 		select_supplier.pressed.emit()
+		press("Continue")
 		await process_frame
 		await process_frame
 
 func quote_and_confirm_purchase() -> void:
-	press("Accept Offer")
-	await process_frame
-	press("Generate Quotation")
-	await process_frame
+	if str(app.get_meta("product_catalog_stage", "")) == "negotiate":
+		press("Request Offer")
+		await process_frame
+		var acceptance := find_button("Accept Offer")
+		if acceptance != null and not acceptance.disabled: acceptance.pressed.emit()
+		press("Continue")
+		await process_frame
 	press("Confirm Purchase")
 	if is_instance_valid(app.confirmation): app.confirmation.confirmed.emit()
 	await process_frame
@@ -259,18 +261,14 @@ func run() -> void:
 	await settle("02-dashboard")
 	press("Browse Product Catalogue")
 	await browse_catalog_product("Electronics", 1)
-	expect(has_label("Lead Time · MOQ · Maximum Order"), "Supplier details expose lead time and supplier-specific quantity limits")
+	var selected_supplier := int(app.get_meta("catalog_selected_supplier", -1))
+	expect(has_visible_label("Supplier Asking Price") and has_visible_label("Supplier Trust"), "Negotiation step displays the actual supplier asking price and trust")
 	await settle("03-market")
-	var quantity: LineEdit = field_for_label("Purchase Quantity")
-	quantity.text = "0"
-	quantity.text_changed.emit("0")
-	press("Accept Offer")
-	expect(has_label("Enter a quantity from"), "Purchase validation displays supplier-specific quantity limits")
-	quantity = field_for_label("Purchase Quantity")
-	quantity.text = "10"
-	quantity.text_changed.emit("10")
+	var invalid_breakdown := SupplyData.purchase_breakdown(app.sim.state, 1, selected_supplier, 0)
+	expect(not str(invalid_breakdown.get("error", "")).is_empty(), "Supplier purchase rules reject a quantity below MOQ")
+	app.set_meta("buy_quantity_1_%d" % selected_supplier, 10)
 	await quote_and_confirm_purchase()
-	expect(app.sim.stock(1) == 0 and app.sim.state.inbound[0].units == 10, "Confirmed quotation schedules inbound stock exactly once")
+	expect(app.sim.stock(1) == 0 and app.sim.state.inbound.size() == 1 and app.sim.state.inbound[0].units == 10 and app.page == "Inbound Stock", "Confirmed purchase schedules one 10-unit shipment and opens inbound inventory")
 	app.selected_store_id = int(app.sim.state.stores.front().id)
 	app.selected_product = 1
 	app.navigate("Store Listings")

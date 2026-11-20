@@ -9,8 +9,6 @@ const Style = preload("res://corporate_theme.gd")
 
 const CATALOG_STAGE_META := "product_catalog_stage"
 const SELECTED_SUPPLIER_META := "catalog_selected_supplier"
-const QUOTATION_META := "catalog_purchase_quotation"
-const EXPANDED_SUPPLIER_META := "catalog_expanded_supplier"
 
 
 static func show(app: Control) -> void:
@@ -19,15 +17,63 @@ static func show(app: Control) -> void:
 			show_categories(app)
 		"products":
 			show_products(app)
-		"confirmation":
-			show_purchase_confirmation(app)
+		"suppliers":
+			show_supplier_selection(app)
+		"negotiate":
+			show_negotiation(app)
+		"summary":
+			show_purchase_summary(app)
 		_:
-			show_supplier_workflow(app)
+			app.set_meta(CATALOG_STAGE_META, "categories")
+			show_categories(app)
+
+static func _route_key(app: Control, product: int) -> String:
+	var company_key := str(app.sim.state.get("company_id", "legacy-company")).replace("-", "_")
+	return "catalog_supplier_%s_%d" % [company_key, product]
+
+static func _supplier_for(app: Control, product: int) -> int:
+	return int(app.get_meta(_route_key(app, product), -1))
+
+static func _set_supplier(app: Control, product: int, supplier: int) -> void:
+	app.set_meta(_route_key(app, product), supplier)
+	app.set_meta(SELECTED_SUPPLIER_META, supplier)
+
+static func _refresh_step(app: Control) -> void:
+	app.refresh_view(true)
+
+static func _step_header(app: Control, selected: int) -> VBoxContainer:
+	var panel: VBoxContainer = app.wide_card("Quick Purchase")
+	panel.name = "BuyInventoryWorkflow"
+	var outer_panel := panel.get_parent() as PanelContainer
+	if outer_panel != null:
+		outer_panel.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 12, 12))
+	var row := HFlowContainer.new()
+	row.name = "BuyInventoryProgress"
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("h_separation", 4)
+	for index in range(5):
+		var names := ["Category", "Product", "Supplier", "Negotiate", "Confirm"]
+		var step := Label.new()
+		step.name = "BuyStep%d" % index
+		step.text = "%d  %s" % [index + 1, str(names[index])]
+		step.add_theme_font_size_override("font_size", 12)
+		step.add_theme_color_override("font_color", Style.GOLD if index == selected else Style.MUTED)
+		row.add_child(step)
+		if index < 4:
+			var separator := Label.new()
+			separator.name = "BuyStepSeparator%d" % index
+			separator.text = ">"
+			separator.add_theme_font_size_override("font_size", 11)
+			separator.add_theme_color_override("font_color", Style.MUTED)
+			row.add_child(separator)
+	panel.add_child(row)
+	return panel
 
 static func show_categories(app: Control) -> void:
-	var catalogue: VBoxContainer = app.wide_card("Product Catalogue")
+	var workflow := _step_header(app, 0)
+	var catalogue: VBoxContainer = _nested_card(workflow, "Select Category")
 	catalogue.name = "ProductCataloguePanel"
-	catalogue.add_child(app.label("Select a category to explore products.", 13, Style.MUTED))
+	catalogue.add_child(app.label("Choose a product category to begin your purchase.", 13, Style.MUTED))
 	var grid := GridContainer.new()
 	grid.name = "ProductCategoryGrid"
 	grid.columns = _category_columns(app.size.x)
@@ -39,6 +85,9 @@ static func show_categories(app: Control) -> void:
 		var count := Catalog.PRODUCTS.filter(func(product: Dictionary): return str(product.category) == name).size()
 		var panel: VBoxContainer = _catalog_card(grid, name)
 		panel.name = "CatalogueCategory_" + _safe_name(name)
+		var selected := int(app.catalog_category) == Catalog.CATEGORIES.find(name)
+		var category_panel := panel.get_parent() as PanelContainer
+		category_panel.add_theme_stylebox_override("panel", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12, 10))
 		var icon := Label.new()
 		icon.name = "CategoryIcon"
 		icon.text = _category_icon(name)
@@ -49,11 +98,23 @@ static func show_categories(app: Control) -> void:
 		var choose_category := func():
 			app.catalog_category = Catalog.CATEGORIES.find(name)
 			app.catalog_search = ""
-			app.set_meta(CATALOG_STAGE_META, "products")
-			app.refresh_view()
-		var browse: Button = app.action(panel, "Browse", choose_category, true)
-		browse.name = "BrowseCategory_" + _safe_name(name)
-	app.secondary_tab(catalogue, "My Products", app.navigate.bind("My Products"), app.page == "My Products")
+			app.set_meta("buy_selected_product", -1)
+			app.refresh_view(true)
+		var choose: Button = app.action(panel, "Select Category", choose_category, selected)
+		choose.name = "BrowseCategory_" + _safe_name(name)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	catalogue.add_child(actions)
+	var continue_button: Button = app.action(actions, "Continue", func():
+		if int(app.catalog_category) not in range(Catalog.CATEGORIES.size()):
+			app.set_notice("Select a category to continue.", true)
+			return
+		app.catalog_search = ""
+		app.set_meta(CATALOG_STAGE_META, "products")
+		_refresh_step(app)
+	, true)
+	continue_button.name = "ContinueBuyInventory"
+	continue_button.disabled = int(app.catalog_category) not in range(Catalog.CATEGORIES.size())
 
 static func show_products(app: Control) -> void:
 	var category_index := int(app.catalog_category)
@@ -63,12 +124,9 @@ static func show_products(app: Control) -> void:
 		show_categories(app)
 		return
 	var category := str(Catalog.CATEGORIES[category_index])
-	var catalogue: VBoxContainer = app.wide_card(category)
+	var workflow := _step_header(app, 1)
+	var catalogue: VBoxContainer = _nested_card(workflow, category)
 	catalogue.name = "CategoryProductsPanel"
-	app.action(catalogue, "Back to Categories", func():
-		app.set_meta(CATALOG_STAGE_META, "categories")
-		app.refresh_view()
-	)
 	var search: LineEdit = app.field(catalogue, "Search Products", app.catalog_search, 64)
 	search.name = "CatalogueProductSearch"
 	var product_grid := GridContainer.new()
@@ -94,11 +152,13 @@ static func show_products(app: Control) -> void:
 		app.metric(card, "Available Suppliers", str(suppliers.size()))
 		app.metric(card, "Starting Landed Cost", app.money(starting_cost) if starting_cost > 0 else "Unavailable", Style.GOLD)
 		var selected_product := product_index
+		var selected := int(app.get_meta("buy_selected_product", -1)) == product_index
+		var card_panel := card.get_parent() as PanelContainer
+		card_panel.add_theme_stylebox_override("panel", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12, 10))
 		var select_product := func():
-			app.selected_product = selected_product
-			app.set_meta(CATALOG_STAGE_META, "suppliers")
+			app.set_meta("buy_selected_product", selected_product)
 			app.refresh_view()
-		var choose_product: Button = app.action(card, "Choose Product", select_product, true)
+		var choose_product: Button = app.action(card, "Select Product", select_product, selected)
 		choose_product.name = "ChooseProduct_%d" % product_index
 		card.get_parent().visible = matches
 		product_cards.append({"index": product_index, "card": card})
@@ -122,38 +182,28 @@ static func show_products(app: Control) -> void:
 		empty.visible = visible_count == 0
 		count_label.text = "%d products" % visible_count
 	)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	catalogue.add_child(actions)
+	app.action(actions, "Back", func():
+		app.set_meta(CATALOG_STAGE_META, "categories")
+		_refresh_step(app)
+	)
+	var continue_button: Button = app.action(actions, "Continue", func():
+		var selected_product := int(app.get_meta("buy_selected_product", -1))
+		if selected_product not in range(Catalog.PRODUCTS.size()) or str(Catalog.PRODUCTS[selected_product].category) != category:
+			app.set_notice("Select a product to continue.", true)
+			return
+		app.selected_product = selected_product
+		app.set_meta(CATALOG_STAGE_META, "suppliers")
+		_refresh_step(app)
+	, true)
+	continue_button.name = "ContinueBuyInventory"
+	continue_button.disabled = int(app.get_meta("buy_selected_product", -1)) not in range(Catalog.PRODUCTS.size())
 
 static func show_supplier_workflow(app: Control) -> void:
-	var product: int = app.selected_product
-	if product not in range(Catalog.PRODUCTS.size()):
-		app.set_meta(CATALOG_STAGE_META, "categories")
-		show_categories(app)
-		return
-	var item: Dictionary = app.sim.product_state(product)
-	var stock_label: Label = app.label("", 15, Style.MUTED)
-	supplier_form(app, product, item, stock_label)
-
-static func show_purchase_confirmation(app: Control) -> void:
-	var receipt: Dictionary = app.get_meta("catalog_purchase_receipt", {})
-	if receipt.is_empty():
-		app.set_meta(CATALOG_STAGE_META, "categories")
-		show_categories(app)
-		return
-	var view: VBoxContainer = app.wide_card("Purchase Confirmed")
-	view.name = "SupplierPurchaseConfirmation"
-	app.metric(view, "Product", str(receipt.get("product_name", "")))
-	app.metric(view, "Supplier", str(receipt.get("supplier_name", "")))
-	app.metric(view, "Quantity · Payment", "%s units · %s" % [_format_quantity(int(receipt.get("units", 0))), str(receipt.get("payment", ""))])
-	app.metric(view, "Purchase Cost", str(receipt.get("total", "")), Style.GOLD)
-	app.metric(view, "Expected Delivery", str(receipt.get("delivery", "")))
-	view.add_child(app.label("The order is recorded in Inbound Stock. Inventory and accounting follow the existing supplier purchase workflow.", 13, Style.MUTED))
-	app.action(view, "Continue Shopping", func():
-		app.remove_meta("catalog_purchase_receipt")
-		app.set_meta(CATALOG_STAGE_META, "categories")
-		app.catalog_category = -1
-		app.refresh_view()
-	, true)
-	app.action(view, "View Inbound Stock", app.navigate.bind("Inbound Stock"))
+	app.set_meta(CATALOG_STAGE_META, "suppliers")
+	show_supplier_selection(app)
 
 static func _available_suppliers(state: Dictionary, product: int) -> Array[int]:
 	var result: Array[int] = []
@@ -194,35 +244,16 @@ static func _supplier_card_width(viewport_width: float) -> float:
 
 static func _category_icon(category: String) -> String:
 	var icons := {
-		"Electronics": "◈", "Home & Living": "⌂", "Kitchen": "♨", "Fashion": "◇",
-		"Beauty": "✦", "Fitness": "✚", "Automotive": "▰", "Baby & Kids": "♡",
-		"Pets": "♧", "Travel": "✈",
+		"Electronics": "EL", "Home & Living": "HL", "Kitchen": "K", "Fashion": "F",
+		"Beauty": "BE", "Fitness": "FI", "Automotive": "AU", "Baby & Kids": "BK",
+		"Pets": "PE", "Travel": "TR",
 	}
 	return str(icons.get(category, "•"))
 
-static func update_responsive_layout(app: Control) -> void:
-	var viewport_width := app.size.x
-	var category_grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
-	if category_grid != null:
-		category_grid.columns = _category_columns(viewport_width)
-	var product_grid := app.find_child("CategoryProductList", true, false) as GridContainer
-	if product_grid != null:
-		product_grid.columns = _product_columns(viewport_width)
-	var supplier_list := app.find_child("CompactSupplierList", true, false) as HFlowContainer
-	if supplier_list != null:
-		var card_width := _supplier_card_width(viewport_width)
-		for child in supplier_list.get_children():
-			var card := child as PanelContainer
-			if card == null:
-				continue
-			card.custom_minimum_size.x = card_width
-			card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-
-static func _catalog_card(parent: Node, title: String) -> VBoxContainer:
+static func _nested_card(parent: Node, title: String) -> VBoxContainer:
 	var panel := PanelContainer.new()
-	panel.name = "CatalogueCard"
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 14, 12))
+	panel.add_theme_stylebox_override("panel", Style.box(Color("#19283C"), Color("#35465D"), 12, 10))
 	parent.add_child(panel)
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 8)
@@ -233,316 +264,389 @@ static func _catalog_card(parent: Node, title: String) -> VBoxContainer:
 	content.add_child(heading)
 	return content
 
-static func supplier_form(app: Control, product: int, item: Dictionary, stock_label: Label) -> void:
+static func update_responsive_layout(app: Control) -> void:
+	var viewport_width := app.size.x
+	var category_grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
+	if category_grid != null:
+		category_grid.columns = _category_columns(viewport_width)
+	var product_grid := app.find_child("CategoryProductList", true, false) as GridContainer
+	if product_grid != null:
+		product_grid.columns = _product_columns(viewport_width)
+	var supplier_list := app.find_child("CompactSupplierList", true, false) as GridContainer
+	if supplier_list != null:
+		supplier_list.columns = _supplier_columns(viewport_width)
+		for child in supplier_list.get_children():
+			var card := child as PanelContainer
+			if card == null:
+				continue
+			card.custom_minimum_size.x = 0
+			card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+static func _catalog_card(parent: Node, title: String) -> VBoxContainer:
+	var panel := PanelContainer.new()
+	panel.name = "CatalogueCard"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", Style.box(Color("#19283C"), Color("#35465D"), 12, 10))
+	parent.add_child(panel)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 8)
+	panel.add_child(content)
+	var heading := Label.new()
+	heading.text = title
+	heading.add_theme_font_size_override("font_size", 18)
+	content.add_child(heading)
+	return content
+
+static func show_supplier_selection(app: Control) -> void:
+	var product := int(app.selected_product)
+	if product not in range(Catalog.PRODUCTS.size()):
+		app.set_meta(CATALOG_STAGE_META, "categories")
+		show_categories(app)
+		return
 	var state: Dictionary = app.sim.state
 	SupplierCredit.ensure(state)
-	var company_key := str(state.get("company_id", "legacy-company")).replace("-", "_")
-	var route_key := "catalog_supplier_%s_%d" % [company_key, product]
-	var accepted_key := "accepted_quote_%s_%d" % [company_key, product]
-	var last_supplier_key := "last_catalog_supplier_%s_%d" % [company_key, product]
-	var selected_supplier := int(app.get_meta(route_key, -1))
-	var supplier_indices: Array[int] = []
-	for supplier_id in Catalog.SUPPLIER_SELECTION_INDICES:
-		supplier_indices.append(int(supplier_id))
-	var quantity: LineEdit
-	var payment: OptionButton
-	if selected_supplier < 0 or selected_supplier not in supplier_indices:
-		var supply: VBoxContainer = app.wide_card("Suppliers for " + str(Catalog.PRODUCTS[product].name))
-		supply.name = "ProductSupplierList"
-		app.action(supply, "Back to Products", func():
-			app.set_meta(CATALOG_STAGE_META, "products")
+	var workflow := _step_header(app, 2)
+	var panel: VBoxContainer = _nested_card(workflow, "Choose Supplier · " + str(Catalog.PRODUCTS[product].name))
+	panel.name = "SupplierSelectionStep"
+	panel.add_child(app.label("Compare available suppliers for this product.", 13, Style.MUTED))
+	var list := GridContainer.new()
+	list.name = "CompactSupplierList"
+	list.columns = _supplier_columns(app.size.x)
+	list.add_theme_constant_override("h_separation", 8)
+	list.add_theme_constant_override("v_separation", 8)
+	panel.add_child(list)
+	var selected := _supplier_for(app, product)
+	for supplier_variant in _available_suppliers(state, product):
+		var supplier := int(supplier_variant)
+		var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+		var goods := Catalog.quote(state.country, product, supplier)
+		var freight := Catalog.inbound_freight(state.country, supplier)
+		var card: VBoxContainer = _catalog_card(list, str(provider.name))
+		card.name = "SupplierChoice%d" % supplier
+		var selected_now := selected == supplier
+		var card_panel := card.get_parent() as PanelContainer
+		card_panel.name = "SupplierChoicePanel%d" % supplier
+		card_panel.custom_minimum_size.x = _supplier_card_width(app.size.x)
+		card_panel.add_theme_stylebox_override("panel", Style.box(Color("#25364D") if selected_now else Color("#19283C"), Color("#D5AC61") if selected_now else Color("#35465D"), 12, 10))
+		app.metric(card, "Unit Price", app.money(goods), Style.GOLD)
+		app.metric(card, "Quality · MOQ", "%d%% · %s" % [roundi(float(provider.quality) * 100.0), _format_quantity(int(provider.minimum))])
+		var relation := SupplierCredit.relationship(state, supplier)
+		app.metric(card, "Trust · Reliability", "%d / 100 · %d%%" % [int(relation.trust), roundi(float(provider.reliability) * 100.0)])
+		app.metric(card, "Estimated Arrival", Calendar.format(int(state.day) + int(provider.lead)))
+		app.metric(card, "Landed Cost / Unit", app.money(goods + freight))
+		var choose: Button = app.action(card, "Select Supplier", func():
+			_set_supplier(app, product, supplier)
 			app.refresh_view()
-		)
-		supply.add_child(app.label("Compare available offers. Expand a card to review its terms.", 13, Style.MUTED))
-		var list := HFlowContainer.new()
-		list.name = "CompactSupplierList"
-		list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		list.add_theme_constant_override("h_separation", 10)
-		list.add_theme_constant_override("v_separation", 10)
-		supply.add_child(list)
-		var available_suppliers := _available_suppliers(state, product)
-		var card_width := _supplier_card_width(app.size.x)
-		var expanded_supplier := int(app.get_meta(EXPANDED_SUPPLIER_META, -1))
-		for row_supplier in available_suppliers:
-			var provider: Dictionary = Catalog.SUPPLIERS[row_supplier]
-			var goods := Catalog.quote(state.country, product, row_supplier)
-			var freight := Catalog.inbound_freight(state.country, row_supplier)
-			var entry: VBoxContainer = _catalog_card(list, str(provider.name))
-			entry.name = "SupplierChoice%d" % row_supplier
-			var card_panel := entry.get_parent() as PanelContainer
-			card_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-			card_panel.custom_minimum_size.x = card_width
-			card_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-			card_panel.name = "SupplierChoicePanel%d" % row_supplier
-			var price: Label = app.label("Landed cost per unit", 11, Style.MUTED)
-			entry.add_child(price)
-			var landed_price: Label = app.label(app.money(goods + freight), 15, Style.GOLD)
-			landed_price.name = "SupplierLandedCost%d" % row_supplier
-			entry.add_child(landed_price)
-			var expanded := expanded_supplier == row_supplier
-			var expand_button: Button = app.action(entry, "Hide Details" if expanded else "View Details", func():
-				app.set_meta(EXPANDED_SUPPLIER_META, -1 if expanded else row_supplier)
-				app.refresh_view()
-			)
-			expand_button.name = "ExpandSupplier%d" % row_supplier
-			expand_button.custom_minimum_size.y = 42
-			if expanded:
-				app.divider(entry)
-				app.metric(entry, "Goods Cost Per Unit", app.money(goods))
-				app.metric(entry, "Inbound Freight Per Unit", app.money(freight))
-				app.metric(entry, "Landed Cost Per Unit", app.money(goods + freight), Style.GOLD)
-				app.metric(entry, "Quality · Reliability", "%d%% · %d%%" % [roundi(float(provider.quality) * 100.0), roundi(float(provider.reliability) * 100.0)])
-				app.metric(entry, "Estimated Delivery · MOQ", "%d days · %s units" % [int(provider.lead), _format_quantity(int(provider.minimum))])
-				var supplier_credit := SupplierCredit.eligibility(state, row_supplier)
-				app.metric(entry, "Supplier Trust", "%d / 100" % int(supplier_credit.trust))
-				if bool(supplier_credit.eligible):
-					app.metric(entry, "Credit Available", app.money(int(supplier_credit.available)))
-				else:
-					entry.add_child(app.label("Credit unavailable: " + str(supplier_credit.reason), 11, Style.MUTED))
-				var select_supplier: Button = app.action(entry, "Select Supplier", func():
-					app.set_meta(route_key, row_supplier)
-					app.set_meta(last_supplier_key, row_supplier)
-					app.set_meta(SELECTED_SUPPLIER_META, row_supplier)
-					app.set_meta(CATALOG_STAGE_META, "negotiation")
-					app.refresh_view()
-				, true)
-				select_supplier.name = "SelectSupplier%d" % row_supplier
-		if available_suppliers.is_empty():
-			supply.add_child(app.label("No supplier platforms are currently unlocked for new purchases.", 13, Style.MUTED))
-		if item.has("legacy_supplier"):
-			supply.add_child(app.label("Existing purchases from %s remain in your history." % str(item.legacy_supplier.name), 12, Style.MUTED))
-	else:
-		var provider: Dictionary = Catalog.SUPPLIERS[selected_supplier]
-		var quantity_key := "%s_quantity_%d" % [route_key, selected_supplier]
-		var quotation_key := "%s_%s_%d_%d" % [QUOTATION_META, company_key, product, selected_supplier]
-		var preview_key := "%s_preview_%d" % [route_key, selected_supplier]
-		var title: VBoxContainer = app.wide_card("Supplier Details · " + str(provider.name))
-		title.name = "SelectedSupplierDetails"
-		var standard_unit := Catalog.quote(state.country, product, selected_supplier)
-		var freight_unit := Catalog.inbound_freight(state.country, selected_supplier)
-		var current_quote: Dictionary = Supply.quote(state, product, selected_supplier)
-		var has_negotiated := int(current_quote.get("discount", 0)) > 0 and int(current_quote.get("expires", 0)) >= int(state.day)
-		app.metric(title, "Quoted Goods Cost Per Unit", app.money(standard_unit))
-		app.metric(title, "Inbound Freight Per Unit", app.money(freight_unit))
-		app.metric(title, "Quality · Reliability", "%d%% · %d%%" % [roundi(float(provider.quality) * 100.0), roundi(float(provider.reliability) * 100.0)])
-		app.metric(title, "Lead Time · MOQ · Maximum Order", "%d days · %s · %s units" % [int(provider.lead), _format_quantity(int(provider.minimum)), _format_quantity(Supply.maximum_order_quantity(selected_supplier))])
-		app.metric(title, "Fulfillment Capability", "Direct-to-customer available" if provider.direct else "Warehouse inventory only")
-		var quote_status: Label = app.label("", 13, Style.GOLD)
-		title.add_child(quote_status)
-		var default_target := maxi(1, roundi(standard_unit * 0.9))
-		var proposed_price: LineEdit = app.field(title, "Target Unit Price (optional)", str(app.get_meta("%s_proposed_price_%d" % [route_key, selected_supplier], app.amount_text(default_target, true))), 14)
-		proposed_price.name = "SupplierProposedUnitPrice"
-		proposed_price.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
-		title.add_child(app.label("Supplier terms follow the existing volume-based pricing rules.", 11, Style.MUTED))
-		var response_key := "%s_response_%d" % [route_key, selected_supplier]
-		var negotiation_response: Label = app.label(str(app.get_meta(response_key, "No offer submitted. You can continue at the current supplier quote.")), 12, Style.GOLD if has_negotiated else Style.MUTED)
-		negotiation_response.name = "SupplierNegotiationResponse"
-		title.add_child(negotiation_response)
-		quantity = app.field(title, "Purchase Quantity", str(app.get_meta(quantity_key, str(int(provider.minimum)))), 10)
-		quantity.name = "SupplierPurchaseQuantity"
-		quantity.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
-		var payment_index := 0
-		var previous_quote: Dictionary = app.get_meta(quotation_key, {})
-		if str(previous_quote.get("payment_method", "cash")) == "credit": payment_index = 1
-		payment = app.dropdown(title, ["Pay Upfront", "Supplier Credit"], payment_index)
-		var credit_label: Label = app.label("", 13, Style.MUTED)
-		title.add_child(credit_label)
-		var accepted_label: Label = app.label("Offer accepted" if int(app.get_meta(accepted_key, -1)) == selected_supplier else "Accept the current supplier offer before generating a quotation.", 13, Style.GREEN if int(app.get_meta(accepted_key, -1)) == selected_supplier else Style.MUTED)
-		title.add_child(accepted_label)
-		var quotation_panel: VBoxContainer = _catalog_card(title, "Purchase Quotation")
-		quotation_panel.name = "GeneratedPurchaseQuotation"
-		var quotation_summary: Label = app.label("Generate a quotation after accepting the supplier offer.", 13, Style.MUTED)
-		quotation_panel.add_child(quotation_summary)
-		var preview_button: Button = app.action(title, "View Quotation", func():
-			var breakdown := Supply.purchase_breakdown(state, product, selected_supplier, units_from(quantity.text))
-			if not str(breakdown.get("error", "")).is_empty():
-				app.set_notice(str(breakdown.error), true)
-				return
-			app.set_meta(preview_key, true)
-			app.refresh_view()
-		)
-		preview_button.name = "ViewSupplierQuotation"
-		var quote_button: Button = app.action(title, "Generate Quotation", func():
-			var accepted_now := int(app.get_meta(accepted_key, -1)) == selected_supplier
-			if not accepted_now:
-				app.set_notice("Accept the current supplier offer before generating a quotation.", true)
-				return
-			var qty := units_from(quantity.text)
-			var breakdown := Supply.purchase_breakdown(state, product, selected_supplier, qty)
-			if not str(breakdown.get("error", "")).is_empty():
-				app.set_notice(str(breakdown.error), true)
-				return
-			if payment.selected == 1:
-				var eligibility := SupplierCredit.eligibility(state, selected_supplier)
-				if not bool(eligibility.eligible) or int(breakdown.total) > int(eligibility.available):
-					app.set_notice(str(eligibility.reason) if not bool(eligibility.eligible) else "The quotation exceeds the available supplier credit.", true)
-					return
-			elif int(breakdown.total) > int(state.cash):
-				app.set_notice("Insufficient company cash for this quotation.", true)
-				return
-			var negotiated := Supply.quote(state, product, selected_supplier)
-			var quote := breakdown.duplicate(true)
-			quote.merge({"payment_method": "credit" if payment.selected == 1 else "cash", "day": int(state.day),
-				"offer_expires": int(negotiated.get("expires", 0)), "offer_minimum": int(negotiated.get("minimum", 0)),
-				"offer_discount": int(negotiated.get("discount", 0))}, true)
-			app.set_meta(quotation_key, quote)
-			app.set_notice("Quotation generated. Review the full landed-cost breakdown before confirming purchase.")
-			app.refresh_view()
-		, true)
-		var confirm_button: Button = app.action(title, "Confirm Purchase", func():
-			var quote: Dictionary = app.get_meta(quotation_key, {})
-			if not _quotation_valid(quote, state, product, selected_supplier, units_from(quantity.text), payment.selected):
-				app.set_notice("Generate a current quotation before confirming this purchase.", true)
-				return
-			var payment_name := "Supplier Credit" if payment.selected == 1 else "Pay Upfront"
-			var message := "%s · %s · %s units\n%s goods + %s freight\nTotal %s · Delivery in %d days" % [
-				str(Catalog.PRODUCTS[product].name), str(provider.name), _format_quantity(units_from(quantity.text)),
-				app.money(int(quote.goods_unit_cost) * int(quote.units)), app.money(int(quote.freight_unit_cost) * int(quote.units)),
-				app.money(int(quote.total)), int(provider.lead)]
-			message += "\nPayment: %s" % payment_name
-			app.confirm_action("Confirm Purchase", message, "Place Order", func():
-				if bool(app.get_meta("supplier_purchase_processing", false)):
-					return
-				app.set_meta("supplier_purchase_processing", true)
-				var latest: Dictionary = app.get_meta(quotation_key, {})
-				if not _quotation_valid(latest, state, product, selected_supplier, units_from(quantity.text), payment.selected):
-					app.set_meta("supplier_purchase_processing", false)
-					app.set_notice("The quotation expired or changed. Generate a new quotation before ordering.", true)
-					app.refresh_view()
-					return
-				var purchase_error := ""
-				var purchase_id := -1
-				if payment.selected == 1:
-					var result := SupplierCredit.purchase_on_credit(state, product, selected_supplier, units_from(quantity.text))
-					purchase_error = str(result.get("error", ""))
-					if purchase_error.is_empty(): purchase_id = int(result.get("obligation", {}).get("purchase_id", -1))
-				else:
-					purchase_error = str(app.sim.buy(product, selected_supplier, units_from(quantity.text)))
-					if purchase_error.is_empty() and not state.inbound.is_empty(): purchase_id = int(state.inbound.back().id)
-				if not purchase_error.is_empty():
-					app.set_meta("supplier_purchase_processing", false)
-					app.set_notice(purchase_error, true)
-					app.refresh_view()
-					return
-				app.remove_meta(quantity_key)
-				app.remove_meta(quotation_key)
-				app.set_meta(accepted_key, -1)
-				var shipment: Dictionary = {}
-				for batch in state.inbound:
-					if int(batch.id) == purchase_id: shipment = batch; break
-				var payment_name_after := "Supplier Credit" if payment.selected == 1 else "Pay Upfront"
-				app.set_meta("catalog_purchase_receipt", {"product_name": Catalog.PRODUCTS[product].name,
-					"supplier_name": provider.name, "units": int(latest.units), "payment": payment_name_after,
-					"total": app.money(int(latest.total)), "delivery": Calendar.format(int(shipment.get("arrival", state.day + int(provider.lead)))),
-					"purchase_id": purchase_id})
-				app.set_meta(CATALOG_STAGE_META, "confirmation")
-				app.set_meta("supplier_purchase_processing", false)
-				app.persist("Purchase order placed. The new order is in your inbound shipments.")
-				app.refresh_view()
-			)
-		, true)
-		confirm_button.name = "ConfirmSupplierPurchase"
-		var negotiate: Button = app.action(title, "Submit Offer", func():
-			var target_price := _parse_money_cents(proposed_price.text)
-			if target_price <= 0 or target_price >= standard_unit:
-				negotiation_response.text = "Enter a positive target below the current quoted unit price."
-				negotiation_response.add_theme_color_override("font_color", Style.RED)
-				return
-			app.set_meta("%s_proposed_price_%d" % [route_key, selected_supplier], proposed_price.text)
-			var result := Supply.negotiate(state, product, selected_supplier, units_from(quantity.text))
-			if not result.is_empty():
-				negotiation_response.text = result
-				negotiation_response.add_theme_color_override("font_color", Style.RED)
-				return
-			app.set_meta(accepted_key, -1)
-			app.remove_meta(quotation_key)
-			var supplier_response := Supply.quote(state, product, selected_supplier)
-			var response_text := "Supplier counteroffer: %s goods per unit. It is not agreed until you accept it." % app.money(int(supplier_response.get("cost", standard_unit)))
-			app.set_meta(response_key, response_text)
-			app.persist("Supplier counteroffer received. Review the actual terms before accepting.")
-			app.refresh_view()
-		)
-		negotiate.name = "SubmitSupplierOffer"
-		var accept: Button = app.action(title, "Accept Offer", func():
-			app.sim.select_supplier(product, selected_supplier)
-			app.set_meta(accepted_key, selected_supplier)
-			app.remove_meta(quotation_key)
-			app.persist("Supplier offer accepted. Generate a quotation to continue.")
-			app.refresh_view()
-		, true)
-		accept.name = "AcceptSupplierOffer"
-		var back: Button = app.action(title, "Back to Suppliers", func():
-			app.set_meta(route_key, -1)
-			app.remove_meta(quotation_key)
-			app.refresh_view()
-		)
-		back.name = "BackToSupplierList"
-		var agreed_price_label: Label = app.label("", 12, Style.GREEN)
-		agreed_price_label.name = "AgreedUnitPrice"
-		title.add_child(agreed_price_label)
-		var update_detail := func():
-			var qty := units_from(quantity.text)
-			var breakdown := Supply.purchase_breakdown(state, product, selected_supplier, qty)
-			var active_offer := Supply.quote(state, product, selected_supplier)
-			var negotiated_valid := int(active_offer.get("discount", 0)) > 0 and int(active_offer.get("expires", 0)) >= int(state.day)
-			var unit_goods := int(breakdown.get("goods_unit_cost", standard_unit))
-			var unit_freight := int(breakdown.get("freight_unit_cost", freight_unit))
-			var landed := int(breakdown.get("landed_unit_cost", standard_unit + freight_unit))
-			quote_status.text = "Current supplier quote: %s goods/unit%s" % [app.money(unit_goods), " · expires %s" % Calendar.format(int(active_offer.expires)) if negotiated_valid else ""]
-			var eligibility := SupplierCredit.eligibility(state, selected_supplier)
-			credit_label.text = "Trust %d/100 · Settled %d · Credit limit %s · Available %s" % [int(eligibility.trust), int(eligibility.settled_purchases), app.money(int(eligibility.credit_limit)), app.money(int(eligibility.available))]
-			if bool(eligibility.eligible): credit_label.text += "\n%d-day terms · Due %s" % [SupplierCredit.PAYMENT_TERM_DAYS, Calendar.format(int(eligibility.due_day))]
-			else: credit_label.text += "\n" + str(eligibility.reason)
-			payment.set_item_disabled(1, not bool(eligibility.eligible))
-			if payment.selected == 1 and not bool(eligibility.eligible): payment.select(0)
-			var accepted_now := int(app.get_meta(accepted_key, -1)) == selected_supplier
-			accepted_label.text = "Offer accepted" if accepted_now else "Accept the current supplier offer before generating a quotation."
-			accepted_label.add_theme_color_override("font_color", Style.GREEN if accepted_now else Style.MUTED)
-			agreed_price_label.text = "Agreed unit cost: %s" % app.money(unit_goods) if accepted_now else "No price agreed yet."
-			var quote_valid := _quotation_valid(app.get_meta(quotation_key, {}), state, product, selected_supplier, qty, payment.selected)
-			if not str(breakdown.get("error", "")).is_empty():
-				quotation_summary.text = str(breakdown.error)
-				quotation_summary.add_theme_color_override("font_color", Style.RED)
-			elif quote_valid:
-				var quotation: Dictionary = app.get_meta(quotation_key, {})
-				quotation_summary.text = "%s units · Goods %s · Freight %s · Landed/unit %s · Total %s · %s" % [
-					_format_quantity(qty), app.money(int(quotation.goods_unit_cost) * qty), app.money(int(quotation.freight_unit_cost) * qty),
-					app.money(int(quotation.landed_unit_cost)), app.money(int(quotation.total)), "Credit" if payment.selected == 1 else "Cash"]
-				quotation_summary.add_theme_color_override("font_color", Style.TEXT)
-			elif bool(app.get_meta(preview_key, false)):
-				quotation_summary.text = "Estimate · %s units · Goods %s · Freight %s · Landed/unit %s · Total %s" % [
-					_format_quantity(qty), app.money(int(breakdown.goods_unit_cost) * qty), app.money(int(breakdown.freight_unit_cost) * qty),
-					app.money(int(breakdown.landed_unit_cost)), app.money(int(breakdown.total))]
-				quotation_summary.add_theme_color_override("font_color", Style.TEXT)
-			else:
-				quotation_summary.text = "No current quotation. Generate one after accepting the offer."
-				quotation_summary.add_theme_color_override("font_color", Style.MUTED)
-			quotation_panel.visible = accepted_now or quote_valid or bool(app.get_meta(preview_key, false))
-			quote_button.disabled = not accepted_now or not str(breakdown.get("error", "")).is_empty()
-			confirm_button.disabled = not accepted_now or not quote_valid
-		quantity.text_changed.connect(func(value: String):
-			app.set_meta(quantity_key, value)
-			app.remove_meta(quotation_key)
-			update_detail.call()
-		)
-		payment.item_selected.connect(func(_index: int):
-			app.remove_meta(quotation_key)
-			update_detail.call()
-		)
-		update_detail.call()
-		if has_negotiated:
-			title.add_child(app.label("Negotiated supplier response: %d%% off at %s+ units, expiring %s." % [int(current_quote.discount), _format_quantity(int(current_quote.minimum)), Calendar.format(int(current_quote.expires))], 12, Style.GOLD))
-		var forecast := Supply.forecast(app.sim, product, selected_supplier)
-		title.add_child(app.label("Forecast %d units/day · Restock suggestion %s units" % [roundi(float(forecast.daily)), _format_quantity(int(forecast.suggested))], 12, Style.MUTED))
+		, selected_now)
+		choose.name = "SelectSupplier%d" % supplier
+	if _available_suppliers(state, product).is_empty():
+		panel.add_child(app.label("No supplier platforms are currently unlocked for new purchases.", 13, Style.MUTED))
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	panel.add_child(actions)
+	app.action(actions, "Back", func():
+		app.set_meta(CATALOG_STAGE_META, "products")
+		_refresh_step(app)
+	)
+	var next: Button = app.action(actions, "Continue", func():
+		var supplier := _supplier_for(app, product)
+		if supplier not in _available_suppliers(state, product):
+			app.set_notice("Select an available supplier to continue.", true)
+			return
+		app.set_meta(CATALOG_STAGE_META, "negotiate")
+		_refresh_step(app)
+	, true)
+	next.name = "ContinueBuyInventory"
+	next.disabled = selected not in _available_suppliers(state, product)
 
-static func _quotation_valid(quote: Dictionary, state: Dictionary, product: int, supplier: int, units: int, payment_index: int) -> bool:
-	if quote.is_empty() or int(quote.get("day", -1)) != int(state.day): return false
-	if int(quote.get("product", -1)) != product or int(quote.get("supplier", -1)) != supplier or int(quote.get("units", -1)) != units: return false
-	if str(quote.get("payment_method", "")) != ("credit" if payment_index == 1 else "cash"): return false
-	var offer := Supply.quote(state, product, supplier)
-	if int(offer.get("discount", 0)) > 0 and int(state.day) > int(offer.get("expires", 0)): return false
-	var latest := Supply.purchase_breakdown(state, product, supplier, units)
-	return str(latest.get("error", "")).is_empty() and int(latest.get("total", -1)) == int(quote.get("total", -2))
+static func show_negotiation(app: Control) -> void:
+	var product := int(app.selected_product)
+	var supplier := _supplier_for(app, product)
+	if product not in range(Catalog.PRODUCTS.size()) or supplier not in range(Catalog.SUPPLIERS.size()):
+		app.set_meta(CATALOG_STAGE_META, "suppliers")
+		show_supplier_selection(app)
+		return
+	var state: Dictionary = app.sim.state
+	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+	var route_key := _route_key(app, product)
+	var workflow := _step_header(app, 3)
+	var panel: VBoxContainer = _nested_card(workflow, "Negotiate Price · " + str(provider.name))
+	panel.name = "SupplierNegotiationStep"
+	var asking := Catalog.quote(state.country, product, supplier)
+	var relation := SupplierCredit.relationship(state, supplier)
+	var selected_request := int(app.get_meta("buy_discount_request_%d_%d" % [product, supplier], 0))
+	app.metric(panel, "Supplier Asking Price", app.money(asking), Style.GOLD)
+	app.metric(panel, "Supplier Trust", "%d / 100" % int(relation.trust))
+	var discount := OptionButton.new()
+	discount.name = "RequestedDiscount"
+	for percent in [0, 5, 10, 15]: discount.add_item("%d%%" % int(percent))
+	discount.select([0, 5, 10, 15].find(selected_request) if selected_request in [0, 5, 10, 15] else 0)
+	panel.add_child(app.label("Requested Discount", 12, Style.MUTED))
+	panel.add_child(discount)
+	var result_label: Label = app.label(str(app.get_meta("buy_negotiation_result_%d_%d" % [product, supplier], "Choose a requested discount and request an offer.")), 13, Style.MUTED)
+	result_label.name = "NegotiationResult"
+	panel.add_child(result_label)
+	var accept_button: Button = app.action(panel, "Accept Offer", func():
+		if not bool(app.get_meta("buy_negotiation_ready_%d_%d" % [product, supplier], false)):
+			return
+		app.set_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], true)
+		app.set_notice("Supplier terms accepted. Continue to purchase quantity.")
+		app.refresh_view()
+	, true)
+	accept_button.name = "AcceptNegotiatedOffer"
+	var accepted := bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false))
+	accept_button.visible = bool(app.get_meta("buy_negotiation_ready_%d_%d" % [product, supplier], false))
+	accept_button.disabled = accepted
+	if accepted:
+		result_label.text += "\nOffer accepted."
+		result_label.add_theme_color_override("font_color", Style.GREEN)
+	var request_button: Button = app.action(panel, "Request Offer", func():
+		var requested := int([0, 5, 10, 15][discount.selected])
+		app.set_meta("buy_discount_request_%d_%d" % [product, supplier], requested)
+		app.set_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false)
+		app.set_meta("buy_negotiation_ready_%d_%d" % [product, supplier], false)
+		if requested == 0:
+			var current_terms := Supply.quote(state, product, supplier)
+			if int(current_terms.get("discount", 0)) > 0 and int(current_terms.get("expires", 0)) >= int(state.day):
+				app.set_meta("buy_negotiation_ready_%d_%d" % [product, supplier], true)
+				app.set_meta("buy_negotiation_result_%d_%d" % [product, supplier], "Existing firm supplier offer: %s per unit, valid through %s." % [app.money(int(current_terms.cost)), Calendar.format(int(current_terms.expires))])
+				app.refresh_view()
+				return
+			app.set_meta("buy_negotiation_ready_%d_%d" % [product, supplier], true)
+			app.set_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], true)
+			app.set_meta("buy_negotiation_result_%d_%d" % [product, supplier], "No discount requested. Negotiated unit price remains the supplier asking price: %s." % app.money(asking))
+			app.refresh_view()
+			return
+		var existing_offer := Supply.quote(state, product, supplier)
+		if int(existing_offer.get("discount", 0)) > 0 and int(existing_offer.get("expires", 0)) >= int(state.day):
+			app.set_meta("buy_negotiation_ready_%d_%d" % [product, supplier], true)
+			app.set_meta("buy_negotiation_result_%d_%d" % [product, supplier], "Existing firm supplier offer: %s per unit, valid through %s." % [app.money(int(existing_offer.cost)), Calendar.format(int(existing_offer.expires))])
+			app.refresh_view()
+			return
+		var negotiation_error := Supply.negotiate(state, product, supplier, Supply.negotiation_minimum(supplier))
+		if not negotiation_error.is_empty():
+			app.set_meta("buy_negotiation_result_%d_%d" % [product, supplier], "Offer rejected: %s. Negotiated unit price remains %s." % [negotiation_error, app.money(asking)])
+			app.set_notice(negotiation_error, true)
+			app.refresh_view()
+			return
+		var quote := Supply.quote(state, product, supplier)
+		var actual_discount := int(quote.get("discount", 0))
+		var response := "Offer received: requested %d%%; existing supplier terms returned %d%% at %s per unit. Review and accept the actual price." % [requested, actual_discount, app.money(int(quote.get("cost", asking)))]
+		app.set_meta("buy_negotiation_ready_%d_%d" % [product, supplier], true)
+		app.set_meta("buy_negotiation_result_%d_%d" % [product, supplier], response)
+		app.persist("Supplier offer received. Review and accept the actual supplier terms to continue.")
+		app.refresh_view()
+	)
+	request_button.name = "RequestSupplierOffer"
+	discount.item_selected.connect(func(index: int):
+		var requested := int([0, 5, 10, 15][index])
+		app.set_meta("buy_discount_request_%d_%d" % [product, supplier], requested)
+		app.set_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false)
+		app.set_meta("buy_negotiation_ready_%d_%d" % [product, supplier], false)
+		app.remove_meta("buy_negotiation_result_%d_%d" % [product, supplier])
+		result_label.text = "Request changed. Submit a new request to see the supplier response."
+		result_label.add_theme_color_override("font_color", Style.MUTED)
+		accept_button.visible = false
+		app.set_meta("buy_purchase_quotation", {})
+	)
+	var active_quote := Supply.quote(state, product, supplier)
+	if int(active_quote.get("discount", 0)) > 0 and int(active_quote.get("expires", 0)) >= int(state.day) and not bool(app.get_meta("buy_negotiation_ready_%d_%d" % [product, supplier], false)):
+		result_label.text = "Existing firm supplier offer: %s per unit, valid through %s. Submit the request to review it." % [app.money(int(active_quote.cost)), Calendar.format(int(active_quote.expires))]
+	var next: Button = app.action(panel, "Continue", func():
+		if not bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false)):
+			app.set_notice("Accept the current supplier terms before continuing.", true)
+			return
+		app.set_meta(CATALOG_STAGE_META, "summary")
+		_refresh_step(app)
+	, true)
+	next.name = "ContinueBuyInventory"
+	next.disabled = not bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false))
+	var back: Button = app.action(panel, "Back", func():
+		app.set_meta(CATALOG_STAGE_META, "suppliers")
+		_refresh_step(app)
+	)
+	back.name = "BackToSuppliers"
+
+static func show_purchase_summary(app: Control) -> void:
+	var product := int(app.selected_product)
+	var supplier := _supplier_for(app, product)
+	if product not in range(Catalog.PRODUCTS.size()) or supplier not in range(Catalog.SUPPLIERS.size()):
+		app.set_meta(CATALOG_STAGE_META, "suppliers")
+		show_supplier_selection(app)
+		return
+	var state: Dictionary = app.sim.state
+	var provider: Dictionary = Catalog.SUPPLIERS[supplier]
+	var key := "buy_quantity_%d_%d" % [product, supplier]
+	var step_key := "buy_quantity_step_%d_%d" % [product, supplier]
+	var quantity := int(app.get_meta(key, int(provider.minimum)))
+	var increment := int(app.get_meta(step_key, 10))
+	if increment not in [10, 100, 1000]: increment = 10
+	quantity = clampi(quantity, int(provider.minimum), Supply.maximum_order_quantity(supplier))
+	app.set_meta(key, quantity)
+	app.set_meta(step_key, increment)
+	var workflow := _step_header(app, 4)
+	var panel: VBoxContainer = _nested_card(workflow, "Quantity & Purchase Summary")
+	panel.name = "PurchaseSummaryStep"
+	var quantity_row := HBoxContainer.new()
+	quantity_row.name = "PurchaseQuantityControls"
+	quantity_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	quantity_row.add_theme_constant_override("separation", 8)
+	panel.add_child(app.label("Order Quantity", 12, Style.MUTED))
+	panel.add_child(quantity_row)
+	var current_quantity := Label.new()
+	current_quantity.name = "SupplierPurchaseQuantity"
+	current_quantity.text = _format_quantity(quantity)
+	current_quantity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	current_quantity.add_theme_font_size_override("font_size", 21)
+	current_quantity.add_theme_color_override("font_color", Color("#E6C37B"))
+	current_quantity.custom_minimum_size = Vector2(96, 40)
+	var minus: Button = app.action(quantity_row, "−", func():
+		_set_purchase_quantity(app, product, supplier, quantity - increment)
+		app.refresh_view()
+	)
+	minus.name = "PurchaseQuantityMinus"
+	var quantity_field := PanelContainer.new()
+	quantity_field.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 8, 6))
+	quantity_field.add_child(current_quantity)
+	quantity_row.add_child(quantity_field)
+	var plus: Button = app.action(quantity_row, "+", func():
+		_set_purchase_quantity(app, product, supplier, quantity + increment)
+		app.refresh_view()
+	, true)
+	plus.name = "PurchaseQuantityPlus"
+	minus.disabled = quantity <= int(provider.minimum)
+	plus.disabled = quantity >= Supply.maximum_order_quantity(supplier)
+	var increments := HBoxContainer.new()
+	increments.name = "QuantityIncrements"
+	increments.alignment = BoxContainer.ALIGNMENT_CENTER
+	increments.add_theme_constant_override("separation", 4)
+	panel.add_child(app.label("Quantity Increment", 12, Style.MUTED))
+	panel.add_child(increments)
+	for value in [10, 100, 1000]:
+		var amount := int(value)
+		var option: Button = app.action(increments, "×%s" % _format_quantity(amount), func():
+			app.set_meta(step_key, amount)
+			app.refresh_view()
+		, amount == increment)
+		option.name = "QuantityIncrement%d" % amount
+	var payment_key := "buy_payment_%d_%d" % [product, supplier]
+	var payment: OptionButton = app.dropdown(panel, ["Pay Upfront", "Supplier Credit"], int(app.get_meta(payment_key, 0)))
+	payment.name = "PurchasePaymentMethod"
+	var eligibility := SupplierCredit.eligibility(state, supplier)
+	payment.set_item_disabled(1, not bool(eligibility.eligible))
+	if not bool(eligibility.eligible): payment.set_item_text(1, "Supplier Credit · Unavailable")
+	var max_row := HBoxContainer.new()
+	max_row.name = "BuyMaxControls"
+	panel.add_child(max_row)
+	app.metric(max_row, "Available Bank Balance", app.money(int(state.cash)))
+	var max_button: Button = app.action(max_row, "Buy Max", func():
+		var active_offer := Supply.quote(state, product, supplier)
+		var freight := Catalog.inbound_freight(state.country, supplier)
+		var offered_minimum := int(active_offer.get("minimum", 0))
+		var goods := int(active_offer.get("cost", Catalog.quote(state.country, product, supplier)))
+		var maximum_units := mini(Supply.maximum_order_quantity(supplier), int(state.cash) / maxi(1, goods + freight))
+		if maximum_units < offered_minimum:
+			goods = Catalog.quote(state.country, product, supplier)
+			maximum_units = mini(Supply.maximum_order_quantity(supplier), int(state.cash) / maxi(1, goods + freight))
+		if maximum_units < int(provider.minimum):
+			app.set_notice("Current bank balance cannot cover the supplier minimum order.", true)
+			return
+		_set_purchase_quantity(app, product, supplier, maximum_units)
+		app.refresh_view()
+	, true)
+	max_button.name = "BuyMaximumUnits"
+	max_button.custom_minimum_size.y = 40
+	var breakdown := Supply.purchase_breakdown(state, product, supplier, quantity)
+	var quote_panel: VBoxContainer = _nested_card(panel, "Purchase Summary")
+	quote_panel.name = "GeneratedPurchaseQuotation"
+	var goods_unit := int(breakdown.get("goods_unit_cost", Catalog.quote(state.country, product, supplier)))
+	var freight_unit := int(breakdown.get("freight_unit_cost", Catalog.inbound_freight(state.country, supplier)))
+	var goods_total := goods_unit * quantity
+	var freight_total := freight_unit * quantity
+	var purchase_total := int(breakdown.get("total", goods_total + freight_total))
+	var arrival_day := int(state.day) + int(provider.lead)
+	app.metric(quote_panel, "Product", str(Catalog.PRODUCTS[product].name))
+	app.metric(quote_panel, "Supplier", str(provider.name))
+	app.metric(quote_panel, "Unit Cost × Quantity", "%s × %s" % [app.money(goods_unit), _format_quantity(quantity)])
+	app.metric(quote_panel, "Goods Subtotal", app.money(goods_total))
+	app.metric(quote_panel, "Inbound Freight", app.money(freight_total))
+	app.metric(quote_panel, "Total Purchase", app.money(purchase_total), Style.GOLD)
+	app.metric(quote_panel, "Landed Cost Per Unit", app.money(goods_unit + freight_unit))
+	app.metric(quote_panel, "Estimated Arrival Date", Calendar.format(arrival_day))
+	var reliability := roundi(float(provider.reliability) * 100.0)
+	var possible_delay := "No delay expected · %d%% reliability" % reliability if reliability >= 100 else "%s · up to 3 days · %d%% reliability" % [Calendar.format(arrival_day + 3), reliability]
+	app.metric(quote_panel, "Possible Delay (Supplier Reliability)", possible_delay)
+	var error := str(breakdown.get("error", ""))
+	if not error.is_empty(): quote_panel.add_child(app.label(error, 12, Style.RED))
+	var funds_available := int(state.cash) >= purchase_total if payment.selected == 0 else (bool(eligibility.eligible) and int(eligibility.available) >= purchase_total)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	panel.add_child(actions)
+	app.action(actions, "Back", func():
+		app.set_meta(CATALOG_STAGE_META, "negotiate")
+		app.refresh_view()
+	)
+	var confirm: Button = app.action(actions, "Confirm Purchase", func():
+		if bool(app.get_meta("supplier_purchase_processing", false)): return
+		var latest := Supply.purchase_breakdown(state, product, supplier, quantity)
+		if not str(latest.get("error", "")).is_empty():
+			app.set_notice(str(latest.error), true)
+			return
+		var latest_eligibility := SupplierCredit.eligibility(state, supplier)
+		if payment.selected == 0 and int(latest.total) > int(state.cash):
+			app.set_notice("Insufficient company cash for this purchase.", true)
+			return
+		if payment.selected == 1 and (not bool(latest_eligibility.eligible) or int(latest.total) > int(latest_eligibility.available)):
+			app.set_notice("The purchase exceeds available supplier credit.", true)
+			return
+		var confirm_message := "%s · %s · %s units\nTotal %s · Estimated arrival %s\nThe supplier order will be recorded once." % [
+			str(Catalog.PRODUCTS[product].name), str(provider.name), _format_quantity(quantity), app.money(int(latest.total)), Calendar.format(arrival_day)]
+		app.confirm_action("Confirm Purchase", confirm_message, "Place Order", func():
+			if bool(app.get_meta("supplier_purchase_processing", false)): return
+			app.set_meta("supplier_purchase_processing", true)
+			var purchase_id := -1
+			var purchase_error := ""
+			if payment.selected == 1:
+				var result := SupplierCredit.purchase_on_credit(state, product, supplier, quantity)
+				purchase_error = str(result.get("error", ""))
+				if purchase_error.is_empty(): purchase_id = int(result.get("obligation", {}).get("purchase_id", -1))
+			else:
+				purchase_error = str(app.sim.buy(product, supplier, quantity))
+				if purchase_error.is_empty(): purchase_id = int(state.next_purchase) - 1
+			if not purchase_error.is_empty():
+				app.set_meta("supplier_purchase_processing", false)
+				app.set_notice(purchase_error, true)
+				app.refresh_view()
+				return
+			var shipment: Dictionary = {}
+			for batch in state.inbound:
+				if int(batch.get("id", -1)) == purchase_id: shipment = batch; break
+			app.set_meta("catalog_purchase_receipt", {"product": product, "supplier": supplier, "product_name": Catalog.PRODUCTS[product].name,
+				"supplier_name": provider.name, "units": quantity, "payment": "Supplier Credit" if payment.selected == 1 else "Pay Upfront",
+				"total": int(latest.total), "purchase_id": purchase_id, "eta": int(shipment.get("eta", arrival_day)),
+				"arrival": int(shipment.get("arrival", arrival_day)), "status": "In Transit"})
+			app.set_meta("focused_inbound_purchase_id", purchase_id)
+			app.set_meta(CATALOG_STAGE_META, "categories")
+			app.set_meta("supplier_purchase_processing", false)
+			app.page = "Inbound Stock"
+			app.category_last_page["Market"] = "Inbound Stock"
+			app.persist("Purchase order placed. The new shipment is open in Inbound Stock.")
+			app.refresh_view(true)
+		)
+	, true)
+	confirm.name = "ConfirmPurchaseOrder"
+	confirm.disabled = not error.is_empty() or not funds_available or quantity < int(provider.minimum)
+	payment.item_selected.connect(func(index: int):
+		app.set_meta(payment_key, index)
+		app.refresh_view()
+	)
+	var buymax := max_button
+	buymax.disabled = int(state.cash) < (goods_unit + freight_unit) * int(provider.minimum)
+
+static func _set_purchase_quantity(app: Control, product: int, supplier: int, value: int) -> void:
+	var minimum := int(Catalog.SUPPLIERS[supplier].minimum)
+	var maximum := Supply.maximum_order_quantity(supplier)
+	app.set_meta("buy_quantity_%d_%d" % [product, supplier], clampi(value, minimum, maximum))
 
 static func supplier_credit_payables(app: Control) -> void:
 	var state: Dictionary = app.sim.state
@@ -589,8 +693,59 @@ static func inbound_stock(app: Control) -> void:
 	var view: VBoxContainer = app.wide_card("Inbound Stock")
 	view.name = "InboundStockPage"
 	view.add_child(app.label("Track supplier orders until their inventory is received into the shared company stock.", 13, Style.MUTED))
+	var focused_id := int(app.get_meta("focused_inbound_purchase_id", -1))
+	if focused_id >= 0:
+		var receipt: Dictionary = app.get_meta("catalog_purchase_receipt", {})
+		var focused_batch: Dictionary = {}
+		for batch in state.get("inbound", []):
+			if int(batch.get("id", -1)) == focused_id: focused_batch = batch; break
+		var received_lot: Dictionary = {}
+		if focused_batch.is_empty():
+			for item in state.get("products", {}).values():
+				for lot in item.get("lots", []):
+					if int(lot.get("purchase_id", -1)) == focused_id: received_lot = lot; break
+		var product_id := int(receipt.get("product", focused_batch.get("product", -1)))
+		var supplier_id := int(receipt.get("supplier", focused_batch.get("supplier", -1)))
+		var product_name := str(receipt.get("product_name", Catalog.PRODUCTS[product_id].name if product_id in range(Catalog.PRODUCTS.size()) else "Product"))
+		var supplier_name := str(receipt.get("supplier_name", focused_batch.get("supplier_name", Catalog.SUPPLIERS[supplier_id].name if supplier_id in range(Catalog.SUPPLIERS.size()) else "Supplier")))
+		var shipment_status := "Received" if not received_lot.is_empty() else ("Delayed" if bool(focused_batch.get("delayed", false)) else ("In Transit" if not focused_batch.is_empty() else str(receipt.get("status", "Ordered"))))
+		var shipment_rank := 0 if shipment_status == "Ordered" else (2 if shipment_status == "Received" else 1)
+		var shipment: VBoxContainer = _nested_card(view, "Purchase Confirmed")
+		shipment.name = "FocusedInboundPurchase%d" % focused_id
+		shipment.add_child(app.label("Inventory is on its way to your warehouse." if shipment_status in ["Ordered", "In Transit", "Delayed"] else "The shipment has been received into company inventory.", 13, Style.MUTED))
+		var eta := int(focused_batch.get("eta", receipt.get("eta", state.day)))
+		var arrival := int(focused_batch.get("arrival", receipt.get("arrival", eta)))
+		var supplier_reliability := float(Catalog.SUPPLIERS[supplier_id].reliability) if supplier_id in range(Catalog.SUPPLIERS.size()) else 1.0
+		app.metric(shipment, "Shipment ID", "PO-%04d" % focused_id)
+		app.metric(shipment, "Product", product_name)
+		app.metric(shipment, "Supplier", supplier_name)
+		app.metric(shipment, "Incoming Quantity", _format_quantity(int(receipt.get("units", focused_batch.get("units", received_lot.get("units", 0))))))
+		app.metric(shipment, "Estimated Arrival Date", Calendar.format(eta))
+		app.metric(shipment, "Possible Delay", Calendar.format(arrival) if arrival > eta else "No delay currently forecast · %d%% reliability" % roundi(supplier_reliability * 100.0))
+		app.metric(shipment, "Purchase Total", app.money(int(receipt.get("total", 0))), Style.GOLD)
+		app.metric(shipment, "Shipment Status", shipment_status, Style.GREEN if shipment_status == "Received" else Style.GOLD)
+		var progress := HBoxContainer.new()
+		progress.name = "ShipmentProgress"
+		progress.add_theme_constant_override("separation", 4)
+		for step_index in range(3):
+			var status: String = ["Ordered", "In Transit", "Received"][step_index]
+			var step_color: Color = Style.GOLD if step_index == shipment_rank else (Style.GREEN if step_index < shipment_rank else Style.MUTED)
+			var label: Label = app.label(status, 12, step_color)
+			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			progress.add_child(label)
+		shipment.add_child(progress)
+		app.action(shipment, "New Inventory Purchase", func():
+			app.remove_meta("focused_inbound_purchase_id")
+			app.remove_meta("catalog_purchase_receipt")
+			app.set_meta(CATALOG_STAGE_META, "categories")
+			app.catalog_category = -1
+			app.page = "Market"
+			app.category_last_page["Market"] = "Market"
+			_refresh_step(app)
+		, true)
 	if state.get("inbound", []).is_empty():
-		view.add_child(app.label("No inbound stock orders are currently in transit.", 14, Style.MUTED))
+		if focused_id < 0: view.add_child(app.label("No inbound stock orders are currently in transit.", 14, Style.MUTED))
 		return
 	var batches: Array = state.inbound.duplicate(true)
 	batches.sort_custom(func(a: Dictionary, b: Dictionary):
@@ -599,6 +754,7 @@ static func inbound_stock(app: Control) -> void:
 		return day_a < day_b
 	)
 	for batch in batches:
+		if int(batch.get("id", -1)) == focused_id: continue
 		var product := int(batch.get("product", -1))
 		var supplier := int(batch.get("supplier", -1))
 		if product not in range(Catalog.PRODUCTS.size()): continue

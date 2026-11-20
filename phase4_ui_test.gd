@@ -176,7 +176,9 @@ func run() -> void:
 	press("Dashboard")
 	expect(app.page == "Dashboard" and has_label("Business Alerts"), "Dashboard category works")
 	press("Market")
-	expect(app.page == "Market" and has_label("Product Catalogue"), "Market category opens Product Catalogue")
+	var market_scroll := app.body.get_parent() as ScrollContainer
+	expect(app.page == "Market" and has_label("Quick Purchase") and market_scroll != null and market_scroll.scroll_vertical == 0,
+		"Market category opens Buy Inventory at the top of its Quick Purchase workflow")
 	press("My Products")
 	expect(app.page == "My Products" and has_label("Product portfolio"), "Market secondary route opens My Products")
 	press("Management")
