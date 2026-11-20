@@ -8,7 +8,7 @@ const CEOProfile = preload("res://ceo_profile.gd")
 const GameStore = preload("res://game_store.gd")
 const LOGO = preload("res://icon.svg")
 
-static func brand(app: Control, parent: Node) -> void:
+static func brand(app: Control, parent: Node) -> HBoxContainer:
 	var header: HBoxContainer = app.row(parent)
 	header.add_theme_constant_override("separation", 10)
 	var mark := TextureRect.new()
@@ -22,6 +22,7 @@ static func brand(app: Control, parent: Node) -> void:
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	header.add_child(name)
+	return header
 
 static func title(app: Control) -> void:
 	var play: VBoxContainer = app.wide_card("Continue Playing")

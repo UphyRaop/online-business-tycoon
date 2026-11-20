@@ -52,7 +52,7 @@ func run() -> void:
 		access_code.text = "URTN"
 		if unlock != null: unlock.pressed.emit()
 	expect(app.developer_save_active and app.screen == "Developer Mode" and app.active_game_id.is_empty(),
-		"Opening Developer Mode starts an isolated DEV save instead of using the normal game path")
+		"URTN unlock starts an isolated DEV sandbox instead of using the normal game path")
 	expect(app.normal_state_snapshot.company_id == normal_copy.company_id and app.normal_state_snapshot.cash == normal_copy.cash,
 		"Opening the console preserves a recoverable normal-game snapshot")
 	var isolated_state: Dictionary = app.sim.state.duplicate(true)
@@ -91,7 +91,7 @@ func run() -> void:
 	tap(app, "Open Cheats")
 	expect(app.screen == "Developer Cheats" and app.find_child("DeveloperCheatTabs", true, false) != null,
 		"Cheats open independently from the preview selector")
-	for tab in ["Finance", "Inventory", "Orders", "Marketing", "Company", "Time", "Scenarios"]:
+	for tab in ["Finance", "Inventory", "Sales & Orders", "Marketing", "Company", "Time", "Scenarios"]:
 		tap(app, tab)
 		expect(app.screen == "Developer Cheats", "Developer cheat category %s opens" % tab)
 	app.screen = "Game"; app.page = "Market"; app.render()

@@ -1,6 +1,6 @@
 extends RefCounted
 
-## Structured, debug-build-only interface used by tests and Developer Mode.
+## Structured interface for the isolated local DEV sandbox and debug automation.
 const Catalog = preload("res://catalog.gd")
 const Sim = preload("res://simulation.gd")
 const StoreManager = preload("res://store_manager.gd")
@@ -10,7 +10,6 @@ const DevStore = preload("res://developer_test_store.gd")
 const SaveValidation = preload("res://save_store.gd")
 
 func execute(command: String, args: Dictionary, app: Node) -> Dictionary:
-	if not OS.is_debug_build(): return _result(false, "release_build", "Developer commands are disabled in release builds.")
 	if app == null: return _result(false, "missing_app", "The game instance is unavailable.")
 	var result := _dispatch(command, args, app)
 	if _require_dev(app) and not result.get("ok", false):
@@ -79,7 +78,6 @@ func _load_or_reset(command: String, args: Dictionary, app: Node) -> Dictionary:
 	return _result(true, str(result.code), str(result.message), {"id": result.record.id, "company": result.record.state.company})
 
 func _delete_dev(id: String, app: Node) -> Dictionary:
-	if not OS.is_debug_build(): return _result(false, "release_build", "Developer test saves are available only in debug builds.")
 	if app.get("developer_save_active") and str(app.get("dev_record").get("id", "")) == id:
 		return _result(false, "active_dev_save", "Switch to another DEV save before deleting the active one.")
 	return DevStore.delete_test(id)
@@ -350,7 +348,12 @@ func _save(app: Node) -> Dictionary:
 	return _result(true, str(result.code), str(result.message))
 
 func _require_dev(app: Node) -> bool:
-	return OS.is_debug_build() and app.get("developer_save_active") == true and app.get("sim") != null and app.get("dev_record") is Dictionary
+	if app == null or app.get("developer_save_active") != true or app.get("sim") == null:
+		return false
+	var record: Variant = app.get("dev_record")
+	if not record is Dictionary:
+		return false
+	return not str(record.get("id", "")).is_empty() and app.get("active_game_id") == ""
 
 func _result(ok: bool, code: String, message: String, data: Dictionary = {}) -> Dictionary:
 	var result := {"ok": ok, "code": code, "message": message}
