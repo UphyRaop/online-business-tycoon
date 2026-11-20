@@ -135,7 +135,7 @@ static func valid(state: Dictionary) -> bool:
 		var direct_freight: int = row.get("direct_inbound_freight", 0)
 		if direct_cogs < 0 or direct_purchases < 0 or direct_freight < 0 or direct_freight > direct_purchases or int(row.get("inventory_returns", 0)) < 0 or int(row.get("supplier_refunds", 0)) < 0:
 			return false
-		inventory += row.purchases - (row.cogs - direct_cogs) - int(row.get("inventory_returns", 0))
+		inventory += row.purchases - (row.cogs - direct_cogs) - int(row.get("inventory_returns", 0)) + int(row.get("dev_inventory_adjustment", 0))
 		goods_in_transit += direct_purchases - direct_cogs
 		if goods_in_transit < 0:
 			return false

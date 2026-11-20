@@ -53,7 +53,7 @@ func run() -> void:
 	app.render()
 	await process_frame
 	expect(app.find_child("ProductCategoryGrid", true, false) != null, "Product Catalogue starts with category cards")
-	click("Browse Kitchen")
+	click("Browse", app.find_child("CatalogueCategory_Kitchen", true, false))
 	await process_frame
 	var product_card := app.find_child("CatalogueProduct_0", true, false)
 	expect(product_card != null and button("Choose Product", product_card) != null, "Selecting Kitchen opens its actual product cards")
@@ -62,13 +62,20 @@ func run() -> void:
 	expect(app.find_child("CompactSupplierList", true, false) != null, "Product selection opens the compact supplier list")
 	var supplier_index := int(Catalog.SUPPLIER_SELECTION_INDICES[0])
 	var supplier_card := app.find_child("SupplierChoice%d" % supplier_index, true, false)
-	expect(supplier_card != null and button("Select Supplier", supplier_card) != null, "A single supplier can be selected for full details")
+	expect(supplier_card != null and button("View Details", supplier_card) != null, "A supplier summary can be expanded")
+	click("View Details", supplier_card)
+	await process_frame
+	supplier_card = app.find_child("SupplierChoice%d" % supplier_index, true, false)
+	expect(supplier_card != null and button("Select Supplier", supplier_card) != null, "Expanded supplier details can be selected")
 	click("Select Supplier", supplier_card)
 	await process_frame
 	var details := app.find_child("SelectedSupplierDetails", true, false)
 	expect(details != null, "Selecting a supplier opens its details")
-	for action in ["Negotiate", "Accept Offer", "Generate Quotation", "Confirm Purchase", "Back to Suppliers"]:
+	for action in ["Submit Offer", "Accept Offer", "Generate Quotation", "Confirm Purchase", "Back to Suppliers"]:
 		expect(button(action, details) != null, "Supplier details provides the %s action" % action)
+	expect(app.find_child("SupplierProposedUnitPrice", true, false) != null
+		and app.find_child("SupplierNegotiationResponse", true, false) != null,
+		"Negotiation view shows a target price and a separate actual supplier response")
 	var quantity := app.find_child("SupplierPurchaseQuantity", true, false) as LineEdit
 	expect(quantity != null, "Quantity controls are shown within supplier details")
 	if quantity != null:
@@ -78,7 +85,7 @@ func run() -> void:
 		expect(invalid_quote_button != null and invalid_quote_button.disabled, "Invalid quantity is rejected using actual supplier minimums")
 		quantity.text = str(Supply.negotiation_minimum(supplier_index))
 		quantity.text_changed.emit(quantity.text)
-	click("Negotiate", details)
+	click("Submit Offer", details)
 	await process_frame
 	var terms := Supply.quote(app.sim.state, 0, supplier_index)
 	expect(int(terms.get("discount", 0)) > 0, "Negotiation persists the existing supplier response and quote")
@@ -128,7 +135,7 @@ func run() -> void:
 	app.render()
 	await process_frame
 	var grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
-	expect(grid != null and grid.columns == 1, "Category cards adapt to mobile portrait")
+	expect(grid != null and grid.columns == 2, "Category cards adapt to a two-column mobile portrait layout")
 	app.queue_free()
 	await process_frame
 	print("Supplier workflow UI: %d failures" % failures)

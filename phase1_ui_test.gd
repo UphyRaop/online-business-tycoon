@@ -4,6 +4,7 @@ const Main = preload("res://main.tscn")
 const Saves = preload("res://save_store.gd")
 const Slots = preload("res://save_slots.gd")
 const Stores = preload("res://store_manager.gd")
+const CatalogData = preload("res://catalog.gd")
 var app: Control
 var failures := 0
 
@@ -74,6 +75,18 @@ func press(title: String) -> void:
 				return
 	expect(false, "Missing enabled button " + title)
 
+func press_category(category: String) -> void:
+	var safe_name := category.replace("&", "and").replace(" ", "_")
+	var category_card := app.find_child("CatalogueCategory_" + safe_name, true, false)
+	if category_card == null:
+		expect(false, "Missing category card " + category)
+		return
+	for candidate in controls(category_card, "Button"):
+		if candidate.text == "Browse" and not candidate.disabled and candidate.is_visible_in_tree():
+			candidate.pressed.emit()
+			return
+	expect(false, "Missing Browse action for category " + category)
+
 func has_visible_label(prefix: String) -> bool:
 	for node in controls(app, "Label"):
 		if node.text.begins_with(prefix) and node.is_visible_in_tree(): return true
@@ -106,7 +119,7 @@ func browse_catalog_product(category: String, product_id: int) -> void:
 		await process_frame
 		stage = "categories"
 	if stage == "categories":
-		press("Browse " + category)
+		press_category(category)
 		await process_frame
 		await process_frame
 		stage = "products"
@@ -127,12 +140,28 @@ func browse_catalog_product(category: String, product_id: int) -> void:
 		await process_frame
 		await process_frame
 	if str(app.get_meta("product_catalog_stage", "")) == "suppliers" and app.find_child("SelectedSupplierDetails", true, false) == null:
-		var supplier_action := "Select Supplier"
-		for candidate in controls(app, "Button"):
-			if candidate.text == "Selected Supplier" and candidate.is_visible_in_tree() and not candidate.disabled:
-				supplier_action = "Selected Supplier"
-				break
-		press(supplier_action)
+		var supplier_id := int(CatalogData.SUPPLIER_SELECTION_INDICES[0])
+		var supplier_card: Control = app.find_child("SupplierChoice%d" % supplier_id, true, false)
+		if supplier_card == null:
+			expect(false, "Product selection presents the expected supplier comparison card")
+			return
+		var expand: Button
+		for candidate in controls(supplier_card, "Button"):
+			if candidate.text in ["View Details", "Hide Details"]: expand = candidate
+		if expand == null:
+			expect(false, "Supplier summary exposes its detail expansion action")
+			return
+		if expand.text == "View Details":
+			expand.pressed.emit()
+			await process_frame
+		supplier_card = app.find_child("SupplierChoice%d" % supplier_id, true, false)
+		var select_supplier: Button
+		for candidate in controls(supplier_card, "Button"):
+			if candidate.text == "Select Supplier": select_supplier = candidate
+		if select_supplier == null:
+			expect(false, "Expanded supplier details expose their selection action")
+			return
+		select_supplier.pressed.emit()
 		await process_frame
 		await process_frame
 

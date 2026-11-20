@@ -41,7 +41,7 @@ func run() -> void:
 	await process_frame
 	expect(has_label("Product Catalogue") and app.find_child("ProductCategoryGrid", true, false) != null,
 		"Market starts with compact selectable product category cards")
-	press("Browse Electronics")
+	press_category("Electronics")
 	await process_frame
 	var search: LineEdit = app.find_child("CatalogueProductSearch", true, false)
 	var product_card: Control = app.find_child("CatalogueProduct_1", true, false)

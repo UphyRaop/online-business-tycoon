@@ -64,6 +64,9 @@ static func transaction_rows(state: Dictionary, first_day: int, last_day: int) -
 		_add_transaction(incoming, "Customer receipts", int(cash.customer_receipts))
 		_add_transaction(incoming, "Supplier refunds", int(cash.supplier_refunds))
 		_add_transaction(incoming, "Owner investment", int(cash.owner_investment))
+		var developer_adjustment := int(cash.developer_adjustment)
+		if developer_adjustment > 0: _add_transaction(incoming, "Developer test adjustment", developer_adjustment)
+		elif developer_adjustment < 0: _add_transaction(outgoing, "Developer test adjustment", developer_adjustment)
 		_add_transaction(outgoing, "Customer refunds", int(cash.customer_refunds))
 		_add_transaction(outgoing, "Warehouse goods", int(cash.warehouse_goods))
 		_add_transaction(outgoing, "Supplier-direct goods", int(cash.supplier_direct_goods))
@@ -132,6 +135,7 @@ static func cash_flow_lines(report: Dictionary) -> Dictionary:
 		"store_expenses": -int(report.get("store_expenses", 0)),
 		"other_operating": -int(report.get("fees", 0)) - int(report.get("overhead", 0)) - int(report.get("hosting", 0)) - int(report.get("legacy", 0)),
 		"owner_investment": int(report.get("capital", 0)),
+		"developer_adjustment": int(report.get("dev_cash_adjustment", 0)),
 	}
 	lines.total = 0
 	for key in lines.keys():

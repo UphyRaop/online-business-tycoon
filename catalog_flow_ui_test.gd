@@ -48,10 +48,16 @@ func run() -> void:
 	app.set_meta(Market.CATALOG_STAGE_META, "categories")
 	app.render()
 	await settle_frames()
+	expect(Market._category_columns(1280.0) == 3 and Market._category_columns(768.0) == 2
+		and Market._category_columns(390.0) == 2, "Category cards use three, two and compact mobile two-column layouts")
+	expect(Market._product_columns(1280.0) == 3 and Market._product_columns(768.0) == 2
+		and Market._product_columns(390.0) == 1, "Product cards use three, two and one responsive columns")
+	expect(Market._supplier_columns(1280.0) == 3 and Market._supplier_columns(768.0) == 2
+		and Market._supplier_columns(390.0) == 1, "Supplier comparison uses three, two and one responsive columns")
 	expect(app.find_child("CatalogueCategory_Electronics", true, false) != null
 		and app.find_child("CatalogueCategory_Kitchen", true, false) != null,
 		"Product Catalogue starts with selectable game categories")
-	click("Browse Kitchen")
+	click("Browse", app.find_child("CatalogueCategory_Kitchen", true, false))
 	await settle_frames()
 	expect(str(app.get_meta(Market.CATALOG_STAGE_META, "")) == "products"
 		and app.catalog_category == Catalog.CATEGORIES.find("Kitchen"),
@@ -74,25 +80,78 @@ func run() -> void:
 	expect(app.selected_product == 0 and str(app.get_meta(Market.CATALOG_STAGE_META, "")) == "suppliers"
 		and app.find_child("CompactSupplierList", true, false) != null,
 		"Choosing a product opens its compact supplier selection stage")
+	var flow := app.find_child("CompactSupplierList", true, false) as HFlowContainer
 	var supplier := int(Catalog.SUPPLIER_SELECTION_INDICES[0])
 	var supplier_card := app.find_child("SupplierChoice%d" % supplier, true, false)
+	expect(supplier_card != null and button("View Details", supplier_card) != null,
+		"Collapsed supplier summary exposes its expansion control")
+	expect(button("Select Supplier", supplier_card) == null,
+		"Collapsed supplier cards keep selection inside the expanded details state")
+	click("View Details", supplier_card)
+	await settle_frames()
+	supplier_card = app.find_child("SupplierChoice%d" % supplier, true, false)
 	expect(supplier_card != null and button("Select Supplier", supplier_card) != null,
-		"Supplier summary exposes selection, quality, reliability, MOQ, lead time, and landed cost")
+		"Expanded supplier card exposes selection with quality, reliability, MOQ, lead time, and landed cost")
+	var expanded_panel := app.find_child("SupplierChoicePanel%d" % supplier, true, false) as PanelContainer
+	var other_supplier := int(Catalog.SUPPLIER_SELECTION_INDICES[1])
+	var collapsed_panel := app.find_child("SupplierChoicePanel%d" % other_supplier, true, false) as PanelContainer
+	expect(expanded_panel != null and collapsed_panel != null
+		and expanded_panel.size_flags_vertical == Control.SIZE_SHRINK_BEGIN
+		and collapsed_panel.size_flags_vertical == Control.SIZE_SHRINK_BEGIN
+		and collapsed_panel.size.y < expanded_panel.size.y,
+		"Opening a supplier expands only its own natural-height card")
+	flow = app.find_child("CompactSupplierList", true, false) as HFlowContainer
+	expect(flow != null and expanded_panel.position.x >= 0.0 and expanded_panel.position.x + expanded_panel.size.x <= flow.size.x + 1.0,
+		"Supplier card stays inside its parent flow without horizontal overflow")
+	click("View Details", supplier_card)
+	await settle_frames()
+	click("View Details", app.find_child("SupplierChoice%d" % other_supplier, true, false))
+	await settle_frames()
+	expect(button("View Details", app.find_child("SupplierChoice%d" % supplier, true, false)) != null
+		and button("Hide Details", app.find_child("SupplierChoice%d" % other_supplier, true, false)) != null,
+		"Expanding another supplier collapses the previously expanded card")
+	click("View Details", app.find_child("SupplierChoice%d" % supplier, true, false))
+	await settle_frames()
+	supplier_card = app.find_child("SupplierChoice%d" % supplier, true, false)
 	click("Select Supplier", supplier_card)
 	await settle_frames()
 	var details := app.find_child("SelectedSupplierDetails", true, false)
-	expect(details != null and button("Negotiate", details) != null and button("Accept Offer", details) != null
-		and button("Generate Quotation", details) != null and button("Confirm Purchase", details) != null,
+	expect(details != null and button("Submit Offer", details) != null and button("Accept Offer", details) != null
+		and button("View Quotation", details) != null and button("Generate Quotation", details) != null and button("Confirm Purchase", details) != null,
 		"Supplier details provide negotiation, acceptance, quotation, and confirmation actions")
+	expect(app.find_child("SupplierProposedUnitPrice", true, false) != null,
+		"Negotiation offers expose a currency amount target while keeping supplier terms system-driven")
 	var quantity := app.find_child("SupplierPurchaseQuantity", true, false) as LineEdit
 	expect(quantity != null, "Purchase quantity is shown in supplier details")
+	var proposed := app.find_child("SupplierProposedUnitPrice", true, false) as LineEdit
+	if proposed != null:
+		proposed.text = "-1"
+		click("Submit Offer", details)
+		expect((app.find_child("SupplierNegotiationResponse", true, false) as Label).text.contains("positive target"),
+			"Invalid or negative target prices are rejected")
+		proposed.text = app.amount_text(roundi(Catalog.quote(app.sim.state.country, 0, supplier) * 0.9), true)
 	if quantity != null:
+		quantity.text = "1"
+		quantity.text_changed.emit(quantity.text)
+		click("Submit Offer", details)
+		var rejected_response := app.find_child("SupplierNegotiationResponse", true, false) as Label
+		expect(rejected_response != null and rejected_response.text.contains("negotiates orders"),
+			"Supplier negotiation rejects quantities below the existing order threshold")
 		quantity.text = str(Supply.negotiation_minimum(supplier))
 		quantity.text_changed.emit(quantity.text)
-	click("Negotiate", details)
+	click("Submit Offer", details)
 	await settle_frames()
 	var terms := Supply.quote(app.sim.state, 0, supplier)
 	expect(int(terms.get("discount", 0)) > 0, "Negotiate uses the existing supplier response mechanics")
+	var response := app.find_child("SupplierNegotiationResponse", true, false) as Label
+	expect(response != null and response.text.contains("Supplier counteroffer") and response.text.contains("not agreed"),
+		"Actual supplier counteroffer remains separate from an accepted agreement")
+	details = app.find_child("SelectedSupplierDetails", true, false)
+	click("View Quotation", details)
+	await settle_frames()
+	var preview := app.find_child("GeneratedPurchaseQuotation", true, false)
+	expect(preview != null and has_label("Estimate") and not has_label("current quotation"),
+		"View Quotation displays the calculated current estimate without creating a purchase order")
 	click("Accept Offer")
 	await settle_frames()
 	click("Generate Quotation")
@@ -128,8 +187,8 @@ func run() -> void:
 	app.render()
 	await settle_frames()
 	var mobile_grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
-	expect(mobile_grid != null and mobile_grid.columns == 1,
-		"Category catalogue switches to a single-column layout on mobile portrait")
+	expect(mobile_grid != null and mobile_grid.columns == 2,
+		"Category catalogue uses compact two-column cards on mobile portrait")
 	app.queue_free()
 	await process_frame
 	print("Category-first product flow UI: %d failures" % failures)

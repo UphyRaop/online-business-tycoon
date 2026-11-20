@@ -23,7 +23,7 @@ func run() -> void:
 	expect(quantity != null, "Supplier Details exposes an editable purchase quantity")
 	quantity.text = "20"
 	quantity.text_changed.emit("20")
-	press("Negotiate")
+	press("Submit Offer")
 	expect(has_label("Negotiated supplier response:"), "Negotiation displays the actual supplier response and terms")
 	await quote_and_confirm_purchase()
 	expect(has_label("Purchase Confirmed") and app.sim.state.inbound.size() == 1 and app.sim.state.inbound[0].units == 20,

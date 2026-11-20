@@ -22,6 +22,8 @@ const CompanySale = preload("res://company_sale.gd")
 const InventoryOverview = preload("res://dashboard_inventory.gd")
 const PortraitFrame = preload("res://portrait_frame.gd")
 const GameStore = preload("res://game_store.gd")
+const DevStore = preload("res://developer_test_store.gd")
+const DevAPI = preload("res://developer_test_api.gd")
 const NAV := ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]
 const NAV_ICON_PATHS := {
 	"Dashboard": "res://assets/navigation/dashboard.svg",
@@ -87,6 +89,20 @@ var active_game_id := ""
 var pending_ceo_name := ""
 var identity_conflict_record: Dictionary = {}
 var avatar_picker_callback: JavaScriptObject
+var dev_preview_size_callback: JavaScriptObject
+var dev_command_callback: JavaScriptObject
+var dev_api := DevAPI.new()
+var developer_save_active := false
+var dev_record: Dictionary = {}
+var normal_state_snapshot: Dictionary = {}
+var normal_ceo_snapshot: Dictionary = {}
+var normal_game_snapshot := ""
+var normal_screen_snapshot := "Title"
+var normal_page_snapshot := "Dashboard"
+var normal_dirty_snapshot := false
+var normal_ceo_corrupt_snapshot := false
+var normal_preview_size := Vector2i.ZERO
+var developer_console_tab := "Home"
 var profile_editing := false
 var profile_edit_snapshot: Dictionary = {}
 var company_profile_editing := false
@@ -100,6 +116,8 @@ var navigation_drawer: PanelContainer
 var navigation_open := false
 var navigation_toggle: Button
 var bank_balance_label: Label
+var header_bank_balance_label: Label
+var header_bank_balance_value: Label
 var day_advance_pending := false
 var day_advance_processing := false
 var profile_sections_expanded := {"achievements": false, "technical": false}
@@ -111,6 +129,15 @@ var header_mobile_layout := false
 
 func _ready() -> void:
 	theme = Style.build()
+	if OS.has_feature("web") and OS.is_debug_build():
+		dev_preview_size_callback = JavaScriptBridge.create_callback(_set_developer_preview_viewport)
+		dev_command_callback = JavaScriptBridge.create_callback(_receive_dev_command)
+		var js_window := JavaScriptBridge.get_interface("window")
+		js_window.obtSetPreviewLogicalSize = dev_preview_size_callback
+		js_window.obtRunDevCommand = dev_command_callback
+		var base_size := get_window().content_scale_size
+		JavaScriptBridge.eval("window.obtPreviewDefaultLogicalSize = [%d, %d];" % [base_size.x, base_size.y])
+		JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.enable();")
 	var migration := GameStore.migrate_legacy()
 	if not str(migration.get("error", "")).is_empty():
 		notice = "Some older saves could not be migrated yet. Their original files remain available. " + str(migration.error)
@@ -121,6 +148,135 @@ func _ready() -> void:
 		large_text = settings.get_value("display", "large_text", false) == true
 	theme.default_font_size = 18 if large_text else 16
 	render()
+
+func _set_developer_preview_viewport(args: Array) -> void:
+	if args.size() < 2:
+		return
+	var width := maxi(1, int(args[0]))
+	var height := maxi(1, int(args[1]))
+	get_window().content_scale_size = Vector2i(width, height)
+
+func _receive_dev_command(args: Array) -> void:
+	var raw := str(args[0]) if not args.is_empty() else "{}"
+	var command_data: Variant = JSON.parse_string(raw)
+	var response: Dictionary
+	if command_data is Dictionary:
+		if str(command_data.get("command", "")) == "open_console":
+			open_developer_mode()
+			response = {"ok": true, "code": "console_opened", "message": "Developer console opened."}
+		else:
+			response = dev_api.execute(str(command_data.get("command", "")), command_data.get("args", {}), self)
+	else:
+		response = {"ok": false, "code": "invalid_command", "message": "Command must be a JSON object."}
+	if OS.has_feature("web"):
+		var serialized := JSON.stringify(response).json_escape()
+		JavaScriptBridge.eval("window.OBTDevResult = JSON.parse(\"%s\");" % serialized)
+
+func open_developer_mode() -> void:
+	if not OS.is_debug_build(): return
+	if has_form_edits():
+		discard_form_then(_open_developer_mode_now)
+		return
+	_open_developer_mode_now()
+
+func _open_developer_mode_now() -> void:
+	if not developer_save_active:
+		normal_state_snapshot = sim.state.duplicate(true) if sim != null else {}
+		normal_ceo_snapshot = ceo_profile.duplicate(true)
+		normal_game_snapshot = active_game_id
+		normal_screen_snapshot = screen
+		normal_page_snapshot = page
+		normal_dirty_snapshot = dirty
+		normal_ceo_corrupt_snapshot = ceo_profile_corrupt
+		normal_preview_size = get_window().content_scale_size
+		var record_result: Dictionary
+		if sim != null:
+			record_result = DevStore.create("DEV Copy — " + str(sim.state.get("company", "Test Company")), sim.state)
+		else:
+			record_result = DevStore.create_fresh("DEV Test Company", "Test CEO", "DEV Test Company", 0, 0, 20261120)
+		if not record_result.get("ok", false):
+			set_notice(str(record_result.get("message", "Could not create an isolated DEV save.")), true)
+			return
+		_activate_dev_record(record_result.record)
+	developer_console_tab = "Home"
+	screen = "Developer Mode"
+	set_notice("")
+	render()
+
+func _activate_dev_record(record: Dictionary) -> void:
+	if not developer_save_active and normal_preview_size == Vector2i.ZERO:
+		normal_state_snapshot = sim.state.duplicate(true) if sim != null else {}
+		normal_ceo_snapshot = ceo_profile.duplicate(true)
+		normal_game_snapshot = active_game_id
+		normal_screen_snapshot = screen
+		normal_page_snapshot = page
+		normal_preview_size = get_window().content_scale_size
+	dev_record = record
+	sim = Sim.new(dev_record.state)
+	developer_save_active = true
+	active_game_id = ""
+	ceo_profile = dev_record.get("ceo_profile", {})
+	ceo_profile_corrupt = false
+	if ceo_profile.is_empty():
+		ceo_profile = CEOProfile.ensure_for_game({}, str(sim.state.owner), "DEV-" + str(dev_record.id), str(dev_record.name))
+		ceo_profile = CEOProfile.register_company(ceo_profile, sim.state)
+	else:
+		ceo_profile = ceo_profile.duplicate(true)
+	ceo_profile = CEOProfile.sync_company(ceo_profile, sim.state)
+	if not dev_record.has("ceo_snapshot"):
+		dev_record.ceo_snapshot = ceo_profile.duplicate(true)
+	dev_record.ceo_profile = ceo_profile.duplicate(true)
+	screen = "Game"
+	page = "Dashboard"
+	dirty = false
+	report_end = 0
+	set_notice("DEV test save active. Normal company saves are isolated.")
+	render()
+
+func leave_developer_mode() -> void:
+	if not developer_save_active: return
+	var restore := func():
+		if OS.has_feature("web"):
+			JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.exit();")
+		if normal_state_snapshot.is_empty():
+			sim = null
+			active_game_id = ""
+			screen = "Title"
+			page = "Dashboard"
+		else:
+			sim = Sim.new(normal_state_snapshot.duplicate(true))
+			active_game_id = normal_game_snapshot
+			screen = normal_screen_snapshot
+			page = normal_page_snapshot
+		ceo_profile = normal_ceo_snapshot.duplicate(true)
+		ceo_profile_corrupt = normal_ceo_corrupt_snapshot
+		developer_save_active = false
+		dev_record.clear()
+		normal_state_snapshot.clear(); normal_ceo_snapshot.clear(); normal_game_snapshot = ""
+		dirty = normal_dirty_snapshot
+		normal_dirty_snapshot = false; normal_ceo_corrupt_snapshot = false
+		if normal_preview_size != Vector2i.ZERO:
+			get_window().content_scale_size = normal_preview_size
+		normal_preview_size = Vector2i.ZERO
+		set_notice("Returned to the normal game. DEV test data remains isolated.")
+		render()
+	confirm_action("Exit Developer Mode?", "Return to the unchanged normal game. The isolated DEV test save remains available.", "Exit DEV Mode", restore)
+
+func set_developer_preview(name: String) -> Dictionary:
+	var presets := {"desktop": Vector2i(900, 1200), "tablet": Vector2i(768, 1024), "mobile": Vector2i(390, 844)}
+	if name == "exit":
+		if OS.has_feature("web"):
+			JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.exit();")
+		get_window().content_scale_size = normal_preview_size if normal_preview_size != Vector2i.ZERO else Vector2i(430, 760)
+		return {"ok": true, "code": "preview_restored", "message": "Original viewport restored."}
+	if not presets.has(name): return {"ok": false, "code": "invalid_preview", "message": "Choose desktop, tablet, or mobile portrait."}
+	var selected: Vector2i = presets[name]
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.select('%s');" % name)
+	else:
+		get_window().content_scale_size = selected
+		_update_responsive_layout()
+	return {"ok": true, "code": "preview_selected", "message": "%s portrait preview selected." % name.capitalize(), "width": selected.x, "height": selected.y}
 
 func label(text: String, font_size: int = 16, color: Color = Style.TEXT) -> Label:
 	var node := Label.new()
@@ -261,10 +417,13 @@ func divider(parent: Node) -> void:
 	parent.add_child(line)
 
 func metric(parent: Node, caption: String, value: String, color: Color = Style.TEXT) -> void:
-	var line: BoxContainer = VBoxContainer.new() if size.x < 600.0 else row(parent)
-	if line is VBoxContainer:
-		line.add_theme_constant_override("separation", 2)
-		parent.add_child(line)
+	var line := BoxContainer.new()
+	line.name = "ResponsiveMetric"
+	line.vertical = size.x < 600.0
+	line.add_theme_constant_override("separation", 2 if line.vertical else 8)
+	if OS.has_feature("web"):
+		line.mouse_filter = Control.MOUSE_FILTER_PASS
+	parent.add_child(line)
 	var name := label(caption, 15, Style.MUTED)
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -295,6 +454,11 @@ func profit_color(cents: int) -> Color:
 
 func _update_responsive_layout() -> void:
 	var viewport_width := size.x
+	Market.update_responsive_layout(self)
+	for metric_row in find_children("ResponsiveMetric", "BoxContainer", true, false):
+		var responsive_metric := metric_row as BoxContainer
+		responsive_metric.vertical = viewport_width < 600.0
+		responsive_metric.add_theme_constant_override("separation", 2 if responsive_metric.vertical else 8)
 	var inventory_panel := find_child("DashboardInventoryOverview", true, false) as PanelContainer
 	var mobile_layout := viewport_width < 600.0
 	if inventory_panel != null and bool(inventory_panel.get_meta("mobile_layout", false)) != mobile_layout:
@@ -329,7 +493,7 @@ func _update_responsive_layout() -> void:
 		navigation_drawer.offset_right = drawer_width
 	if is_instance_valid(navigation_toggle):
 		navigation_toggle.custom_minimum_size.x = 52 if viewport_width < 600.0 else 76
-	if is_instance_valid(bank_balance_label): _refresh_bank_balance()
+	if is_instance_valid(bank_balance_label) or is_instance_valid(header_bank_balance_value): _refresh_bank_balance()
 	var kpis := find_child("DashboardKpis", true, false) as GridContainer
 	if kpis != null:
 		kpis.columns = 4 if viewport_width >= 900.0 else 2
@@ -340,6 +504,13 @@ func _update_responsive_layout() -> void:
 		var grid := find_child(grid_name, true, false) as GridContainer
 		if grid != null:
 			grid.columns = 3 if viewport_width >= 900.0 else (2 if viewport_width >= 600.0 else 1)
+	var menu_actions := find_child("MainMenuActions", true, false) as FlowContainer
+	if menu_actions != null:
+		menu_actions.custom_minimum_size.x = minf(580.0, maxf(0.0, viewport_width - 66.0))
+		for child in menu_actions.get_children():
+			var action_button := child as Button
+			if action_button != null:
+				action_button.custom_minimum_size.x = 150.0 if viewport_width < 600.0 else 172.0
 
 func _reflow_page_cards() -> void:
 	if not is_instance_valid(page_grid):
@@ -392,16 +563,38 @@ func set_notice(message: String, error: bool = false) -> void:
 	_refresh_bank_balance()
 
 func _refresh_bank_balance() -> void:
-	if not is_instance_valid(bank_balance_label) or sim == null or screen != "Game" or page != "Dashboard":
+	if sim == null or screen != "Game":
 		return
-	bank_balance_label.text = money(int(sim.state.get("cash", 0)))
-	bank_balance_label.add_theme_color_override("font_color", Style.RED if int(sim.state.get("cash", 0)) < 0 else Style.GOLD)
+	var value := money(int(sim.state.get("cash", 0)))
+	var color := Style.RED if int(sim.state.get("cash", 0)) < 0 else Style.GOLD
+	for balance in [bank_balance_label, header_bank_balance_value]:
+		if is_instance_valid(balance):
+			balance.text = value
+			balance.add_theme_color_override("font_color", color)
 
 func persist(message: String) -> void:
+	if developer_save_active:
+		dev_record.state = sim.state
+		dev_record.ceo_profile = ceo_profile.duplicate(true)
+		DevStore.audit(dev_record, "gameplay_save", "dev_simulation", "in-memory", message)
+		var dev_save := DevStore.save_test(dev_record)
+		dirty = not dev_save.get("ok", false)
+		if not dirty: set_notice(message)
+		else: set_notice("DEV test save failed. " + str(dev_save.get("message", "")), true)
+		return
 	_sync_ceo_profile()
 	write_progress(Slots.AUTOSAVE, message)
 
 func write_progress(slot: int, message: String) -> bool:
+	if developer_save_active:
+		dev_record.state = sim.state
+		dev_record.ceo_profile = ceo_profile.duplicate(true)
+		var dev_save := DevStore.save_test(dev_record)
+		if not dev_save.get("ok", false):
+			set_notice("DEV test save failed. " + str(dev_save.get("message", "")), true)
+			return false
+		set_notice("DEV test state saved to its isolated test file.")
+		return true
 	_sync_ceo_profile()
 	var archive_path := CEOProfile.company_path_for_game(active_game_id, str(sim.state.get("company_id", "")))
 	var archive_result := Saves.save(sim.state, archive_path, Time.get_unix_time_from_system())
@@ -483,12 +676,19 @@ func show_screen(target: String) -> void:
 	render()
 
 func start_new_game() -> void:
+	if developer_save_active:
+		set_notice("Create DEV test companies only through Developer Mode.", true)
+		screen = "Developer Mode"; render()
+		return
 	active_game_id = ""
 	ceo_profile = {}
 	pending_ceo_name = ""
 	show_screen("New Game")
 
 func create_game_for_ceo(name: String) -> void:
+	if developer_save_active:
+		set_notice("Normal game registration is disabled while an isolated DEV save is active.", true)
+		return
 	var ceo_name := name.strip_edges()
 	if not _valid_ceo_name(ceo_name):
 		set_notice("Enter a CEO name of 1–48 characters without control characters.", true)
@@ -504,6 +704,9 @@ func create_game_for_ceo(name: String) -> void:
 	show_screen("Setup")
 
 func resume_game(game_id: String) -> void:
+	if developer_save_active:
+		set_notice("Normal saves cannot be loaded while the DEV test copy is active.", true)
+		return
 	if not _select_game(game_id): return
 	var latest := Slots.latest_for_game(game_id)
 	if latest.is_empty():
@@ -523,6 +726,7 @@ func open_game_slots(game_id: String) -> void:
 	open_screen("Load")
 
 func _select_game(game_id: String) -> bool:
+	if developer_save_active: return false
 	var game := GameStore.get_game(game_id)
 	var profile := CEOProfile.load_game_profile(game_id)
 	if game.is_empty() or profile.is_empty():
@@ -534,6 +738,9 @@ func _select_game(game_id: String) -> bool:
 	return true
 
 func delete_game(game_id: String) -> void:
+	if developer_save_active:
+		set_notice("Normal game deletion is unavailable while a DEV copy is active.", true)
+		return
 	var game := GameStore.get_game(game_id)
 	if game.is_empty(): return
 	confirm_action("Delete %s?" % str(game.get("game_name", "Game")),
@@ -554,6 +761,9 @@ func delete_game(game_id: String) -> void:
 	)
 
 func delete_company(company_id: String) -> void:
+	if developer_save_active:
+		set_notice("Normal company deletion is unavailable from a DEV copy.", true)
+		return
 	if active_game_id.is_empty() or sim != null:
 		set_notice("Open company selection before removing a company from this game.", true)
 		return
@@ -701,13 +911,20 @@ func _sync_ceo_profile() -> void:
 	if sim == null or ceo_profile_corrupt:
 		return
 	if ceo_profile.is_empty():
-		ceo_profile = CEOProfile.ensure_for_game({}, str(sim.state.get("owner", "")), active_game_id, str(GameStore.get_game(active_game_id).get("game_name", "")))
+		var profile_game_id := "DEV-" + str(dev_record.get("id", "")) if developer_save_active else active_game_id
+		var game_name := str(dev_record.get("name", "DEV Test")) if developer_save_active else str(GameStore.get_game(active_game_id).get("game_name", ""))
+		ceo_profile = CEOProfile.ensure_for_game({}, str(sim.state.get("owner", "")), profile_game_id, game_name)
 	if str(ceo_profile.get("full_name", "")).strip_edges().is_empty():
 		ceo_profile.full_name = str(sim.state.get("owner", ""))
 	sim.state.owner = str(ceo_profile.get("full_name", sim.state.get("owner", "")))
 	ceo_profile = CEOProfile.sync_company(ceo_profile, sim.state)
+	if developer_save_active:
+		dev_record.ceo_profile = ceo_profile.duplicate(true)
 
 func switch_company(company_id: String) -> void:
+	if developer_save_active:
+		set_notice("Company switching is disabled inside an isolated DEV save.", true)
+		return
 	var index := CEOProfile.company_index(ceo_profile, company_id)
 	if index < 0:
 		set_notice("That company is no longer in this CEO profile.", true)
@@ -758,6 +975,9 @@ func sell_current_company() -> void:
 	confirm_action("Sell %s?" % str(value.company_name), details, "Confirm Company Sale", func(): _complete_company_sale())
 
 func _complete_company_sale() -> void:
+	if developer_save_active:
+		set_notice("Company sale records are disabled from a DEV copy to keep the test ledger isolated.", true)
+		return
 	if sim == null:
 		set_notice("The active company could not be found.", true)
 		return
@@ -906,7 +1126,7 @@ func profile_page() -> void:
 			ceo_profile.title = CEOProfile.progression_title(ceo_profile)
 			sim.state.owner = ceo_profile.full_name
 			_sync_ceo_profile()
-			var result := GameStore.update_game_profile(active_game_id, ceo_profile)
+			var result: Error = OK if developer_save_active else GameStore.update_game_profile(active_game_id, ceo_profile)
 			if result != OK:
 				ceo_profile = previous
 				sim.state.owner = previous_owner
@@ -917,7 +1137,7 @@ func profile_page() -> void:
 			if not write_progress(Slots.AUTOSAVE, "CEO profile updated."):
 				ceo_profile = previous
 				sim.state.owner = previous_owner
-				GameStore.update_game_profile(active_game_id, ceo_profile)
+				if not developer_save_active: GameStore.update_game_profile(active_game_id, ceo_profile)
 				profile_editing = true
 				profile_edit_snapshot = previous.duplicate(true)
 				return
@@ -1235,6 +1455,9 @@ func _on_web_avatar_selected(args: Array) -> void:
 	open_avatar_crop(image)
 
 func enter_game(data: Dictionary) -> void:
+	if developer_save_active:
+		set_notice("Normal company loading is disabled while an isolated DEV save is active.", true)
+		return
 	if active_game_id.is_empty():
 		set_notice("Choose or create a game before loading a company.", true)
 		return
@@ -1279,6 +1502,11 @@ func delete_save(slot: int) -> void:
 	)
 
 func leave_game() -> void:
+	if developer_save_active:
+		screen = "Developer Mode"
+		developer_console_tab = "Home"
+		render()
+		return
 	var exit_to_title := func():
 		sim = null
 		dirty = false
@@ -1397,6 +1625,7 @@ func _reset_edit_modes() -> void:
 func primary_navigation(parent: Node) -> Button:
 	header_mobile_layout = size.x < 600.0
 	var heading := row(parent)
+	heading.name = "GameHeaderPrimaryRow"
 	var menu_button := action(heading, "Menu", toggle_navigation_drawer, false)
 	menu_button.name = "NavigationMenuButton"
 	menu_button.custom_minimum_size = Vector2(52 if size.x < 600.0 else 76, 46)
@@ -1405,17 +1634,62 @@ func primary_navigation(parent: Node) -> Button:
 	_apply_drawer_icon(menu_button, DRAWER_ICON_PATHS.Menu, 20)
 	navigation_toggle = menu_button
 	var viewport_width := size.x
+	var company_info := stack(heading, 2)
+	company_info.name = "HeaderCompanyInformation"
+	company_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	company_info.add_child(label(str(sim.state.get("company", "Company")), 15 if viewport_width < 600.0 else 17, Style.TEXT))
 	var date := label(_game_date_text(viewport_width), 12 if viewport_width < 600.0 else 14, Style.MUTED)
 	date.name = "GameDate"
 	date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	date.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	date.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	date.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	date.autowrap_mode = TextServer.AUTOWRAP_OFF
 	date.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	date.tooltip_text = _game_date_text(viewport_width)
-	heading.add_child(date)
+	company_info.add_child(date)
+	if OS.is_debug_build():
+		var developer_button := action(heading, "</>", open_developer_mode, false)
+		developer_button.name = "DeveloperModeButton"
+		developer_button.custom_minimum_size = Vector2(48, 44)
+		developer_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+		developer_button.tooltip_text = "Developer Mode — isolated testing tools"
+		if viewport_width < 600.0:
+			menu_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+			company_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if viewport_width >= 600.0:
+		_add_header_bank_balance(heading)
+	if viewport_width < 600.0:
+		var balance_row := row(parent)
+		balance_row.name = "HeaderBankBalanceRow"
+		_add_header_bank_balance(balance_row)
+	# Keep company details and Developer Mode before the navigation action.
+	heading.move_child(menu_button, heading.get_child_count() - 1)
 	_create_navigation_drawer()
 	return menu_button
+
+func _add_header_bank_balance(parent: Node) -> void:
+	var display := row(parent)
+	display.name = "CompanyBankBalance"
+	display.size_flags_horizontal = Control.SIZE_SHRINK_END if size.x >= 600.0 else Control.SIZE_EXPAND_FILL
+	display.custom_minimum_size.x = 230 if size.x >= 600.0 else 0
+	display.add_theme_constant_override("separation", 6)
+	header_bank_balance_label = label("Bank Balance", 12, Style.MUTED)
+	header_bank_balance_label.name = "HeaderBankBalanceLabel"
+	header_bank_balance_label.custom_minimum_size.x = 84
+	header_bank_balance_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	header_bank_balance_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	header_bank_balance_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	display.add_child(header_bank_balance_label)
+	header_bank_balance_value = label(money(int(sim.state.get("cash", 0))), 14, Style.GOLD)
+	header_bank_balance_value.name = "HeaderBankBalanceValue"
+	header_bank_balance_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	header_bank_balance_value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	header_bank_balance_value.custom_minimum_size.x = 136
+	header_bank_balance_value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_bank_balance_value.autowrap_mode = TextServer.AUTOWRAP_OFF
+	header_bank_balance_value.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	display.add_child(header_bank_balance_value)
+	_refresh_bank_balance()
 
 func _game_date_text(viewport_width: float) -> String:
 	var country: String = Catalog.COUNTRIES[int(sim.state.country)]
@@ -1641,6 +1915,8 @@ func render() -> void:
 	navigation_drawer = null
 	navigation_toggle = null
 	bank_balance_label = null
+	header_bank_balance_label = null
+	header_bank_balance_value = null
 	navigation_open = false
 	page_shell = null
 	page_wide = null
@@ -1705,12 +1981,18 @@ func render() -> void:
 		heading.add_child(title)
 	elif screen == "Title":
 		Menu.brand(self, masthead)
+		if OS.is_debug_build(): _developer_button(masthead)
 	else:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
 			"Campaign Manager": "Ads Manager", "Campaign Details": "Campaign Details", "Company Selection": "Choose a Company",
 			"Advertising Analytics": "Ads Analytics", "Management": "Store Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
 		"CEO identity conflict": "Identity choice", "New Game": "Create a Game"}
-		masthead.add_child(label(titles.get(screen, screen), 30))
+		var screen_heading := row(masthead)
+		var screen_title := label(titles.get(screen, screen), 30)
+		screen_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		screen_heading.add_child(screen_title)
+		if OS.is_debug_build() and screen not in ["Developer Mode", "Developer Cheats"]:
+			_developer_button(screen_heading)
 	var scroll := ScrollContainer.new()
 	scroll.name = "GameContentScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -1739,14 +2021,26 @@ func render() -> void:
 	body.add_child(status)
 	if screen != "Game":
 		match screen:
-			"Title": Menu.title(self)
+			"Title":
+				if developer_save_active: developer_main_menu()
+				else: Menu.title(self)
 			"New Game": new_game_identity()
-			"Setup": setup()
-			"Company Selection": company_selection()
+			"Developer Mode": developer_console()
+			"Developer Cheats": developer_cheats()
+			"Setup":
+				if developer_save_active: developer_console()
+				else: setup()
+			"Company Selection":
+				if developer_save_active: developer_main_menu()
+				else: company_selection()
 			"Entrepreneur name": complete_identity()
 			"CEO identity conflict": identity_conflict_screen()
-			"Load": Menu.slots(self, false)
-			"Save": Menu.slots(self, true)
+			"Load":
+				if developer_save_active: developer_console()
+				else: Menu.slots(self, false)
+			"Save":
+				if developer_save_active: developer_save_screen()
+				else: Menu.slots(self, true)
 			"Settings": Menu.settings(self)
 			"Campaign Manager": AdsView.manager(self)
 			"Campaign Details": AdsView.details(self)
@@ -1777,6 +2071,206 @@ func render() -> void:
 		"Supplier Relationships": Market.supplier_relationships(self)
 		"Supplier Returns": Market.supplier_returns_page(self)
 	_finish_responsive_content()
+
+func _developer_button(parent: Node) -> Button:
+	var button := action(parent, "</> Developer Mode", open_developer_mode, false)
+	button.name = "DeveloperModeButton"
+	button.tooltip_text = "Isolated developer testing tools"
+	return button
+
+func developer_main_menu() -> void:
+	var panel := card("DEV Test Companies")
+	panel.add_child(label("This debug-build menu contains only isolated developer saves. Normal player saves are not displayed here.", 14, Style.MUTED))
+	if developer_save_active:
+		action(panel, "Continue DEV Company · %s" % str(sim.state.company), func(): screen = "Game"; page = "Dashboard"; render(), true)
+		action(panel, "Developer Console", func(): screen = "Developer Mode"; render())
+	for record in DevStore.list_tests():
+		action(panel, "Load DEV · %s" % str(record.get("name", "DEV Test")), func(): _run_dev_command("load_dev", {"id": record.id}))
+		var delete_button := action(panel, "Delete DEV · %s" % str(record.get("name", "DEV Test")), func():
+			confirm_action("Delete this DEV test save?", "Only the isolated developer test file will be deleted.", "Delete DEV Save", func():
+				var result: Dictionary = dev_api.execute("delete_dev", {"id": record.id}, self)
+				set_notice(str(result.get("message", "")), not result.get("ok", false))
+				render()
+			)
+		)
+		delete_button.disabled = developer_save_active and str(record.id) == str(dev_record.get("id", ""))
+	action(panel, "Create Fresh DEV Company", func():
+		var result: Dictionary = dev_api.execute("create_dev_company", {
+			"name": "DEV Test Company", "owner": "Test CEO", "company": "DEV Test Company",
+			"country": 0, "difficulty": 0, "seed": int(Time.get_unix_time_from_system())
+		}, self)
+		set_notice(str(result.get("message", "")), not result.get("ok", false))
+		screen = "Developer Mode"
+		render()
+	, true)
+	action(panel, "Settings", open_screen.bind("Settings"))
+
+func developer_save_screen() -> void:
+	var panel := card("DEV Save State")
+	panel.add_child(label("Manual saves and autosaves for this run are written to the isolated DEV file. Normal player save slots remain untouched.", 14, Style.MUTED))
+	if developer_save_active:
+		metric(panel, "DEV Test Save", str(dev_record.get("name", "DEV Test")), Style.GOLD)
+		action(panel, "Save DEV Test State", func(): _run_dev_command("read_state", {}), true)
+	action(panel, "Developer Console", func(): screen = "Developer Mode"; render())
+	if sim != null: action(panel, "Back to DEV Game", func(): screen = "Game"; render())
+
+func developer_console() -> void:
+	if not OS.is_debug_build():
+		body.add_child(label("Developer Mode is disabled in release builds.", 15, Style.RED))
+		return
+	var safety := card("Isolated Developer Console")
+	safety.add_child(label("Developer actions use a separate DEV save. Normal company saves, achievements, and rankings are not modified.", 14, Style.MUTED))
+	if developer_save_active:
+		metric(safety, "Active DEV Company", str(sim.state.company), Style.GOLD)
+		metric(safety, "DEV Save ID", str(dev_record.get("id", "")), Style.MUTED)
+		metric(safety, "Simulation", "Day %d · %s" % [sim.state.day, Calendar.format(sim.state.day)])
+		metric(safety, "Scenario", str(dev_record.get("active_scenario", "Normal Business")))
+	else:
+		safety.add_child(label("No isolated DEV save is active. Create or load one before using cheats.", 14, Style.MUTED))
+	page_grid.name = "DeveloperConsoleChoices"
+	var preview := card("Preview Device")
+	preview.add_child(label("Select one of the approved portrait viewport sizes.", 13, Style.MUTED))
+	action(preview, "Preview Device", func(): developer_console_tab = "Preview Device"; render(), true)
+	var cheats := card("Cheats")
+	cheats.add_child(label("Test finance, inventory, orders, advertising, company, and time using real game services.", 13, Style.MUTED))
+	action(cheats, "Open Cheats", func(): developer_console_tab = "Finance"; screen = "Developer Cheats"; render(), true)
+	var save_actions := card("DEV Test Saves")
+	action(save_actions, "Create Fresh DEV Company", func():
+		var result: Dictionary = dev_api.execute("create_dev_company", {"name": "DEV Test Company", "owner": "Test CEO", "company": "DEV Test Company", "country": 0, "difficulty": 0, "seed": 20261120}, self)
+		set_notice(str(result.get("message", "")), not result.get("ok", false))
+		screen = "Developer Mode"; render()
+	, true)
+	if developer_save_active:
+		action(save_actions, "Reset DEV Scenario", func(): confirm_action("Reset DEV scenario?", "Discard the current isolated DEV scenario and create a fresh baseline?", "Reset DEV", func(): _run_dev_command("reset_dev", {"id": dev_record.id})))
+		action(save_actions, "Restore DEV Test Snapshot", func(): confirm_action("Restore DEV snapshot?", "Replace the current isolated DEV state with the original snapshot copied for testing?", "Restore Snapshot", func(): _run_dev_command("restore_dev_snapshot", {"id": dev_record.id})))
+		action(save_actions, "Exit Developer Mode", leave_developer_mode)
+	var saved: Array[Dictionary] = DevStore.list_tests()
+	if not saved.is_empty():
+		var saves_card := card("Saved DEV Companies")
+		for record in saved:
+			action(saves_card, "Load %s · %s" % [record.name, record.company], func(): _run_dev_command("load_dev", {"id": record.id}))
+	if developer_console_tab == "Preview Device":
+		developer_preview_panel()
+
+func developer_preview_panel() -> void:
+	var preview := card("Portrait Preview")
+	preview.name = "DeveloperPreviewDevicePanel"
+	preview.add_child(label("The whole interactive Godot viewport is resized and fitted to the available window. The running simulation and current page are preserved.", 14, Style.MUTED))
+	for device in ["desktop", "tablet", "mobile"]:
+		var caption: String = {"desktop": "Desktop · 900 × 1200", "tablet": "Tablet · 768 × 1024", "mobile": "Mobile · 390 × 844"}[device]
+		action(preview, caption, func(): _launch_dev_preview(device), true)
+	action(preview, "Restore Original Viewport", func(): set_developer_preview("exit"); screen = "Developer Mode"; render())
+
+func _launch_dev_preview(device: String) -> void:
+	var result := set_developer_preview(device)
+	if not result.get("ok", false): set_notice(str(result.get("message", "")), true); return
+	screen = "Game"
+	page = normal_page_snapshot if normal_page_snapshot in ["Dashboard", "Market", "My Products", "Orders", "Pre-orders", "Business", "Finance", "Finance Statements", "Expense Management", "Profile", "Advertising", "Campaign Manager", "Campaign Details", "Advertising Analytics", "Management", "Store Profitability", "Store Listings", "Inbound Stock", "Supplier Relationships", "Supplier Returns"] else "Dashboard"
+	render()
+
+func _run_dev_command(command: String, args: Dictionary = {}) -> Dictionary:
+	var result := dev_api.execute(command, args, self)
+	if not result.get("ok", false): set_notice(str(result.get("message", "Developer action failed.")), true)
+	else: set_notice(str(result.get("message", "")))
+	screen = "Developer Mode"
+	render()
+	return result
+
+func _dev_product_selector(parent: Node, selected: int = 0) -> OptionButton:
+	var picker := OptionButton.new()
+	picker.name = "DevProductSelector"
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for index in Catalog.PRODUCTS.size(): picker.add_item(str(Catalog.PRODUCTS[index].name), index)
+	picker.select(clampi(selected, 0, Catalog.PRODUCTS.size() - 1))
+	parent.add_child(picker)
+	return picker
+
+func _dev_number(parent: Node, node_name: String, minimum: float, maximum: float, value: float, step_value: float) -> SpinBox:
+	var input := SpinBox.new()
+	input.name = node_name
+	input.min_value = minimum; input.max_value = maximum; input.value = value; input.step = step_value
+	input.custom_minimum_size.y = TOUCH_HEIGHT
+	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(input)
+	return input
+
+func _dev_finance_controls() -> void:
+	var panel := card("Finance Cheats")
+	panel.add_child(label("Amounts are currency units and create a separate equity adjustment in the DEV ledger, not sales or profit.", 13, Style.MUTED))
+	var cash := _dev_number(panel, "DevCashAmount", -1000000000.0, 1000000000.0, float(sim.state.cash) / 100.0, 0.01)
+	action(panel, "Set Bank Balance", func(): _run_dev_command("set_cash", {"amount": roundi(cash.value * 100.0)}), true)
+	var add := _dev_number(panel, "DevAddMoneyAmount", 0.01, 1000000000.0, 1000.0, 0.01)
+	action(panel, "Add Money", func(): _run_dev_command("add_money", {"amount": roundi(add.value * 100.0)}), true)
+
+func _dev_inventory_controls() -> void:
+	var panel := card("Inventory Cheats")
+	var product := _dev_product_selector(panel)
+	var quantity := _dev_number(panel, "DevInventoryQuantity", 1, 100000, 10, 1)
+	var selected := func(): return product.get_selected_id()
+	action(panel, "Add Stock", func(): _run_dev_command("add_inventory", {"product": selected.call(), "quantity": int(quantity.value)}), true)
+	action(panel, "Empty Stock", func(): confirm_action("Empty DEV stock?", "Remove all warehouse lots for this product in the isolated DEV save?", "Empty Stock", func(): _run_dev_command("empty_stock", {"product": selected.call()})))
+
+func _dev_order_controls() -> void:
+	var panel := card("Sales & Orders Cheats")
+	var product := _dev_product_selector(panel)
+	var selected := func(): return product.get_selected_id()
+	action(panel, "Generate 10 Test Orders", func(): _run_dev_command("generate_orders", {"count": 10, "product": selected.call()}), true)
+	action(panel, "Generate 100 Test Orders", func(): _run_dev_command("generate_orders", {"count": 100, "product": selected.call()}), true)
+
+func _dev_marketing_controls() -> void:
+	var panel := card("Marketing Scenarios")
+	var scenarios := ["High ROAS", "Low ROAS", "Budget Exhausted", "Zero Conversions"]
+	var picker := dropdown(panel, scenarios, 0)
+	var product := _dev_product_selector(panel)
+	action(panel, "Create Marketing Scenario", func(): _run_dev_command("apply_marketing_scenario", {"scenario": scenarios[picker.selected], "product": product.get_selected_id()}), true)
+	panel.add_child(label("Campaign delivery, spending, conversions, and attribution are generated by the normal advertising simulation when days advance.", 13, Style.MUTED))
+	action(panel, "Simulate 7 Days", func():
+		confirm_action("Simulate campaign performance?", "Advance the isolated DEV company from Day %d to Day %d and process its active campaigns and business events?" % [sim.state.day, int(sim.state.day) + 7], "Advance 7 Days", func(): _run_dev_command("advance_days", {"days": 7}))
+	, true)
+
+func _dev_company_controls() -> void:
+	var panel := card("Company State Cheats")
+	var reputation := _dev_number(panel, "DevReputation", 0, 100, sim.state.reputation, 1)
+	action(panel, "Max Reputation", func(): _run_dev_command("set_reputation", {"value": 100}), true)
+	action(panel, "Set Reputation", func(): _run_dev_command("set_reputation", {"value": int(reputation.value)}))
+	action(panel, "Unlock Expansion", func(): _run_dev_command("unlock_expansion", {}), true)
+	panel.add_child(label("Expansion unlock is recorded as DEV-only test state; no expansion gameplay system is added to normal companies.", 13, Style.MUTED))
+
+func _dev_time_controls() -> void:
+	var panel := card("Simulation Time")
+	panel.add_child(label("Large advances process the real simulation engine, including supplier deliveries, settlements, campaigns, operating costs, and orders.", 13, Style.MUTED))
+	for days in [7, 30, 365]:
+		action(panel, "Advance %d Days" % days, func():
+			confirm_action("Advance DEV simulation?", "Advance from Day %d to Day %d? Simulation events will be processed." % [sim.state.day, int(sim.state.day) + days], "Advance %d Days" % days, func(): _run_dev_command("advance_days", {"days": days}))
+		, days == 7)
+
+func _dev_scenario_controls() -> void:
+	var panel := card("Test Scenarios")
+	var scenarios := ["Normal Business", "Financial Crisis", "Rapid Growth", "Stock Shortage"]
+	var picker := dropdown(panel, scenarios, 0)
+	action(panel, "Apply Scenario", func(): _run_dev_command("reset_scenario", {"scenario": scenarios[picker.selected]}), true)
+
+func developer_cheats() -> void:
+	if not developer_save_active:
+		body.add_child(label("Create or load an isolated DEV company before using cheats.", 15, Style.RED))
+		action(body, "Return to Developer Mode", func(): screen = "Developer Mode"; render())
+		return
+	var tabs := HFlowContainer.new()
+	tabs.name = "DeveloperCheatTabs"
+	for tab in ["Finance", "Inventory", "Orders", "Marketing", "Company", "Time", "Scenarios"]:
+		var button := action(tabs, tab, func(): developer_console_tab = tab; screen = "Developer Cheats"; render(), developer_console_tab == tab)
+		button.custom_minimum_size = Vector2(100, 42)
+	body.add_child(tabs)
+	match developer_console_tab:
+		"Finance": _dev_finance_controls()
+		"Inventory": _dev_inventory_controls()
+		"Orders": _dev_order_controls()
+		"Marketing": _dev_marketing_controls()
+		"Company": _dev_company_controls()
+		"Time": _dev_time_controls()
+		"Scenarios": _dev_scenario_controls()
+	action(body, "Developer Console", func(): screen = "Developer Mode"; render())
+	action(body, "Exit DEV Save", leave_developer_mode)
 
 func setup() -> void:
 	var details := card("Company Registration")
