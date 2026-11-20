@@ -1,7 +1,8 @@
 extends RefCounted
 
-## Developer test data is kept in a namespace that the normal game save systems
-## never read or write. Binary Variant storage preserves integer financial fields exactly.
+## Developer test data is kept in a browser-local namespace that the normal game save
+## systems never read or write. It is a sandbox, not owner authentication. Binary Variant
+## storage preserves integer financial fields exactly.
 const ROOT := "user://obt_dev_tests"
 const AUDIT_PATH := ROOT + "/audit.jsonl"
 const Sim = preload("res://simulation.gd")
@@ -26,7 +27,6 @@ static func list_tests() -> Array[Dictionary]:
 	return result
 
 static func create(name: String, source_state: Dictionary, seed: int = 0) -> Dictionary:
-	if not OS.is_debug_build(): return {"ok": false, "code": "release_build", "message": "Developer test saves are available only in debug builds."}
 	if not Saves.valid(source_state): return {"ok": false, "code": "invalid_source", "message": "The selected source game failed save validation."}
 	var cloned: Dictionary = source_state.duplicate(true)
 	if seed != 0: cloned.seed = seed
@@ -50,7 +50,6 @@ static func load_test(id: String) -> Dictionary:
 	return {"ok": true, "code": "loaded", "message": "DEV test save loaded.", "record": record}
 
 static func save_test(record: Dictionary) -> Dictionary:
-	if not OS.is_debug_build(): return {"ok": false, "code": "release_build", "message": "Developer test saves are available only in debug builds."}
 	if not Saves.valid(record.get("state", {})) or not Saves.valid(record.get("snapshot", {})):
 		return {"ok": false, "code": "invalid_test_save", "message": "The updated DEV test save failed validation."}
 	record.updated = Time.get_unix_time_from_system()
@@ -74,7 +73,6 @@ static func reset_test(id: String, to_snapshot: bool = false) -> Dictionary:
 	return {"ok": true, "code": "reset", "message": "DEV test save reset.", "record": record}
 
 static func delete_test(id: String) -> Dictionary:
-	if not OS.is_debug_build(): return {"ok": false, "code": "release_build", "message": "Developer test saves are available only in debug builds."}
 	var path := _path(id)
 	if path.is_empty() or not FileAccess.file_exists(path): return {"ok": false, "code": "not_found", "message": "DEV test save was not found."}
 	var existing := _read(id)

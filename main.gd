@@ -203,6 +203,8 @@ func _open_developer_mode_now() -> void:
 			set_notice(str(record_result.get("message", "Could not create an isolated DEV save.")), true)
 			return
 		_activate_dev_record(record_result.record)
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.enable();")
 	developer_console_tab = "Home"
 	screen = "Developer Mode"
 	set_notice("")
@@ -242,7 +244,7 @@ func leave_developer_mode() -> void:
 	if not developer_save_active: return
 	var restore := func():
 		if OS.has_feature("web"):
-			JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.exit();")
+			JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.disable();")
 		if normal_state_snapshot.is_empty():
 			sim = null
 			active_game_id = ""
@@ -265,7 +267,7 @@ func leave_developer_mode() -> void:
 		normal_preview_size = Vector2i.ZERO
 		set_notice("Returned to the normal game. DEV test data remains isolated.")
 		render()
-	confirm_action("Exit Developer Mode?", "Return to the unchanged normal game. The isolated DEV test save remains available.", "Exit DEV Mode", restore)
+	confirm_action("Lock Developer Mode?", "Return to the unchanged normal game. The isolated DEV test save remains available.", "Lock Developer Mode", restore)
 
 func set_developer_preview(name: String) -> Dictionary:
 	var presets := {"desktop": Vector2i(900, 1200), "tablet": Vector2i(768, 1024), "mobile": Vector2i(390, 844)}
@@ -1671,7 +1673,7 @@ func primary_navigation(parent: Node) -> Button:
 	developer_button.custom_minimum_size = Vector2(40, 34)
 	developer_button.add_theme_font_size_override("font_size", 12)
 	developer_button.size_flags_horizontal = Control.SIZE_SHRINK_END
-	developer_button.tooltip_text = "Developer Mode access — tools are restricted to authorized debug builds"
+	developer_button.tooltip_text = "Developer Mode opens an isolated local test sandbox"
 	Style.secondary(developer_button)
 	var details := row(rows)
 	details.name = "GameHeaderSecondaryRow"
@@ -1799,7 +1801,7 @@ func _show_developer_access_dialog() -> void:
 	var content := stack(panel, 10)
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_child(label("Developer Mode Access", 20, Style.GOLD))
-	content.add_child(label("Developer tools are available only in authorized debug builds.", 14, Style.MUTED))
+	content.add_child(label("URTN opens a local test sandbox. Its cheats cannot change normal saves or shared player data; this public code is not owner authentication.", 14, Style.MUTED))
 	var code := LineEdit.new()
 	code.name = "DeveloperAccessCode"
 	code.placeholder_text = "Access code"
@@ -1828,15 +1830,10 @@ func _show_developer_access_dialog() -> void:
 func _submit_developer_access(code: LineEdit, error_label: Label) -> void:
 	if not is_instance_valid(developer_access_overlay): return
 	if code.text.strip_edges().to_upper() == "URTN":
-		if OS.is_debug_build():
-			var overlay := developer_access_overlay
-			developer_access_overlay = null
-			overlay.queue_free()
-			_open_developer_mode_now()
-		else:
-			error_label.text = "Developer tools are disabled in this production build."
-			error_label.visible = true
-			code.clear()
+		var overlay := developer_access_overlay
+		developer_access_overlay = null
+		overlay.queue_free()
+		_open_developer_mode_now()
 	else:
 		error_label.text = "Access code not recognized."
 		error_label.visible = true
@@ -1975,7 +1972,7 @@ func _create_navigation_drawer() -> void:
 	main_menu_action.custom_minimum_size.y = 46
 	_apply_drawer_icon(main_menu_action, DRAWER_ICON_PATHS["Main Menu"], 20)
 	Style.secondary(main_menu_action)
-	if OS.is_debug_build() and developer_save_active:
+	if developer_save_active:
 		var lock_action := action(content, "Lock Developer Mode", leave_developer_mode)
 		lock_action.name = "DrawerActionLockDeveloperMode"
 		lock_action.custom_minimum_size.y = 46
@@ -2100,8 +2097,8 @@ func render() -> void:
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		heading.add_child(title)
 	elif screen == "Title":
-		Menu.brand(self, masthead)
-		if OS.is_debug_build(): _developer_button(masthead)
+		var brand_header := Menu.brand(self, masthead)
+		_developer_button(brand_header)
 	else:
 		var titles := {"Setup": "Start your business", "Load": "Load Game", "Save": "Save Game", "Settings": "Settings",
 			"Campaign Manager": "Ads Manager", "Campaign Details": "Campaign Details", "Company Selection": "Choose a Company",
@@ -2111,7 +2108,7 @@ func render() -> void:
 		var screen_title := label(titles.get(screen, screen), 30)
 		screen_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		screen_heading.add_child(screen_title)
-		if OS.is_debug_build() and not global_game_header:
+		if not global_game_header:
 			_developer_button(screen_heading)
 	var scroll := ScrollContainer.new()
 	scroll.name = "GameContentScroll"
@@ -2195,14 +2192,18 @@ func render() -> void:
 	_finish_responsive_content()
 
 func _developer_button(parent: Node) -> Button:
-	var button := action(parent, "</> Developer Mode", request_developer_mode_access, false)
+	var button := action(parent, "</>", request_developer_mode_access, false)
 	button.name = "DeveloperModeButton"
-	button.tooltip_text = "Isolated developer testing tools"
+	button.custom_minimum_size = Vector2(42, 38)
+	button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	button.add_theme_font_size_override("font_size", 12)
+	Style.secondary(button)
+	button.tooltip_text = "Open isolated local Developer Mode sandbox"
 	return button
 
 func developer_main_menu() -> void:
 	var panel := card("DEV Test Companies")
-	panel.add_child(label("This debug-build menu contains only isolated developer saves. Normal player saves are not displayed here.", 14, Style.MUTED))
+	panel.add_child(label("This menu contains only isolated developer saves in this browser profile. Normal player saves are not displayed here.", 14, Style.MUTED))
 	if developer_save_active:
 		action(panel, "Continue DEV Company · %s" % str(sim.state.company), func(): screen = "Game"; page = "Dashboard"; render(), true)
 		action(panel, "Developer Console", func(): screen = "Developer Mode"; render())
@@ -2237,11 +2238,8 @@ func developer_save_screen() -> void:
 	if sim != null: action(panel, "Back to DEV Game", func(): screen = "Game"; render())
 
 func developer_console() -> void:
-	if not OS.is_debug_build():
-		body.add_child(label("Developer Mode is disabled in release builds.", 15, Style.RED))
-		return
 	var safety := card("Isolated Developer Console")
-	safety.add_child(label("Developer actions use a separate DEV save. Normal company saves, achievements, and rankings are not modified.", 14, Style.MUTED))
+	safety.add_child(label("Developer actions use a separate local DEV save. They cannot write to normal company saves or shared player data.", 14, Style.MUTED))
 	if developer_save_active:
 		metric(safety, "Active DEV Company", str(sim.state.company), Style.GOLD)
 		metric(safety, "DEV Save ID", str(dev_record.get("id", "")), Style.MUTED)
@@ -2340,7 +2338,7 @@ func _dev_order_controls() -> void:
 	action(panel, "Generate 100 Test Orders", func(): _run_dev_command("generate_orders", {"count": 100, "product": selected.call()}), true)
 
 func _dev_marketing_controls() -> void:
-	var panel := card("Marketing Scenarios")
+	var panel := card("Marketing Cheats")
 	var scenarios := ["High ROAS", "Low ROAS", "Budget Exhausted", "Zero Conversions"]
 	var picker := dropdown(panel, scenarios, 0)
 	var product := _dev_product_selector(panel)
@@ -2351,7 +2349,7 @@ func _dev_marketing_controls() -> void:
 	, true)
 
 func _dev_company_controls() -> void:
-	var panel := card("Company State Cheats")
+	var panel := card("Company Cheats")
 	var reputation := _dev_number(panel, "DevReputation", 0, 100, sim.state.reputation, 1)
 	action(panel, "Max Reputation", func(): _run_dev_command("set_reputation", {"value": 100}), true)
 	action(panel, "Set Reputation", func(): _run_dev_command("set_reputation", {"value": int(reputation.value)}))
@@ -2359,7 +2357,7 @@ func _dev_company_controls() -> void:
 	panel.add_child(label("Expansion unlock is recorded as DEV-only test state; no expansion gameplay system is added to normal companies.", 13, Style.MUTED))
 
 func _dev_time_controls() -> void:
-	var panel := card("Simulation Time")
+	var panel := card("Time Cheats")
 	panel.add_child(label("Large advances process the real simulation engine, including supplier deliveries, settlements, campaigns, operating costs, and orders.", 13, Style.MUTED))
 	for days in [7, 30, 365]:
 		action(panel, "Advance %d Days" % days, func():
@@ -2379,20 +2377,20 @@ func developer_cheats() -> void:
 		return
 	var tabs := HFlowContainer.new()
 	tabs.name = "DeveloperCheatTabs"
-	for tab in ["Finance", "Inventory", "Orders", "Marketing", "Company", "Time", "Scenarios"]:
+	for tab in ["Finance", "Inventory", "Sales & Orders", "Marketing", "Company", "Time", "Scenarios"]:
 		var button := action(tabs, tab, func(): developer_console_tab = tab; screen = "Developer Cheats"; render(), developer_console_tab == tab)
-		button.custom_minimum_size = Vector2(100, 42)
+		button.custom_minimum_size = Vector2(120 if tab == "Sales & Orders" else 100, 42)
 	body.add_child(tabs)
 	match developer_console_tab:
 		"Finance": _dev_finance_controls()
 		"Inventory": _dev_inventory_controls()
-		"Orders": _dev_order_controls()
+		"Sales & Orders": _dev_order_controls()
 		"Marketing": _dev_marketing_controls()
 		"Company": _dev_company_controls()
 		"Time": _dev_time_controls()
 		"Scenarios": _dev_scenario_controls()
 	action(body, "Developer Console", func(): screen = "Developer Mode"; render())
-	action(body, "Exit DEV Save", leave_developer_mode)
+	action(body, "Lock Developer Mode", leave_developer_mode)
 
 func setup() -> void:
 	var details := card("Company Registration")

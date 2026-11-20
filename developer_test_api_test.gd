@@ -32,6 +32,14 @@ func run() -> void:
 	app.active_game_id = "normal-game-must-not-be-used"
 	app.screen = "Game"
 	app.page = "Dashboard"
+	var denied_before_sandbox := api.execute("set_cash", {"amount": -999999}, app)
+	expect(not denied_before_sandbox.ok and denied_before_sandbox.get("code", "") == "dev_save_required"
+		and int(app.sim.state.cash) == int(normal.cash),
+		"Finance cheats are rejected until an isolated DEV save is active")
+	expect(DevStore.ROOT != SaveValidation.PATH and DevStore.ROOT != SaveValidation.PROTOTYPE,
+		"Production Developer Mode writes to a namespace separate from normal and legacy save files")
+	expect(SaveValidation.save(normal) == OK, "Normal save fixture is written before sandbox isolation checks")
+	var normal_save_bytes := FileAccess.get_file_as_bytes(SaveValidation.PATH)
 	var created := api.execute("create_dev_company", {"source": true, "name": "DEV Isolation Test", "seed": 1102}, app)
 	expect(created.ok and app.developer_save_active, "Developer command creates and activates a separate DEV save")
 	expect(app.active_game_id.is_empty(), "Activating DEV data clears the normal-save target")
@@ -107,6 +115,8 @@ func run() -> void:
 	var load := api.execute("load_dev", {"id": app.dev_record.id}, app)
 	expect(load.ok and int(app.sim.state.day) == 1, "Saved DEV test company can be loaded independently")
 	expect(int(app.normal_state_snapshot.cash) == normal_cash and app.active_game_id.is_empty(), "DEV reset/load leaves the normal save and target untouched")
+	expect(FileAccess.get_file_as_bytes(SaveValidation.PATH) == normal_save_bytes,
+		"Developer cheats and DEV reset/load never modify the normal save file")
 	var crisis := api.execute("reset_scenario", {"scenario": "Financial Crisis"}, app)
 	expect(crisis.ok and int(app.sim.state.cash) < 0 and app.dev_record.active_scenario == "Financial Crisis",
 		"Financial Crisis scenario sets a negative bank balance and identifies the active scenario")

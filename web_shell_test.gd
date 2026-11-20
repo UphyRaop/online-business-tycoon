@@ -4,6 +4,7 @@ var failures := 0
 
 func _initialize() -> void:
 	var shell := FileAccess.get_file_as_string("res://browser/online_business_loader.html")
+	var main_source := FileAccess.get_file_as_string("res://main.gd")
 	var presets := FileAccess.get_file_as_string("res://export_presets.cfg")
 	expect(not shell.is_empty(), "Custom pre-engine Web loading shell is present")
 	expect(presets.contains('html/custom_html_shell="res://browser/online_business_loader.html"'),
@@ -25,7 +26,8 @@ func _initialize() -> void:
 	for preset in ["desktop: [900, 1200]", "tablet: [768, 1024]", "mobile: [390, 844]"]:
 		expect(shell.contains(preset), "Developer preview includes the approved portrait preset %s" % preset)
 	expect(not shell.contains("actualDesktop()") and shell.contains("OBTDevPreview = {")
-		and shell.contains("select(name)"), "Developer preview supports touch and mouse and is enabled by the debug game build")
+		and shell.contains("select(name)") and main_source.contains("window.OBTDevPreview && window.OBTDevPreview.enable();"),
+		"Developer preview supports touch and mouse and is enabled only after Developer Mode is unlocked")
 	expect(shell.contains("previewFrame.style.width = width + 'px'")
 		and shell.contains("previewFrame.style.height = height + 'px'")
 		and shell.contains("previewFrame.style.transform = 'scale(' + scale + ')'")
