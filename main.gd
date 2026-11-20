@@ -1565,6 +1565,9 @@ func navigate(target: String) -> void:
 			_reset_edit_modes()
 		page = target
 		category_last_page[primary_category(target)] = target
+		if target == "Market":
+			var market_scroll := body.get_parent() as ScrollContainer
+			if market_scroll != null: market_scroll.scroll_vertical = 0
 		set_notice("")
 		render()
 	)
@@ -2120,7 +2123,7 @@ func render() -> void:
 		heading.name = "PageHeading"
 		var page_title := page
 		match page:
-			"Market": page_title = "Product Catalogue"
+			"Market": page_title = "Market / Buy Inventory"
 			"Business": page_title = "Company Management"
 			"Management": page_title = "Store Management"
 			"My Products": page_title = "Inventory Management"
@@ -2154,7 +2157,9 @@ func render() -> void:
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.follow_focus = true
+	# Market's multi-step purchase flow controls its own scroll resets. Focus-follow
+	# can otherwise reopen a rebuilt step at the old action's vertical position.
+	scroll.follow_focus = page != "Market"
 	shell.add_child(scroll)
 	body = stack(scroll, 8)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2712,8 +2717,8 @@ func show_product_editor() -> void:
 	set_notice("")
 	render()
 
-func refresh_view() -> void:
-	var previous: int = body.get_parent().scroll_vertical
+func refresh_view(reset_scroll: bool = false) -> void:
+	var previous: int = 0 if reset_scroll else body.get_parent().scroll_vertical
 	render()
 	body.get_parent().set_deferred("scroll_vertical", previous)
 

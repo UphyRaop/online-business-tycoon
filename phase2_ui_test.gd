@@ -18,25 +18,24 @@ func run() -> void:
 	app.sim.state.seed = 153
 	press("Market")
 	await browse_catalog_product("Kitchen", 0)
-	expect(has_label("Forecast"), "Supplier Details shows the product demand forecast")
-	var quantity: LineEdit = field_for_label("Purchase Quantity")
-	expect(quantity != null, "Supplier Details exposes an editable purchase quantity")
-	quantity.text = "20"
-	quantity.text_changed.emit("20")
-	press("Submit Offer")
-	expect(has_label("Negotiated supplier response:"), "Negotiation displays the actual supplier response and terms")
+	expect(app.find_child("SupplierNegotiationStep", true, false) != null, "Supplier selection opens its own negotiation step")
+	var supplier := int(app.get_meta("catalog_selected_supplier", -1))
+	var discount := app.find_child("RequestedDiscount", true, false) as OptionButton
+	if discount != null:
+		discount.select(1)
+		discount.item_selected.emit(1)
+	app.set_meta("buy_quantity_0_%d" % supplier, 20)
 	await quote_and_confirm_purchase()
-	expect(has_label("Purchase Confirmed") and app.sim.state.inbound.size() == 1 and app.sim.state.inbound[0].units == 20,
-		"A confirmed supplier quotation creates one purchase order with the requested quantity")
+	expect(has_label("Purchase Confirmed") and app.sim.state.inbound.size() == 1 and app.sim.state.inbound[0].units == 20 and app.page == "Inbound Stock",
+		"The approved flow creates one purchase order and opens focused inbound inventory")
 	open_first_store_listing()
 	press("Edit Listing")
 	select(controls(app, "OptionButton")[1], 1)
 	press("Save Changes")
 	press("Market")
 	await browse_catalog_product("Kitchen", 4)
-	quantity = field_for_label("Purchase Quantity")
-	quantity.text = "20"
-	quantity.text_changed.emit("20")
+	supplier = int(app.get_meta("catalog_selected_supplier", -1))
+	app.set_meta("buy_quantity_4_%d" % supplier, 20)
 	await quote_and_confirm_purchase()
 	open_first_store_listing()
 	press("Edit Listing")

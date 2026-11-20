@@ -39,7 +39,7 @@ func run() -> void:
 	press("Market")
 	await process_frame
 	await process_frame
-	expect(has_label("Product Catalogue") and app.find_child("ProductCategoryGrid", true, false) != null,
+	expect(has_label("Quick Purchase") and app.find_child("ProductCategoryGrid", true, false) != null,
 		"Market starts with compact selectable product category cards")
 	press_category("Electronics")
 	await process_frame
@@ -58,10 +58,12 @@ func run() -> void:
 	if product_card != null:
 		var choose_product: Button
 		for candidate in controls(product_card, "Button"):
-			if candidate.text == "Choose Product":
+			if candidate.text == "Select Product":
 				choose_product = candidate
 				break
-		if choose_product != null: choose_product.pressed.emit()
+		if choose_product != null:
+			choose_product.pressed.emit()
+			press("Continue")
 	await process_frame
 	await process_frame
 	expect(app.selected_product == 1 and app.find_child("CompactSupplierList", true, false) != null,
