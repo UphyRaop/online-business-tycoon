@@ -36,7 +36,7 @@ func run() -> void:
 	var bank_value: Label
 	var viewports := [
 		Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(768, 1024),
-		Vector2i(1024, 768), Vector2i(390, 844), Vector2i(375, 667), Vector2i(844, 390)
+		Vector2i(1024, 768), Vector2i(390, 844), Vector2i(375, 667), Vector2i(360, 740), Vector2i(320, 700), Vector2i(844, 390)
 	]
 	for viewport in viewports:
 		root.size = viewport
@@ -69,8 +69,9 @@ func run() -> void:
 		for days in [1, 2, 7, 30]:
 			expect(advance != null and advance.find_child("AdvanceDays%d" % days, true, false) is Button,
 				"Advance Day +%d is present at %s" % [days, viewport])
-		expect(app.find_child("DeveloperModeButton", true, false) is Button,
-			"Developer Mode entry point is available in debug testing at %s" % viewport)
+		var developer_button := app.find_child("DeveloperModeButton", true, false) as Button
+		expect(developer_button != null and developer_button.text == "</>",
+			"Compact Developer Mode entry point stays at the top-right on %s" % viewport)
 		if primary != null:
 			for left_index in primary.get_child_count():
 				for right_index in range(left_index + 1, primary.get_child_count()):
@@ -87,9 +88,22 @@ func run() -> void:
 				and mobile_advance.get_child(0).name == "AdvanceDayGroupLabel"
 				and mobile_advance.get_child(1).name == "GlobalAdvanceDayControls",
 				"Mobile header puts full date on row two and bank/advance information on row three at %s" % viewport)
-			if balance_and_advance != null and balance_and_advance.get_child_count() >= 2:
+			var advance_label := app.find_child("AdvanceDayGroupLabel", true, false) as Label
+			var advance_buttons := app.find_child("GlobalAdvanceDayControls", true, false) as HBoxContainer
+			expect(advance_label != null and advance_label.horizontal_alignment == HORIZONTAL_ALIGNMENT_RIGHT
+				and advance_buttons != null and absf(advance_label.get_global_rect().end.x - advance_buttons.get_global_rect().end.x) <= 1.0,
+				"Advance Day label is right-aligned above the compact mobile button group at %s" % viewport)
+			if advance_buttons != null:
+				for mobile_button in advance_buttons.find_children("*", "Button", true, false):
+					var size := (mobile_button as Button).custom_minimum_size
+					expect(size.y <= 36.0 and size.x <= 46.0,
+						"Mobile Advance Day buttons use compact visible dimensions at %s" % viewport)
+			if balance_and_advance != null and balance_and_advance.get_child_count() >= 2 and viewport.x >= 350:
 				expect(not overlaps(balance_and_advance.get_child(0) as Control, balance_and_advance.get_child(1) as Control),
 					"Mobile bank balance and Advance Day controls do not overlap at %s" % viewport)
+			if viewport.x < 350:
+				expect(mobile_advance.get_parent().name == "UltraCompactGlobalHeaderRows",
+					"Very narrow mobile stacks Bank Balance and Advance Day on separate rows")
 		else:
 			expect(app.find_child("CompanyBankBalance", true, false) != null,
 				"Desktop and tablet keep bank balance beside company information at %s" % viewport)
@@ -99,7 +113,7 @@ func run() -> void:
 		expect(header != null and header.get_global_rect().position.x >= 0
 			and header.get_global_rect().end.x <= content_width + 1,
 			"Header remains within the viewport at %s" % viewport)
-		expect(header != null and header.size.y <= (160 if viewport.x < 600 else 130),
+		expect(header != null and header.size.y <= (200 if viewport.x < 350 else (160 if viewport.x < 600 else 130)),
 			"Header remains compact in logical layout at %s" % viewport)
 		var action_buttons := [menu, app.find_child("DeveloperModeButton", true, false),
 			advance.find_child("AdvanceDays1", true, false) if advance != null else null,
@@ -113,9 +127,21 @@ func run() -> void:
 					"Header control %s is not clipped at %s" % [(candidate as Control).name, viewport])
 		if menu != null:
 			menu.pressed.emit()
-			expect(app.navigation_open, "Hamburger opens the existing navigation drawer at %s" % viewport)
+			var nav_panel := app.find_child("PrimaryNavigation", true, false) as PanelContainer
+			var scroller := app.find_child("GameContentScroll", true, false) as ScrollContainer
+			expect(app.navigation_open and nav_panel != null and nav_panel.is_visible_in_tree()
+				and scroller != null and scroller.is_ancestor_of(nav_panel) and not nav_panel.top_level,
+				"Hamburger opens Main Navigation in normal scroll flow at %s" % viewport)
+			var nav_start_y := nav_panel.get_global_rect().position.y if nav_panel != null else 0.0
+			if scroller != null:
+				scroller.scroll_vertical = mini(scroller.get_v_scroll_bar().max_value, 80.0)
+				await process_frame
+				expect(nav_panel != null and nav_panel.get_global_rect().position.y < nav_start_y,
+					"Main Navigation scrolls away naturally at %s" % viewport)
+				scroller.scroll_vertical = 0
+				await process_frame
 			menu.pressed.emit()
-			expect(not app.navigation_open, "Hamburger closes the existing navigation drawer at %s" % viewport)
+			expect(not app.navigation_open, "Hamburger closes Main Navigation at %s" % viewport)
 		# Header controls stay shared when the user opens non-game gameplay screens.
 		app.screen = "Settings"
 		app.render()
@@ -171,5 +197,5 @@ func run() -> void:
 			"Advance Day +%d refreshes the balance from active simulation state" % days)
 	app.queue_free()
 	await process_frame
-	print("Ultra Compact V3 Header: %d failures" % failures)
+	print("Ultra Compact V4 Header: %d failures" % failures)
 	quit(0 if failures == 0 else 1)

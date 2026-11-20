@@ -105,9 +105,10 @@ func run() -> void:
 	app.sim.state.cash = current_cash
 	app.set_notice("")
 	expect(nav != null and not nav.is_visible_in_tree(), "Primary navigation drawer is hidden by default")
+	var navigation_state_before: Dictionary = app.sim.state.duplicate(true)
 	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()
-	expect(nav != null and nav.is_visible_in_tree(), "Hamburger opens the left navigation overlay")
-	_check_primary_tabs_within_viewport(Vector2i(1280, 720))
+	expect(nav != null and nav.is_visible_in_tree(), "Hamburger opens Main Navigation in normal page flow")
+	await _check_primary_tabs_within_viewport(Vector2i(1280, 720))
 	for tab in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]:
 		var route_name: String = "Order" if tab in ["Order", "Orders"] else tab
 		var item: Button = nav.find_child("Primary_" + route_name, true, false) if nav != null else null
@@ -120,12 +121,22 @@ func run() -> void:
 		"Save Game and Main Menu are distinct icon actions in the drawer")
 	var action_label: Label = controls(nav, "Label").filter(func(node): return node.text == "Actions").front()
 	expect(action_label != null, "Drawer separates navigation from its action section")
-	var outside_click := InputEventMouseButton.new()
-	outside_click.button_index = MOUSE_BUTTON_LEFT
-	outside_click.pressed = true
-	app.navigation_overlay.gui_input.emit(outside_click)
-	expect(not app.navigation_open and not nav.is_visible_in_tree(), "Clicking the page overlay closes the drawer")
+	var close_navigation: Button = nav.find_child("PrimaryNavigationClose", true, false)
+	if close_navigation != null: close_navigation.pressed.emit()
+	expect(not app.navigation_open and not nav.is_visible_in_tree(), "The in-flow navigation Close button collapses Main Navigation")
+	expect(content_scroll != null and content_scroll.is_ancestor_of(nav) and not nav.top_level,
+		"Main Navigation participates in the normal scroll layout rather than a viewport overlay")
 	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()
+	var initial_nav_y := nav.get_global_rect().position.y
+	if content_scroll != null:
+		content_scroll.scroll_vertical = mini(content_scroll.get_v_scroll_bar().max_value, 120.0)
+		await process_frame
+	expect(content_scroll != null and nav.get_global_rect().position.y < initial_nav_y,
+		"Open Main Navigation scrolls naturally with page content")
+	if content_scroll != null: content_scroll.scroll_vertical = 0
+	await process_frame
+	expect(app.sim.state == navigation_state_before,
+		"Opening and closing Main Navigation does not modify game state")
 	var tab_key := InputEventKey.new()
 	tab_key.keycode = KEY_TAB
 	tab_key.pressed = true
@@ -144,6 +155,18 @@ func run() -> void:
 		"Main Menu preserves the existing unsaved-progress confirmation")
 	if app.confirmation != null: app.confirmation.get_cancel_button().pressed.emit()
 	app.dirty = false
+	var menu_for_route: Button = app.find_child("NavigationMenuButton", true, false)
+	if menu_for_route != null: menu_for_route.pressed.emit()
+	var market_route: Button = nav.find_child("Primary_Market", true, false)
+	if market_route != null: market_route.pressed.emit()
+	await process_frame
+	var closed_nav: Control = app.find_child("PrimaryNavigation", true, false)
+	expect(app.page == "Market" and not app.navigation_open and closed_nav != null and not closed_nav.is_visible_in_tree()
+		and app.sim.state == navigation_state_before,
+		"Selecting an existing Main Navigation destination closes the panel without changing simulation state")
+	app.navigate("Dashboard")
+	await process_frame
+	nav = app.find_child("PrimaryNavigation", true, false) as PanelContainer
 	var save_button: Button = app.find_child("DrawerActionSave", true, false)
 	save_button.pressed.emit()
 	expect(app.screen == "Save", "Drawer Save Game opens the existing save screen")
@@ -422,7 +445,7 @@ func run() -> void:
 			and controls(global_advance, "Button").size() == 4 and header_date.text.contains(Catalog.COUNTRIES[app.sim.state.country])
 			and header_date.text.contains(" · ") and header_date.text.begins_with("Day %d · " % app.sim.state.day),
 			"Header date, Bank Balance, Developer Mode, and global Advance Day remain visible at %dx%d" % [viewport.x, viewport.y])
-		_check_primary_tabs_within_viewport(viewport)
+		await _check_primary_tabs_within_viewport(viewport)
 		expect(app.page_grid.columns == (2 if app.size.x >= 768 else 1),
 			"Page panels use the intended responsive column count at %dx%d (actual: %d columns at %.1f px / viewport %.1f px)" % [viewport.x, viewport.y, app.page_grid.columns, app.size.x, app.get_viewport_rect().size.x])
 		var expected_grid_children: int = 0 if app.size.x >= 768 and app.page_cards.size() == 1 else (2 if app.size.x >= 768 else app.page_cards.size())
@@ -446,7 +469,7 @@ func run() -> void:
 				"A 10+ digit mobile bank balance is displayed in full without clipping")
 			app.sim.state.cash = previous_cash
 			app.set_notice("")
-		_check_primary_tabs_within_viewport(viewport)
+		await _check_primary_tabs_within_viewport(viewport)
 		var shell_bounds: Rect2 = app.page_shell.get_global_rect()
 		var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
 		expect(shell_bounds.position.x * scale_x >= 0 and shell_bounds.end.x * scale_x <= float(viewport.x) + 1.0,
@@ -476,6 +499,8 @@ func run() -> void:
 	quit(0 if failures == 0 else 1)
 
 func _check_primary_tabs_within_viewport(viewport: Vector2i) -> void:
+	await app.get_tree().process_frame
+	await app.get_tree().process_frame
 	var nav: Control = app.find_child("PrimaryNavigation", true, false)
 	if nav == null:
 		expect(false, "Navigation drawer remains reachable at %dx%d" % [viewport.x, viewport.y])
@@ -485,10 +510,9 @@ func _check_primary_tabs_within_viewport(viewport: Vector2i) -> void:
 		var menu_button: Button = app.find_child("NavigationMenuButton", true, false)
 		if menu_button != null: menu_button.pressed.emit()
 	expect(nav.is_visible_in_tree(), "Navigation drawer opens at %dx%d" % [viewport.x, viewport.y])
-	var drawer_scroll: ScrollContainer = nav.find_child("NavigationScroll", true, false)
-	if drawer_scroll != null and drawer_scroll.get_child_count() > 0:
-		expect(drawer_scroll.size.x > 0 and drawer_scroll.get_child(0).get_combined_minimum_size().x <= drawer_scroll.size.x + 1,
-			"Navigation drawer content fits its internal scroller at %dx%d" % [viewport.x, viewport.y])
+	var page_scroller: ScrollContainer = app.find_child("GameContentScroll", true, false)
+	expect(page_scroller != null and page_scroller.is_ancestor_of(nav) and not nav.top_level,
+		"Main Navigation is part of the page's normal scroll layout at %dx%d" % [viewport.x, viewport.y])
 	var button_count := 0
 	var scale_x: float = float(viewport.x) / app.get_viewport_rect().size.x
 	for item in controls(nav, "Button"):
@@ -500,7 +524,15 @@ func _check_primary_tabs_within_viewport(viewport: Vector2i) -> void:
 		expect(button_bounds.position.x * scale_x >= 0 and button_bounds.end.x * scale_x <= float(viewport.x) + 1.0
 			and button_bounds.position.x >= nav.get_global_rect().position.x - 1.0
 			and button_bounds.end.x <= nav.get_global_rect().end.x + 1.0,
-			"%s remains reachable within the viewport" % button.text)
+			"%s remains horizontally reachable in normal page flow" % button.text)
 	expect(button_count == 7, "All seven primary navigation items fit inside the drawer")
+	if page_scroller != null:
+		var before_scroll := nav.get_global_rect().position.y
+		page_scroller.scroll_vertical = mini(page_scroller.get_v_scroll_bar().max_value, 100.0)
+		await app.get_tree().process_frame
+		expect(nav.get_global_rect().position.y < before_scroll,
+			"Main Navigation scrolls with page content at %dx%d" % [viewport.x, viewport.y])
+		page_scroller.scroll_vertical = 0
+		await app.get_tree().process_frame
 	if opened_here:
 		app.close_navigation_drawer(false)
