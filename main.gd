@@ -87,6 +87,7 @@ var active_game_id := ""
 var pending_ceo_name := ""
 var identity_conflict_record: Dictionary = {}
 var avatar_picker_callback: JavaScriptObject
+var dev_preview_size_callback: JavaScriptObject
 var profile_editing := false
 var profile_edit_snapshot: Dictionary = {}
 var company_profile_editing := false
@@ -111,6 +112,12 @@ var header_mobile_layout := false
 
 func _ready() -> void:
 	theme = Style.build()
+	if OS.has_feature("web") and OS.is_debug_build():
+		dev_preview_size_callback = JavaScriptBridge.create_callback(_set_developer_preview_viewport)
+		JavaScriptBridge.get_interface("window").obtSetPreviewLogicalSize = dev_preview_size_callback
+		var base_size := get_window().content_scale_size
+		JavaScriptBridge.eval("window.obtPreviewDefaultLogicalSize = [%d, %d];" % [base_size.x, base_size.y])
+		JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.enable();")
 	var migration := GameStore.migrate_legacy()
 	if not str(migration.get("error", "")).is_empty():
 		notice = "Some older saves could not be migrated yet. Their original files remain available. " + str(migration.error)
@@ -121,6 +128,13 @@ func _ready() -> void:
 		large_text = settings.get_value("display", "large_text", false) == true
 	theme.default_font_size = 18 if large_text else 16
 	render()
+
+func _set_developer_preview_viewport(args: Array) -> void:
+	if args.size() < 2:
+		return
+	var width := maxi(1, int(args[0]))
+	var height := maxi(1, int(args[1]))
+	get_window().content_scale_size = Vector2i(width, height)
 
 func label(text: String, font_size: int = 16, color: Color = Style.TEXT) -> Label:
 	var node := Label.new()
@@ -261,10 +275,13 @@ func divider(parent: Node) -> void:
 	parent.add_child(line)
 
 func metric(parent: Node, caption: String, value: String, color: Color = Style.TEXT) -> void:
-	var line: BoxContainer = VBoxContainer.new() if size.x < 600.0 else row(parent)
-	if line is VBoxContainer:
-		line.add_theme_constant_override("separation", 2)
-		parent.add_child(line)
+	var line := BoxContainer.new()
+	line.name = "ResponsiveMetric"
+	line.vertical = size.x < 600.0
+	line.add_theme_constant_override("separation", 2 if line.vertical else 8)
+	if OS.has_feature("web"):
+		line.mouse_filter = Control.MOUSE_FILTER_PASS
+	parent.add_child(line)
 	var name := label(caption, 15, Style.MUTED)
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -295,6 +312,11 @@ func profit_color(cents: int) -> Color:
 
 func _update_responsive_layout() -> void:
 	var viewport_width := size.x
+	Market.update_responsive_layout(self)
+	for metric_row in find_children("ResponsiveMetric", "BoxContainer", true, false):
+		var responsive_metric := metric_row as BoxContainer
+		responsive_metric.vertical = viewport_width < 600.0
+		responsive_metric.add_theme_constant_override("separation", 2 if responsive_metric.vertical else 8)
 	var inventory_panel := find_child("DashboardInventoryOverview", true, false) as PanelContainer
 	var mobile_layout := viewport_width < 600.0
 	if inventory_panel != null and bool(inventory_panel.get_meta("mobile_layout", false)) != mobile_layout:
@@ -340,6 +362,13 @@ func _update_responsive_layout() -> void:
 		var grid := find_child(grid_name, true, false) as GridContainer
 		if grid != null:
 			grid.columns = 3 if viewport_width >= 900.0 else (2 if viewport_width >= 600.0 else 1)
+	var menu_actions := find_child("MainMenuActions", true, false) as FlowContainer
+	if menu_actions != null:
+		menu_actions.custom_minimum_size.x = minf(580.0, maxf(0.0, viewport_width - 66.0))
+		for child in menu_actions.get_children():
+			var action_button := child as Button
+			if action_button != null:
+				action_button.custom_minimum_size.x = 150.0 if viewport_width < 600.0 else 172.0
 
 func _reflow_page_cards() -> void:
 	if not is_instance_valid(page_grid):

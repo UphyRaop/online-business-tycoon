@@ -10,6 +10,7 @@ const Style = preload("res://corporate_theme.gd")
 const CATALOG_STAGE_META := "product_catalog_stage"
 const SELECTED_SUPPLIER_META := "catalog_selected_supplier"
 const QUOTATION_META := "catalog_purchase_quotation"
+const EXPANDED_SUPPLIER_META := "catalog_expanded_supplier"
 
 
 static func show(app: Control) -> void:
@@ -26,10 +27,10 @@ static func show(app: Control) -> void:
 static func show_categories(app: Control) -> void:
 	var catalogue: VBoxContainer = app.wide_card("Product Catalogue")
 	catalogue.name = "ProductCataloguePanel"
-	catalogue.add_child(app.label("Choose a category to compare products and suppliers.", 14, Style.MUTED))
+	catalogue.add_child(app.label("Select a category to explore products.", 13, Style.MUTED))
 	var grid := GridContainer.new()
 	grid.name = "ProductCategoryGrid"
-	grid.columns = 2 if app.size.x >= 620.0 else 1
+	grid.columns = _category_columns(app.size.x)
 	grid.add_theme_constant_override("h_separation", 10)
 	grid.add_theme_constant_override("v_separation", 10)
 	catalogue.add_child(grid)
@@ -38,20 +39,20 @@ static func show_categories(app: Control) -> void:
 		var count := Catalog.PRODUCTS.filter(func(product: Dictionary): return str(product.category) == name).size()
 		var panel: VBoxContainer = _catalog_card(grid, name)
 		panel.name = "CatalogueCategory_" + _safe_name(name)
-		panel.add_child(app.label("%d products" % count, 13, Style.MUTED))
-		var icon := TextureRect.new()
+		var icon := Label.new()
 		icon.name = "CategoryIcon"
-		icon.custom_minimum_size = Vector2(28, 28)
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.texture = load("res://assets/navigation/market.svg")
+		icon.text = _category_icon(name)
+		icon.add_theme_font_size_override("font_size", 24)
+		icon.add_theme_color_override("font_color", Style.GOLD)
 		panel.add_child(icon)
-		app.action(panel, "Browse " + name, func():
+		panel.add_child(app.label("%d products" % count, 13, Style.MUTED))
+		var choose_category := func():
 			app.catalog_category = Catalog.CATEGORIES.find(name)
 			app.catalog_search = ""
 			app.set_meta(CATALOG_STAGE_META, "products")
 			app.refresh_view()
-		, true)
+		var browse: Button = app.action(panel, "Browse", choose_category, true)
+		browse.name = "BrowseCategory_" + _safe_name(name)
 	app.secondary_tab(catalogue, "My Products", app.navigate.bind("My Products"), app.page == "My Products")
 
 static func show_products(app: Control) -> void:
@@ -70,9 +71,12 @@ static func show_products(app: Control) -> void:
 	)
 	var search: LineEdit = app.field(catalogue, "Search Products", app.catalog_search, 64)
 	search.name = "CatalogueProductSearch"
-	var product_grid := VBoxContainer.new()
+	var product_grid := GridContainer.new()
 	product_grid.name = "CategoryProductList"
-	product_grid.add_theme_constant_override("separation", 6)
+	product_grid.columns = _product_columns(app.size.x)
+	product_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	product_grid.add_theme_constant_override("h_separation", 10)
+	product_grid.add_theme_constant_override("v_separation", 10)
 	catalogue.add_child(product_grid)
 	var product_cards: Array[Dictionary] = []
 	var shown := 0
@@ -87,32 +91,36 @@ static func show_products(app: Control) -> void:
 		var starting_cost := _starting_landed_cost(app.sim.state, product_index, suppliers)
 		var card: VBoxContainer = _catalog_card(product_grid, str(product.name))
 		card.name = "CatalogueProduct_%d" % product_index
-		app.metric(card, "Available Suppliers", "%d" % suppliers.size())
-		app.metric(card, "Starting Landed Cost", app.money(starting_cost))
+		app.metric(card, "Available Suppliers", str(suppliers.size()))
+		app.metric(card, "Starting Landed Cost", app.money(starting_cost) if starting_cost > 0 else "Unavailable", Style.GOLD)
 		var selected_product := product_index
-		app.action(card, "Choose Product", func():
+		var select_product := func():
 			app.selected_product = selected_product
 			app.set_meta(CATALOG_STAGE_META, "suppliers")
-			app.open_product(selected_product)
-		, true)
+			app.refresh_view()
+		var choose_product: Button = app.action(card, "Choose Product", select_product, true)
+		choose_product.name = "ChooseProduct_%d" % product_index
 		card.get_parent().visible = matches
 		product_cards.append({"index": product_index, "card": card})
 	var empty: Label = app.label("No products match this search. Clear the search or return to Categories.", 14, Style.MUTED)
 	empty.name = "ProductCatalogueEmptyState"
 	empty.visible = shown == 0
 	product_grid.add_child(empty)
+	var count_label: Label = app.label("%d products" % shown, 12, Style.MUTED)
+	count_label.name = "CategoryProductCount"
+	catalogue.add_child(count_label)
 	search.text_changed.connect(func(value: String):
 		app.catalog_search = value
-		var visible_count := 0
 		var filter := value.strip_edges().to_lower()
+		var visible_count := 0
 		for entry in product_cards:
 			var item: Dictionary = Catalog.PRODUCTS[int(entry.index)]
 			var matches := filter.is_empty() or str(item.name).to_lower().contains(filter) or str(item.id).to_lower().contains(filter)
-			var card: VBoxContainer = entry.card
-			(card.get_parent() as Control).visible = matches
+			(entry.card.get_parent() as Control).visible = matches
 			if matches: visible_count += 1
 		empty.text = "No products match this search. Clear the search or return to Categories." if visible_count == 0 else ""
 		empty.visible = visible_count == 0
+		count_label.text = "%d products" % visible_count
 	)
 
 static func show_supplier_workflow(app: Control) -> void:
@@ -122,13 +130,6 @@ static func show_supplier_workflow(app: Control) -> void:
 		show_categories(app)
 		return
 	var item: Dictionary = app.sim.product_state(product)
-	var breadcrumbs: VBoxContainer = app.wide_card("Supplier Sourcing · " + Catalog.PRODUCTS[product].name)
-	breadcrumbs.name = "SupplierWorkflowBreadcrumbs"
-	var category_label := str(Catalog.CATEGORIES[app.catalog_category]) if int(app.catalog_category) in range(Catalog.CATEGORIES.size()) else "Categories"
-	app.action(breadcrumbs, "Back to " + category_label, func():
-		app.set_meta(CATALOG_STAGE_META, "products")
-		app.refresh_view()
-	)
 	var stock_label: Label = app.label("", 15, Style.MUTED)
 	supplier_form(app, product, item, stock_label)
 
@@ -173,6 +174,50 @@ static func _starting_landed_cost(state: Dictionary, product: int, suppliers: Ar
 static func _safe_name(value: String) -> String:
 	return value.replace("&", "and").replace(" ", "_")
 
+static func _category_columns(viewport_width: float) -> int:
+	# Categories remain two-up on narrow phones where the compact card fits.
+	return 3 if viewport_width >= 900.0 else (2 if viewport_width >= 340.0 else 1)
+
+static func _product_columns(viewport_width: float) -> int:
+	return 3 if viewport_width >= 900.0 else (2 if viewport_width >= 600.0 else 1)
+
+static func _supplier_columns(viewport_width: float) -> int:
+	return 3 if viewport_width >= 900.0 else (2 if viewport_width >= 600.0 else 1)
+
+static func _supplier_card_width(viewport_width: float) -> float:
+	# Account for the outer page shell, card padding and flow spacing before
+	# assigning a minimum width. Shrink-begin cards then retain natural heights.
+	var page_width := minf(1100.0, maxf(280.0, viewport_width - (40.0 if viewport_width >= 900.0 else 24.0)))
+	var inner_width := maxf(220.0, page_width - 64.0)
+	var columns := _supplier_columns(viewport_width)
+	return floorf((inner_width - 10.0 * float(columns - 1)) / float(columns))
+
+static func _category_icon(category: String) -> String:
+	var icons := {
+		"Electronics": "◈", "Home & Living": "⌂", "Kitchen": "♨", "Fashion": "◇",
+		"Beauty": "✦", "Fitness": "✚", "Automotive": "▰", "Baby & Kids": "♡",
+		"Pets": "♧", "Travel": "✈",
+	}
+	return str(icons.get(category, "•"))
+
+static func update_responsive_layout(app: Control) -> void:
+	var viewport_width := app.size.x
+	var category_grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
+	if category_grid != null:
+		category_grid.columns = _category_columns(viewport_width)
+	var product_grid := app.find_child("CategoryProductList", true, false) as GridContainer
+	if product_grid != null:
+		product_grid.columns = _product_columns(viewport_width)
+	var supplier_list := app.find_child("CompactSupplierList", true, false) as HFlowContainer
+	if supplier_list != null:
+		var card_width := _supplier_card_width(viewport_width)
+		for child in supplier_list.get_children():
+			var card := child as PanelContainer
+			if card == null:
+				continue
+			card.custom_minimum_size.x = card_width
+			card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+
 static func _catalog_card(parent: Node, title: String) -> VBoxContainer:
 	var panel := PanelContainer.new()
 	panel.name = "CatalogueCard"
@@ -199,41 +244,78 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 	var supplier_indices: Array[int] = []
 	for supplier_id in Catalog.SUPPLIER_SELECTION_INDICES:
 		supplier_indices.append(int(supplier_id))
-	var supply: VBoxContainer = app.wide_card("Suppliers for " + str(Catalog.PRODUCTS[product].name))
-	supply.name = "ProductSupplierList"
-	supply.add_child(app.label("Compare supplier terms. Select one supplier to review the full offer.", 13, Style.MUTED))
 	var quantity: LineEdit
 	var payment: OptionButton
 	if selected_supplier < 0 or selected_supplier not in supplier_indices:
-		var list: VBoxContainer = app.stack(supply, 6)
+		var supply: VBoxContainer = app.wide_card("Suppliers for " + str(Catalog.PRODUCTS[product].name))
+		supply.name = "ProductSupplierList"
+		app.action(supply, "Back to Products", func():
+			app.set_meta(CATALOG_STAGE_META, "products")
+			app.refresh_view()
+		)
+		supply.add_child(app.label("Compare available offers. Expand a card to review its terms.", 13, Style.MUTED))
+		var list := HFlowContainer.new()
 		list.name = "CompactSupplierList"
-		for candidate in supplier_indices:
-			var row_supplier := int(candidate)
+		list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		list.add_theme_constant_override("h_separation", 10)
+		list.add_theme_constant_override("v_separation", 10)
+		supply.add_child(list)
+		var available_suppliers := _available_suppliers(state, product)
+		var card_width := _supplier_card_width(app.size.x)
+		var expanded_supplier := int(app.get_meta(EXPANDED_SUPPLIER_META, -1))
+		for row_supplier in available_suppliers:
 			var provider: Dictionary = Catalog.SUPPLIERS[row_supplier]
-			var available := Supply.supplier_unlocked(state, row_supplier)
 			var goods := Catalog.quote(state.country, product, row_supplier)
 			var freight := Catalog.inbound_freight(state.country, row_supplier)
 			var entry: VBoxContainer = _catalog_card(list, str(provider.name))
 			entry.name = "SupplierChoice%d" % row_supplier
-			app.metric(entry, "Quality · Reliability", "%d%% · %d%%" % [roundi(float(provider.quality) * 100.0), roundi(float(provider.reliability) * 100.0)])
-			app.metric(entry, "Lead Time · Minimum Order", "%d days · %s units" % [int(provider.lead), _format_quantity(int(provider.minimum))])
-			app.metric(entry, "Landed Cost Per Unit", app.money(goods + freight))
-			if not available:
-				entry.add_child(app.label("Supplier platform is locked. Unlock it through company progression.", 12, Style.MUTED))
-			var last_selected := int(app.get_meta(last_supplier_key, -1)) == row_supplier
-			var choose: Button = app.action(entry, "Select Supplier" if not last_selected else "Selected Supplier", func():
-				app.set_meta(route_key, row_supplier)
-				app.set_meta(last_supplier_key, row_supplier)
-				app.set_meta(SELECTED_SUPPLIER_META, row_supplier)
+			var card_panel := entry.get_parent() as PanelContainer
+			card_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+			card_panel.custom_minimum_size.x = card_width
+			card_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+			card_panel.name = "SupplierChoicePanel%d" % row_supplier
+			var price: Label = app.label("Landed cost per unit", 11, Style.MUTED)
+			entry.add_child(price)
+			var landed_price: Label = app.label(app.money(goods + freight), 15, Style.GOLD)
+			landed_price.name = "SupplierLandedCost%d" % row_supplier
+			entry.add_child(landed_price)
+			var expanded := expanded_supplier == row_supplier
+			var expand_button: Button = app.action(entry, "Hide Details" if expanded else "View Details", func():
+				app.set_meta(EXPANDED_SUPPLIER_META, -1 if expanded else row_supplier)
 				app.refresh_view()
-			, true)
-			choose.disabled = not available
+			)
+			expand_button.name = "ExpandSupplier%d" % row_supplier
+			expand_button.custom_minimum_size.y = 42
+			if expanded:
+				app.divider(entry)
+				app.metric(entry, "Goods Cost Per Unit", app.money(goods))
+				app.metric(entry, "Inbound Freight Per Unit", app.money(freight))
+				app.metric(entry, "Landed Cost Per Unit", app.money(goods + freight), Style.GOLD)
+				app.metric(entry, "Quality · Reliability", "%d%% · %d%%" % [roundi(float(provider.quality) * 100.0), roundi(float(provider.reliability) * 100.0)])
+				app.metric(entry, "Estimated Delivery · MOQ", "%d days · %s units" % [int(provider.lead), _format_quantity(int(provider.minimum))])
+				var supplier_credit := SupplierCredit.eligibility(state, row_supplier)
+				app.metric(entry, "Supplier Trust", "%d / 100" % int(supplier_credit.trust))
+				if bool(supplier_credit.eligible):
+					app.metric(entry, "Credit Available", app.money(int(supplier_credit.available)))
+				else:
+					entry.add_child(app.label("Credit unavailable: " + str(supplier_credit.reason), 11, Style.MUTED))
+				var select_supplier: Button = app.action(entry, "Select Supplier", func():
+					app.set_meta(route_key, row_supplier)
+					app.set_meta(last_supplier_key, row_supplier)
+					app.set_meta(SELECTED_SUPPLIER_META, row_supplier)
+					app.set_meta(CATALOG_STAGE_META, "negotiation")
+					app.refresh_view()
+				, true)
+				select_supplier.name = "SelectSupplier%d" % row_supplier
+		if available_suppliers.is_empty():
+			supply.add_child(app.label("No supplier platforms are currently unlocked for new purchases.", 13, Style.MUTED))
 		if item.has("legacy_supplier"):
-			supply.add_child(app.label("Existing purchases from %s remain in your history. Choose a currently available supplier for new orders." % str(item.legacy_supplier.name), 12, Style.MUTED))
+			supply.add_child(app.label("Existing purchases from %s remain in your history." % str(item.legacy_supplier.name), 12, Style.MUTED))
 	else:
 		var provider: Dictionary = Catalog.SUPPLIERS[selected_supplier]
 		var quantity_key := "%s_quantity_%d" % [route_key, selected_supplier]
 		var quotation_key := "%s_%s_%d_%d" % [QUOTATION_META, company_key, product, selected_supplier]
+		var preview_key := "%s_preview_%d" % [route_key, selected_supplier]
 		var title: VBoxContainer = app.wide_card("Supplier Details · " + str(provider.name))
 		title.name = "SelectedSupplierDetails"
 		var standard_unit := Catalog.quote(state.country, product, selected_supplier)
@@ -247,6 +329,15 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		app.metric(title, "Fulfillment Capability", "Direct-to-customer available" if provider.direct else "Warehouse inventory only")
 		var quote_status: Label = app.label("", 13, Style.GOLD)
 		title.add_child(quote_status)
+		var default_target := maxi(1, roundi(standard_unit * 0.9))
+		var proposed_price: LineEdit = app.field(title, "Target Unit Price (optional)", str(app.get_meta("%s_proposed_price_%d" % [route_key, selected_supplier], app.amount_text(default_target, true))), 14)
+		proposed_price.name = "SupplierProposedUnitPrice"
+		proposed_price.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL
+		title.add_child(app.label("Supplier terms follow the existing volume-based pricing rules.", 11, Style.MUTED))
+		var response_key := "%s_response_%d" % [route_key, selected_supplier]
+		var negotiation_response: Label = app.label(str(app.get_meta(response_key, "No offer submitted. You can continue at the current supplier quote.")), 12, Style.GOLD if has_negotiated else Style.MUTED)
+		negotiation_response.name = "SupplierNegotiationResponse"
+		title.add_child(negotiation_response)
 		quantity = app.field(title, "Purchase Quantity", str(app.get_meta(quantity_key, str(int(provider.minimum)))), 10)
 		quantity.name = "SupplierPurchaseQuantity"
 		quantity.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
@@ -262,6 +353,15 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 		quotation_panel.name = "GeneratedPurchaseQuotation"
 		var quotation_summary: Label = app.label("Generate a quotation after accepting the supplier offer.", 13, Style.MUTED)
 		quotation_panel.add_child(quotation_summary)
+		var preview_button: Button = app.action(title, "View Quotation", func():
+			var breakdown := Supply.purchase_breakdown(state, product, selected_supplier, units_from(quantity.text))
+			if not str(breakdown.get("error", "")).is_empty():
+				app.set_notice(str(breakdown.error), true)
+				return
+			app.set_meta(preview_key, true)
+			app.refresh_view()
+		)
+		preview_button.name = "ViewSupplierQuotation"
 		var quote_button: Button = app.action(title, "Generate Quotation", func():
 			var accepted_now := int(app.get_meta(accepted_key, -1)) == selected_supplier
 			if not accepted_now:
@@ -342,17 +442,27 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			)
 		, true)
 		confirm_button.name = "ConfirmSupplierPurchase"
-		var negotiate: Button = app.action(title, "Negotiate", func():
+		var negotiate: Button = app.action(title, "Submit Offer", func():
+			var target_price := _parse_money_cents(proposed_price.text)
+			if target_price <= 0 or target_price >= standard_unit:
+				negotiation_response.text = "Enter a positive target below the current quoted unit price."
+				negotiation_response.add_theme_color_override("font_color", Style.RED)
+				return
+			app.set_meta("%s_proposed_price_%d" % [route_key, selected_supplier], proposed_price.text)
 			var result := Supply.negotiate(state, product, selected_supplier, units_from(quantity.text))
 			if not result.is_empty():
-				app.set_notice(result, true)
+				negotiation_response.text = result
+				negotiation_response.add_theme_color_override("font_color", Style.RED)
 				return
 			app.set_meta(accepted_key, -1)
 			app.remove_meta(quotation_key)
-			app.persist("Negotiation complete. Review the supplier's actual response before accepting.")
+			var supplier_response := Supply.quote(state, product, selected_supplier)
+			var response_text := "Supplier counteroffer: %s goods per unit. It is not agreed until you accept it." % app.money(int(supplier_response.get("cost", standard_unit)))
+			app.set_meta(response_key, response_text)
+			app.persist("Supplier counteroffer received. Review the actual terms before accepting.")
 			app.refresh_view()
 		)
-		negotiate.name = "NegotiateSupplierOffer"
+		negotiate.name = "SubmitSupplierOffer"
 		var accept: Button = app.action(title, "Accept Offer", func():
 			app.sim.select_supplier(product, selected_supplier)
 			app.set_meta(accepted_key, selected_supplier)
@@ -367,6 +477,9 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			app.refresh_view()
 		)
 		back.name = "BackToSupplierList"
+		var agreed_price_label: Label = app.label("", 12, Style.GREEN)
+		agreed_price_label.name = "AgreedUnitPrice"
+		title.add_child(agreed_price_label)
 		var update_detail := func():
 			var qty := units_from(quantity.text)
 			var breakdown := Supply.purchase_breakdown(state, product, selected_supplier, qty)
@@ -375,7 +488,7 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			var unit_goods := int(breakdown.get("goods_unit_cost", standard_unit))
 			var unit_freight := int(breakdown.get("freight_unit_cost", freight_unit))
 			var landed := int(breakdown.get("landed_unit_cost", standard_unit + freight_unit))
-			quote_status.text = "Quoted %s goods/unit · Proposed %s goods/unit%s" % [app.money(standard_unit), app.money(unit_goods), " · %d%% off until %s" % [int(active_offer.discount), Calendar.format(int(active_offer.expires))] if negotiated_valid else " · standard supplier offer"]
+			quote_status.text = "Current supplier quote: %s goods/unit%s" % [app.money(unit_goods), " · expires %s" % Calendar.format(int(active_offer.expires)) if negotiated_valid else ""]
 			var eligibility := SupplierCredit.eligibility(state, selected_supplier)
 			credit_label.text = "Trust %d/100 · Settled %d · Credit limit %s · Available %s" % [int(eligibility.trust), int(eligibility.settled_purchases), app.money(int(eligibility.credit_limit)), app.money(int(eligibility.available))]
 			if bool(eligibility.eligible): credit_label.text += "\n%d-day terms · Due %s" % [SupplierCredit.PAYMENT_TERM_DAYS, Calendar.format(int(eligibility.due_day))]
@@ -385,7 +498,7 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 			var accepted_now := int(app.get_meta(accepted_key, -1)) == selected_supplier
 			accepted_label.text = "Offer accepted" if accepted_now else "Accept the current supplier offer before generating a quotation."
 			accepted_label.add_theme_color_override("font_color", Style.GREEN if accepted_now else Style.MUTED)
-			var total := int(breakdown.get("total", 0))
+			agreed_price_label.text = "Agreed unit cost: %s" % app.money(unit_goods) if accepted_now else "No price agreed yet."
 			var quote_valid := _quotation_valid(app.get_meta(quotation_key, {}), state, product, selected_supplier, qty, payment.selected)
 			if not str(breakdown.get("error", "")).is_empty():
 				quotation_summary.text = str(breakdown.error)
@@ -396,10 +509,15 @@ static func supplier_form(app: Control, product: int, item: Dictionary, stock_la
 					_format_quantity(qty), app.money(int(quotation.goods_unit_cost) * qty), app.money(int(quotation.freight_unit_cost) * qty),
 					app.money(int(quotation.landed_unit_cost)), app.money(int(quotation.total)), "Credit" if payment.selected == 1 else "Cash"]
 				quotation_summary.add_theme_color_override("font_color", Style.TEXT)
+			elif bool(app.get_meta(preview_key, false)):
+				quotation_summary.text = "Estimate · %s units · Goods %s · Freight %s · Landed/unit %s · Total %s" % [
+					_format_quantity(qty), app.money(int(breakdown.goods_unit_cost) * qty), app.money(int(breakdown.freight_unit_cost) * qty),
+					app.money(int(breakdown.landed_unit_cost)), app.money(int(breakdown.total))]
+				quotation_summary.add_theme_color_override("font_color", Style.TEXT)
 			else:
 				quotation_summary.text = "No current quotation. Generate one after accepting the offer."
 				quotation_summary.add_theme_color_override("font_color", Style.MUTED)
-			quotation_panel.visible = accepted_now or quote_valid
+			quotation_panel.visible = accepted_now or quote_valid or bool(app.get_meta(preview_key, false))
 			quote_button.disabled = not accepted_now or not str(breakdown.get("error", "")).is_empty()
 			confirm_button.disabled = not accepted_now or not quote_valid
 		quantity.text_changed.connect(func(value: String):
@@ -620,6 +738,12 @@ static func refresh_inbound(app: Control, product: int, inbound: VBoxContainer, 
 static func units_from(value: String) -> int:
 	var text := value.strip_edges()
 	return text.to_int() if text.is_valid_int() else 0
+
+static func _parse_money_cents(value: String) -> int:
+	var cleaned := value.strip_edges().replace(",", "").replace(" ", "")
+	if cleaned.is_empty() or not cleaned.is_valid_float():
+		return -1
+	return roundi(cleaned.to_float() * 100.0)
 
 static func _format_quantity(value: int) -> String:
 	var text := str(value)
