@@ -39,6 +39,18 @@ func run() -> void:
 	var normal_copy: Dictionary = app.sim.state.duplicate(true)
 	expect(button(app, "DeveloperModeButton") != null, "Developer Mode is visible in gameplay on desktop")
 	button(app, "DeveloperModeButton").pressed.emit()
+	var access_dialog := app.find_child("DeveloperAccessDialog", true, false) as ColorRect
+	var access_code := app.find_child("DeveloperAccessCode", true, false) as LineEdit
+	expect(access_dialog != null and access_code != null,
+		"Developer Mode button opens an access-code dialog instead of granting access directly")
+	if access_dialog != null and access_code != null:
+		access_code.text = "invalid"
+		var unlock := button(app, "DeveloperAccessUnlock")
+		if unlock != null: unlock.pressed.emit()
+		expect((app.find_child("DeveloperAccessError", true, false) as Label).visible,
+			"Unrecognized developer access code is rejected and shown in the dialog")
+		access_code.text = "URTN"
+		if unlock != null: unlock.pressed.emit()
 	expect(app.developer_save_active and app.screen == "Developer Mode" and app.active_game_id.is_empty(),
 		"Opening Developer Mode starts an isolated DEV save instead of using the normal game path")
 	expect(app.normal_state_snapshot.company_id == normal_copy.company_id and app.normal_state_snapshot.cash == normal_copy.cash,
@@ -48,8 +60,8 @@ func run() -> void:
 	app.enter_game(normal_copy)
 	expect(app.sim.state == isolated_state and app.active_game_id.is_empty(),
 		"Company switching and normal company loading are blocked while DEV isolation is active")
-	expect(button(app, "DeveloperModeButton") == null and app.find_child("DeveloperConsoleChoices", true, false) != null,
-		"Developer console presents independent Preview Device and Cheats paths without a redundant launcher")
+	expect(button(app, "DeveloperModeButton") != null and app.find_child("DeveloperConsoleChoices", true, false) != null,
+		"Developer console preserves the global access button and presents independent Preview Device and Cheats paths")
 	tap(app, "Preview Device")
 	expect(app.screen == "Developer Mode" and app.find_child("DeveloperPreviewDevicePanel", true, false) != null,
 		"Preview Device selector is independently accessible")

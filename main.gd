@@ -50,6 +50,7 @@ var large_text := false
 var dirty := false
 var edit_checks: Array[Callable] = []
 var confirmation: ConfirmationDialog
+var developer_access_overlay: Control
 var page := "Dashboard"
 var body: VBoxContainer
 var status: Label
@@ -126,6 +127,10 @@ var expanded_order_details: Dictionary = {}
 var preorder_show_history := false
 var ad_expanded_campaigns: Dictionary = {}
 var header_mobile_layout := false
+var header_compact_layout := false
+var header_date_label: Label
+var header_title_label: Label
+var header_company_label: Label
 
 func _ready() -> void:
 	theme = Style.build()
@@ -471,11 +476,12 @@ func _update_responsive_layout() -> void:
 		inventory_parent.move_child(replacement, inventory_index)
 	var date_label := find_child("GameDate", true, false) as Label
 	if date_label != null and sim != null:
-		if screen == "Game" and (viewport_width < 600.0) != header_mobile_layout:
+		if ((viewport_width < 600.0) != header_mobile_layout or (viewport_width < 760.0) != header_compact_layout):
 			render()
 			return
-		date_label.text = _game_date_text(viewport_width)
+		date_label.text = _game_date_text()
 		date_label.tooltip_text = Calendar.format(sim.state.day) + " | " + Catalog.COUNTRIES[sim.state.country]
+		_update_header_text()
 	if page == "Profile":
 		var identity_layout := find_child("CEOIdentityLayout", true, false) as BoxContainer
 		if identity_layout != null:
@@ -492,7 +498,7 @@ func _update_responsive_layout() -> void:
 		var drawer_width := clampf(viewport_width * 0.78, 260.0, 320.0)
 		navigation_drawer.offset_right = drawer_width
 	if is_instance_valid(navigation_toggle):
-		navigation_toggle.custom_minimum_size.x = 52 if viewport_width < 600.0 else 76
+		navigation_toggle.custom_minimum_size.x = 40
 	if is_instance_valid(bank_balance_label) or is_instance_valid(header_bank_balance_value): _refresh_bank_balance()
 	var kpis := find_child("DashboardKpis", true, false) as GridContainer
 	if kpis != null:
@@ -563,7 +569,7 @@ func set_notice(message: String, error: bool = false) -> void:
 	_refresh_bank_balance()
 
 func _refresh_bank_balance() -> void:
-	if sim == null or screen != "Game":
+	if sim == null:
 		return
 	var value := money(int(sim.state.get("cash", 0)))
 	var color := Style.RED if int(sim.state.get("cash", 0)) < 0 else Style.GOLD
@@ -1624,92 +1630,200 @@ func _reset_edit_modes() -> void:
 
 func primary_navigation(parent: Node) -> Button:
 	header_mobile_layout = size.x < 600.0
-	var heading := row(parent)
+	header_compact_layout = size.x < 760.0
+	var viewport_width := size.x
+	var header := PanelContainer.new()
+	header.name = "UltraCompactGlobalHeader"
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	header.add_theme_stylebox_override("panel", Style.box(Color("#101A29"), Color("#34445B"), 9, 7))
+	parent.add_child(header)
+	var rows := stack(header, 3)
+	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rows.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var heading := row(rows)
 	heading.name = "GameHeaderPrimaryRow"
-	var menu_button := action(heading, "Menu", toggle_navigation_drawer, false)
+	heading.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	heading.add_theme_constant_override("separation", 5)
+	var menu_button := action(heading, "", toggle_navigation_drawer, false)
 	menu_button.name = "NavigationMenuButton"
-	menu_button.custom_minimum_size = Vector2(52 if size.x < 600.0 else 76, 46)
+	menu_button.custom_minimum_size = Vector2(40, 40)
 	menu_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	menu_button.tooltip_text = "Open navigation menu"
 	_apply_drawer_icon(menu_button, DRAWER_ICON_PATHS.Menu, 20)
 	navigation_toggle = menu_button
-	var viewport_width := size.x
-	var company_info := stack(heading, 2)
+	var company_info := stack(heading, 0)
 	company_info.name = "HeaderCompanyInformation"
 	company_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	company_info.add_child(label(str(sim.state.get("company", "Company")), 15 if viewport_width < 600.0 else 17, Style.TEXT))
-	var date := label(_game_date_text(viewport_width), 12 if viewport_width < 600.0 else 14, Style.MUTED)
-	date.name = "GameDate"
-	date.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	date.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	date.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	date.autowrap_mode = TextServer.AUTOWRAP_OFF
-	date.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	date.tooltip_text = _game_date_text(viewport_width)
-	company_info.add_child(date)
+	company_info.custom_minimum_size.x = 180 if viewport_width >= 600.0 else 0
+	header_title_label = label("ONLINE BUSINESS TYCOON", 12, Style.GOLD)
+	header_title_label.name = "HeaderGameTitle"
+	header_title_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	company_info.add_child(header_title_label)
+	header_company_label = label(str(sim.state.get("company", "Company")), 14 if viewport_width < 600.0 else 15, Style.TEXT)
+	header_company_label.name = "HeaderCompanyName"
+	header_company_label.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	company_info.add_child(header_company_label)
 	if OS.is_debug_build():
-		var developer_button := action(heading, "</>", open_developer_mode, false)
+		var developer_button := action(heading, "</>", request_developer_mode_access, false)
 		developer_button.name = "DeveloperModeButton"
-		developer_button.custom_minimum_size = Vector2(48, 44)
+		developer_button.custom_minimum_size = Vector2(44, 40)
 		developer_button.size_flags_horizontal = Control.SIZE_SHRINK_END
-		developer_button.tooltip_text = "Developer Mode — isolated testing tools"
-		if viewport_width < 600.0:
-			menu_button.size_flags_horizontal = Control.SIZE_SHRINK_END
-			company_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	if viewport_width >= 600.0:
+		developer_button.tooltip_text = "Developer Mode access — isolated testing tools"
+	var details := row(rows)
+	details.name = "GameHeaderSecondaryRow"
+	details.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	details.add_theme_constant_override("separation", 6)
+	header_date_label = label(_game_date_text(), 12 if viewport_width < 600.0 else 13, Style.MUTED)
+	header_date_label.name = "GameDate"
+	header_date_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_date_label.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	header_date_label.tooltip_text = _game_date_text()
+	details.add_child(header_date_label)
+	if viewport_width >= 760.0:
 		_add_header_bank_balance(heading)
-	if viewport_width < 600.0:
-		var balance_row := row(parent)
-		balance_row.name = "HeaderBankBalanceRow"
-		_add_header_bank_balance(balance_row)
-	# Keep company details and Developer Mode before the navigation action.
-	heading.move_child(menu_button, heading.get_child_count() - 1)
+		advance_day_controls(details, true)
+	elif viewport_width >= 600.0:
+		_add_header_bank_balance(heading)
+		var compact_advance := row(rows)
+		compact_advance.alignment = BoxContainer.ALIGNMENT_END
+		advance_day_controls(compact_advance, true)
+	else:
+		var mobile_balance_and_advance := row(rows)
+		mobile_balance_and_advance.name = "MobileBalanceAndAdvanceRow"
+		mobile_balance_and_advance.add_theme_constant_override("separation", 8)
+		_add_header_bank_balance(mobile_balance_and_advance, true)
+		var mobile_advance := stack(mobile_balance_and_advance, 1)
+		mobile_advance.name = "MobileAdvanceDayGroup"
+		mobile_advance.size_flags_horizontal = Control.SIZE_SHRINK_END
+		advance_day_controls(mobile_advance, false)
 	_create_navigation_drawer()
 	return menu_button
 
-func _add_header_bank_balance(parent: Node) -> void:
-	var display := row(parent)
+func _add_header_bank_balance(parent: Node, stacked: bool = false) -> void:
+	var display: Control = stack(parent, 0) if stacked else row(parent)
 	display.name = "CompanyBankBalance"
-	display.size_flags_horizontal = Control.SIZE_SHRINK_END if size.x >= 600.0 else Control.SIZE_EXPAND_FILL
-	display.custom_minimum_size.x = 230 if size.x >= 600.0 else 0
-	display.add_theme_constant_override("separation", 6)
-	header_bank_balance_label = label("Bank Balance", 12, Style.MUTED)
+	display.size_flags_horizontal = Control.SIZE_SHRINK_END if not stacked else Control.SIZE_EXPAND_FILL
+	display.custom_minimum_size.x = 130 if stacked else 245
+	display.add_theme_constant_override("separation", 4)
+	header_bank_balance_label = label("Bank Balance", 11, Style.MUTED)
 	header_bank_balance_label.name = "HeaderBankBalanceLabel"
-	header_bank_balance_label.custom_minimum_size.x = 84
-	header_bank_balance_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	header_bank_balance_label.custom_minimum_size.x = 78
 	header_bank_balance_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	header_bank_balance_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	display.add_child(header_bank_balance_label)
-	header_bank_balance_value = label(money(int(sim.state.get("cash", 0))), 14, Style.GOLD)
+	header_bank_balance_value = label(money(int(sim.state.get("cash", 0))), 13, Style.GOLD)
 	header_bank_balance_value.name = "HeaderBankBalanceValue"
-	header_bank_balance_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	header_bank_balance_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if not stacked else HORIZONTAL_ALIGNMENT_LEFT
 	header_bank_balance_value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	header_bank_balance_value.custom_minimum_size.x = 136
-	header_bank_balance_value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header_bank_balance_value.autowrap_mode = TextServer.AUTOWRAP_OFF
-	header_bank_balance_value.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	header_bank_balance_value.custom_minimum_size.x = 135 if stacked else 145
+	header_bank_balance_value.size_flags_horizontal = Control.SIZE_EXPAND_FILL if not stacked else Control.SIZE_SHRINK_BEGIN
+	header_bank_balance_value.autowrap_mode = TextServer.AUTOWRAP_OFF if not stacked else TextServer.AUTOWRAP_WORD_SMART
+	header_bank_balance_value.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	display.add_child(header_bank_balance_value)
 	_refresh_bank_balance()
 
-func _game_date_text(viewport_width: float) -> String:
+func _game_date_text() -> String:
 	var country: String = Catalog.COUNTRIES[int(sim.state.country)]
-	return "Day %d\n%s | %s" % [sim.state.day, Calendar.format(sim.state.day), country]
+	return "Day %d · %s · %s" % [sim.state.day, Calendar.format(sim.state.day), country]
 
-func advance_day_controls(parent: Node) -> void:
+func advance_day_controls(parent: Node, horizontal: bool = true) -> void:
 	var controls := row(parent)
 	controls.name = "GlobalAdvanceDayControls"
-	controls.add_theme_constant_override("separation", 8)
-	var title := label("Advance Day", 13, Style.GOLD)
+	controls.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	controls.add_theme_constant_override("separation", 4)
+	var title := label("Advance Day", 12, Style.GOLD)
 	title.name = "AdvanceDayLabel"
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.visible = horizontal
+	title.custom_minimum_size.x = 78
+	title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	if not horizontal:
+		var group_title := label("Advance Day", 11, Style.GOLD)
+		group_title.name = "AdvanceDayGroupLabel"
+		group_title.custom_minimum_size.x = 78
+		group_title.autowrap_mode = TextServer.AUTOWRAP_OFF
+		parent.add_child(group_title)
+		parent.move_child(group_title, 0)
 	controls.add_child(title)
 	for days in [1, 2, 7, 30]:
 		var button := action(controls, "+%d" % days, request_advance_days.bind(days), days == 1)
 		button.name = "AdvanceDays%d" % days
-		button.custom_minimum_size = Vector2(48 if size.x < 600.0 else 64, 42)
+		button.custom_minimum_size = Vector2(40 if size.x < 600.0 else 46, 40)
 		button.size_flags_horizontal = Control.SIZE_SHRINK_END
 		button.disabled = day_advance_pending or day_advance_processing
+
+func _update_header_text() -> void:
+	if sim == null: return
+	if is_instance_valid(header_title_label): header_title_label.text = "ONLINE BUSINESS TYCOON"
+	if is_instance_valid(header_company_label): header_company_label.text = str(sim.state.get("company", "Company"))
+	if is_instance_valid(header_date_label):
+		header_date_label.text = _game_date_text()
+		header_date_label.tooltip_text = _game_date_text()
+	if is_instance_valid(header_bank_balance_value): _refresh_bank_balance()
+
+func request_developer_mode_access() -> void:
+	if not OS.is_debug_build(): return
+	if has_form_edits():
+		discard_form_then(_show_developer_access_dialog)
+		return
+	_show_developer_access_dialog()
+
+func _show_developer_access_dialog() -> void:
+	if not OS.is_debug_build() or is_instance_valid(confirmation) or is_instance_valid(developer_access_overlay): return
+	var overlay := ColorRect.new()
+	overlay.name = "DeveloperAccessDialog"
+	overlay.color = Color(0.0, 0.0, 0.0, 0.72)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
+	var panel := PanelContainer.new()
+	panel.name = "DeveloperAccessPanel"
+	panel.custom_minimum_size.x = minf(360.0, maxf(280.0, size.x - 32.0))
+	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 10, 14))
+	center.add_child(panel)
+	var content := stack(panel, 10)
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(label("Developer Mode Access", 20, Style.GOLD))
+	content.add_child(label("Enter the authorized test access code to continue.", 14, Style.MUTED))
+	var code := LineEdit.new()
+	code.name = "DeveloperAccessCode"
+	code.placeholder_text = "Access code"
+	code.custom_minimum_size.y = 44
+	code.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(code)
+	var error_label := label("", 13, Style.RED)
+	error_label.name = "DeveloperAccessError"
+	error_label.visible = false
+	content.add_child(error_label)
+	var actions := row(content)
+	var cancel := action(actions, "Cancel", func():
+		developer_access_overlay = null
+		overlay.queue_free()
+	)
+	cancel.name = "DeveloperAccessCancel"
+	var unlock := action(actions, "Unlock Developer Mode", func(): _submit_developer_access(code, error_label), true)
+	unlock.name = "DeveloperAccessUnlock"
+	Style.primary(unlock)
+	developer_access_overlay = overlay
+	add_child(overlay)
+	code.text_submitted.connect(func(_value: String): _submit_developer_access(code, error_label))
+	code.grab_focus()
+
+func _submit_developer_access(code: LineEdit, error_label: Label) -> void:
+	if not OS.is_debug_build() or not is_instance_valid(developer_access_overlay): return
+	if code.text.strip_edges().to_upper() == "URTN":
+		var overlay := developer_access_overlay
+		developer_access_overlay = null
+		overlay.queue_free()
+		_open_developer_mode_now()
+	else:
+		error_label.text = "Access code not recognized."
+		error_label.visible = true
+		code.clear()
+		if code.is_inside_tree() and code.is_visible_in_tree(): code.grab_focus()
 
 func request_advance_days(days: int) -> void:
 	if sim == null or day_advance_pending or day_advance_processing or days not in [1, 2, 7, 30]:
@@ -1917,6 +2031,9 @@ func render() -> void:
 	bank_balance_label = null
 	header_bank_balance_label = null
 	header_bank_balance_value = null
+	header_date_label = null
+	header_title_label = null
+	header_company_label = null
 	navigation_open = false
 	page_shell = null
 	page_wide = null
@@ -1955,11 +2072,12 @@ func render() -> void:
 	page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
 	var shell := page_shell
 	var masthead := stack(shell, 3)
-	if screen != "Title":
+	var global_game_header := sim != null and screen not in ["Title", "Setup", "New Game", "Company Selection", "Load", "Entrepreneur name", "CEO identity conflict"]
+	if global_game_header:
+		primary_navigation(masthead)
+	elif screen != "Title":
 		masthead.add_child(label("ONLINE BUSINESS TYCOON", 13, Style.GOLD))
 	if screen == "Game":
-		primary_navigation(masthead)
-		advance_day_controls(masthead)
 		var heading := row(masthead)
 		heading.name = "PageHeading"
 		var page_title := page
@@ -1991,7 +2109,7 @@ func render() -> void:
 		var screen_title := label(titles.get(screen, screen), 30)
 		screen_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		screen_heading.add_child(screen_title)
-		if OS.is_debug_build() and screen not in ["Developer Mode", "Developer Cheats"]:
+		if OS.is_debug_build() and not global_game_header:
 			_developer_button(screen_heading)
 	var scroll := ScrollContainer.new()
 	scroll.name = "GameContentScroll"
@@ -2073,7 +2191,7 @@ func render() -> void:
 	_finish_responsive_content()
 
 func _developer_button(parent: Node) -> Button:
-	var button := action(parent, "</> Developer Mode", open_developer_mode, false)
+	var button := action(parent, "</> Developer Mode", request_developer_mode_access, false)
 	button.name = "DeveloperModeButton"
 	button.tooltip_text = "Isolated developer testing tools"
 	return button
