@@ -82,26 +82,35 @@ static func show_categories(app: Control) -> void:
 	catalogue.add_child(grid)
 	for category in Catalog.CATEGORIES:
 		var name := str(category)
-		var count := Catalog.PRODUCTS.filter(func(product: Dictionary): return str(product.category) == name).size()
-		var panel: VBoxContainer = _catalog_card(grid, name)
-		panel.name = "CatalogueCategory_" + _safe_name(name)
+		var card := Button.new()
+		card.name = "CatalogueCategory_" + _safe_name(name)
+		card.text = name
+		card.icon = load(_category_icon_path(name)) as Texture2D
+		card.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		card.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		card.add_theme_constant_override("h_separation", 10)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.custom_minimum_size = Vector2(0, 56)
+		card.focus_mode = Control.FOCUS_ALL
+		card.mouse_filter = Control.MOUSE_FILTER_STOP
 		var selected := int(app.catalog_category) == Catalog.CATEGORIES.find(name)
-		var category_panel := panel.get_parent() as PanelContainer
-		category_panel.add_theme_stylebox_override("panel", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12, 10))
-		var icon := Label.new()
-		icon.name = "CategoryIcon"
-		icon.text = _category_icon(name)
-		icon.add_theme_font_size_override("font_size", 24)
-		icon.add_theme_color_override("font_color", Style.GOLD)
-		panel.add_child(icon)
-		panel.add_child(app.label("%d products" % count, 13, Style.MUTED))
+		var fill := Color("#25364D") if selected else Color("#19283C")
+		var outline := Color("#D5AC61") if selected else Color("#35465D")
+		card.add_theme_stylebox_override("normal", Style.box(fill, outline, 12, 10))
+		card.add_theme_stylebox_override("hover", Style.box(fill.lightened(0.07), Color("#D5AC61"), 12, 10))
+		card.add_theme_stylebox_override("pressed", Style.box(Color("#25364D"), Color("#D5AC61"), 12, 10))
+		card.add_theme_stylebox_override("focus", Style.box(fill, Color("#D5AC61"), 12, 10))
+		card.add_theme_color_override("font_color", Style.TEXT)
+		card.add_theme_color_override("font_hover_color", Style.TEXT)
+		card.add_theme_color_override("font_pressed_color", Style.TEXT)
+		card.add_theme_color_override("font_focus_color", Style.TEXT)
+		grid.add_child(card)
 		var choose_category := func():
 			app.catalog_category = Catalog.CATEGORIES.find(name)
 			app.catalog_search = ""
 			app.set_meta("buy_selected_product", -1)
 			app.refresh_view(true)
-		var choose: Button = app.action(panel, "Select Category", choose_category, selected)
-		choose.name = "BrowseCategory_" + _safe_name(name)
+		card.pressed.connect(choose_category)
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)
 	catalogue.add_child(actions)
@@ -242,13 +251,13 @@ static func _supplier_card_width(viewport_width: float) -> float:
 	var columns := _supplier_columns(viewport_width)
 	return floorf((inner_width - 10.0 * float(columns - 1)) / float(columns))
 
-static func _category_icon(category: String) -> String:
+static func _category_icon_path(category: String) -> String:
 	var icons := {
-		"Electronics": "EL", "Home & Living": "HL", "Kitchen": "K", "Fashion": "F",
-		"Beauty": "BE", "Fitness": "FI", "Automotive": "AU", "Baby & Kids": "BK",
-		"Pets": "PE", "Travel": "TR",
+		"Electronics": "electronics", "Home & Living": "home_living", "Kitchen": "kitchen", "Fashion": "fashion",
+		"Beauty": "beauty", "Fitness": "fitness", "Automotive": "automotive", "Baby & Kids": "baby_kids",
+		"Pets": "pets", "Travel": "travel",
 	}
-	return str(icons.get(category, "•"))
+	return "res://assets/categories/%s.svg" % str(icons.get(category, "general"))
 
 static func _nested_card(parent: Node, title: String) -> VBoxContainer:
 	var panel := PanelContainer.new()

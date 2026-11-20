@@ -35,6 +35,36 @@ func click(title: String, scope: Node = null) -> void:
 	var node := button(title, scope)
 	if node != null and not node.disabled: node.pressed.emit()
 
+func click_control(control: Control, use_touch: bool = false) -> void:
+	if control == null:
+		return
+	var position := control.get_global_rect().get_center()
+	if use_touch:
+		var touch_down := InputEventScreenTouch.new()
+		touch_down.index = 1
+		touch_down.position = position
+		touch_down.pressed = true
+		root.push_input(touch_down)
+		await process_frame
+		var touch_up := InputEventScreenTouch.new()
+		touch_up.index = 1
+		touch_up.position = position
+		touch_up.pressed = false
+		root.push_input(touch_up)
+	else:
+		var mouse_down := InputEventMouseButton.new()
+		mouse_down.button_index = MOUSE_BUTTON_LEFT
+		mouse_down.position = position
+		mouse_down.pressed = true
+		root.push_input(mouse_down)
+		await process_frame
+		var mouse_up := InputEventMouseButton.new()
+		mouse_up.button_index = MOUSE_BUTTON_LEFT
+		mouse_up.position = position
+		mouse_up.pressed = false
+		root.push_input(mouse_up)
+	await settle_frames()
+
 func settle_frames() -> void:
 	await process_frame
 	await process_frame
@@ -59,13 +89,38 @@ func run() -> void:
 	await settle_frames()
 	expect(app.find_child("BuyInventoryWorkflow", true, false) != null and has_label("Quick Purchase"),
 		"Market opens the compact Quick Purchase workflow")
-	expect(Market._category_columns(1280.0) == 3 and Market._category_columns(768.0) == 2 and Market._category_columns(390.0) == 2,
+	var page_heading := app.find_child("PageHeading", true, false)
+	expect(page_heading != null and controls(page_heading, "Label").any(func(item): return item.text == "Market"),
+		"Market page heading displays only Market while the Quick Purchase heading remains in-panel")
+	expect(Market._category_columns(1920.0) == 3 and Market._category_columns(1366.0) == 3
+		and Market._category_columns(1024.0) == 3 and Market._category_columns(768.0) == 2
+		and Market._category_columns(390.0) == 2 and Market._category_columns(375.0) == 2
+		and Market._category_columns(844.0) == 2 and Market._category_columns(667.0) == 2,
 		"Categories use responsive three, two and compact mobile columns")
-	expect(app.find_child("CatalogueCategory_Electronics", true, false) != null and app.find_child("CatalogueCategory_Kitchen", true, false) != null,
+	expect(app.find_child("CatalogueCategory_Electronics", true, false) is Button and app.find_child("CatalogueCategory_Kitchen", true, false) is Button,
 		"Category selection uses the live game catalogue")
-	click("Select Category", app.find_child("CatalogueCategory_Kitchen", true, false))
-	expect(app.catalog_category == Catalog.CATEGORIES.find("Kitchen") and app.find_child("ContinueBuyInventory", true, false) != null,
-		"Category selection is retained and Continue is available")
+	expect(button("Select Category") == null, "Category cards no longer contain redundant Select Category buttons")
+	for category_index in Catalog.CATEGORIES.size():
+		var category_name := str(Catalog.CATEGORIES[category_index])
+		var category_id := category_name.replace("&", "and").replace(" ", "_")
+		var category_card := app.find_child("CatalogueCategory_" + category_id, true, false) as Button
+		expect(category_card != null and category_card.icon != null,
+			"%s uses a bundled graphical category icon" % category_name)
+	var electronics := app.find_child("CatalogueCategory_Electronics", true, false) as Button
+	await click_control(electronics)
+	expect(app.catalog_category == Catalog.CATEGORIES.find("Electronics") and app.find_child("ContinueBuyInventory", true, false) != null,
+		"A real mouse click selects Electronics and enables Continue")
+	electronics = app.find_child("CatalogueCategory_Electronics", true, false) as Button
+	var selected_box := electronics.get_theme_stylebox("normal") as StyleBoxFlat if electronics != null else null
+	expect(selected_box != null and selected_box.border_color == Color("#D5AC61"),
+		"Selected category uses the gold border")
+	var touch_test_card := app.find_child("CatalogueCategory_Kitchen", true, false) as Button
+	await click_control(touch_test_card, true)
+	expect(app.catalog_category == Catalog.CATEGORIES.find("Kitchen"),
+		"A real touchscreen tap selects a category through the same button target")
+	app.set_meta(Market.CATALOG_STAGE_META, "categories")
+	app.render()
+	await settle_frames()
 	click("Continue")
 	await settle_frames()
 	expect(str(app.get_meta(Market.CATALOG_STAGE_META, "")) == "products", "Continue opens the Product step")
@@ -185,6 +240,18 @@ func run() -> void:
 	var mobile_grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
 	expect(mobile_grid != null and mobile_grid.columns == 2 and app.find_child("BuyInventoryProgress", true, false) != null,
 		"Mobile portrait retains compact category cards and the five-step indicator")
+	var viewport_matrix := [Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(1024, 768), Vector2i(768, 1024),
+		Vector2i(390, 844), Vector2i(375, 667), Vector2i(844, 390), Vector2i(667, 375)]
+	for viewport in viewport_matrix:
+		root.size = viewport
+		app.catalog_category = -1
+		app.set_meta(Market.CATALOG_STAGE_META, "categories")
+		app.render()
+		await settle_frames()
+		var responsive_grid := app.find_child("ProductCategoryGrid", true, false) as GridContainer
+		var first_category := app.find_child("CatalogueCategory_Electronics", true, false) as Button
+		expect(responsive_grid != null and first_category != null,
+			"Category cards render at %d×%d" % [viewport.x, viewport.y])
 	app.queue_free()
 	await process_frame
 	print("Buy Inventory workflow UI: %d failures" % failures)
