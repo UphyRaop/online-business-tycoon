@@ -62,6 +62,8 @@ func run() -> void:
 			var scroll := app.find_child("DeveloperAccessScroll", true, false) as ScrollContainer
 			expect(scroll != null and scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED,
 				"Access dialog supports vertical keyboard-safe scrolling without horizontal overflow at %s" % viewport)
+			expect(scroll != null and scroll.vertical_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO,
+				"Access dialog can scroll vertically when the mobile keyboard reduces available height at %s" % viewport)
 		if input != null:
 			input.text = "invalid"
 			unlock.pressed.emit()
@@ -137,7 +139,7 @@ func run() -> void:
 		var console_scroll := app.find_child("DeveloperConsoleScroll", true, false) as ScrollContainer
 		expect(console_scroll != null and console_scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED,
 			"Developer tools use vertical scrolling at %s" % viewport)
-		if viewport.x < 600:
+		if viewport.x < 600 or (viewport.x > viewport.y and viewport.y < 600):
 			var title := app.find_child("DeveloperConsoleTitle", true, false) as Label
 			expect(title != null and title.autowrap_mode == TextServer.AUTOWRAP_OFF,
 				"Mobile Developer Mode title remains on one line at %s" % viewport)

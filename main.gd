@@ -96,6 +96,7 @@ var developer_mode_unlocked := false
 var developer_console_visible := false
 var developer_changes_active := false
 var developer_original_viewport := Vector2i.ZERO
+var developer_preview_active := false
 var developer_overlay: Control
 var developer_access_code_value := ""
 var developer_access_error_message := ""
@@ -157,7 +158,9 @@ func _set_developer_preview_viewport(args: Array) -> void:
 		return
 	var width := maxi(1, int(args[0]))
 	var height := maxi(1, int(args[1]))
-	get_window().content_scale_size = Vector2i(width, height)
+	var requested := Vector2i(width, height)
+	get_window().content_scale_size = requested
+	developer_preview_active = developer_mode_unlocked and developer_original_viewport != Vector2i.ZERO and requested != developer_original_viewport
 
 func _receive_dev_command(args: Array) -> void:
 	var raw := str(args[0]) if not args.is_empty() else "{}"
@@ -184,6 +187,7 @@ func open_developer_mode() -> void:
 	developer_changes_active = dirty
 	if developer_original_viewport == Vector2i.ZERO:
 		developer_original_viewport = get_window().content_scale_size
+	_developer_sync_landscape_scale()
 	if OS.has_feature("web"):
 		JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.enable();")
 	set_notice("")
@@ -207,7 +211,30 @@ func leave_developer_mode() -> void:
 func close_developer_console() -> void:
 	if not developer_mode_unlocked: return
 	developer_console_visible = false
+	if not developer_preview_active:
+		_developer_restore_original_scale()
 	render()
+
+func _developer_browser_viewport_size() -> Vector2i:
+	if OS.has_feature("web"):
+		var width := int(JavaScriptBridge.eval("window.innerWidth"))
+		var height := int(JavaScriptBridge.eval("window.innerHeight"))
+		if width > 0 and height > 0: return Vector2i(width, height)
+	return Vector2i(roundi(size.x), roundi(size.y))
+
+func _developer_sync_landscape_scale() -> void:
+	if not OS.has_feature("web") or developer_preview_active or developer_original_viewport == Vector2i.ZERO:
+		return
+	var browser_size := _developer_browser_viewport_size()
+	var target := developer_original_viewport
+	if browser_size.x > browser_size.y and browser_size.y <= 600:
+		target = browser_size
+	if get_window().content_scale_size != target:
+		get_window().content_scale_size = target
+
+func _developer_restore_original_scale() -> void:
+	if developer_original_viewport != Vector2i.ZERO and get_window().content_scale_size != developer_original_viewport:
+		get_window().content_scale_size = developer_original_viewport
 
 func create_developer_backup() -> Dictionary:
 	if not developer_mode_unlocked or sim == null or active_game_id.is_empty():
@@ -244,12 +271,14 @@ func create_developer_backup() -> Dictionary:
 func set_developer_preview(name: String) -> Dictionary:
 	var presets := {"desktop": Vector2i(900, 1200), "tablet": Vector2i(768, 1024), "mobile": Vector2i(390, 844)}
 	if name == "exit":
+		developer_preview_active = false
 		if OS.has_feature("web"):
 			JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.exit();")
 		get_window().content_scale_size = developer_original_viewport if developer_original_viewport != Vector2i.ZERO else Vector2i(430, 760)
 		return {"ok": true, "code": "preview_restored", "message": "Original viewport restored."}
 	if not presets.has(name): return {"ok": false, "code": "invalid_preview", "message": "Choose desktop, tablet, or mobile portrait."}
 	var selected: Vector2i = presets[name]
+	developer_preview_active = true
 	if OS.has_feature("web"):
 		JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.select('%s');" % name)
 	else:
@@ -432,6 +461,8 @@ func profit_color(cents: int) -> Color:
 	return Style.GREEN if cents >= 0 else Style.RED
 
 func _update_responsive_layout() -> void:
+	if is_instance_valid(developer_access_overlay) or (developer_mode_unlocked and developer_console_visible):
+		_developer_sync_landscape_scale()
 	var viewport_width := size.x
 	Market.update_responsive_layout(self)
 	for metric_row in find_children("ResponsiveMetric", "BoxContainer", true, false):
@@ -1716,15 +1747,20 @@ func _update_header_text() -> void:
 func request_developer_mode_access() -> void:
 	if developer_mode_unlocked:
 		developer_console_visible = true
+		_developer_sync_landscape_scale()
 		_show_developer_console_overlay()
 		return
 	if has_form_edits():
 		set_notice("Save or cancel the current form before opening Developer Mode.", true)
 		return
+	if developer_original_viewport == Vector2i.ZERO:
+		developer_original_viewport = get_window().content_scale_size
+	_developer_sync_landscape_scale()
 	_show_developer_access_dialog()
 
 func _show_developer_access_dialog() -> void:
 	if is_instance_valid(confirmation) or is_instance_valid(developer_access_overlay): return
+	_developer_sync_landscape_scale()
 	var overlay := ColorRect.new()
 	overlay.name = "DeveloperAccessDialog"
 	overlay.color = Color(0.0, 0.0, 0.0, 0.72)
@@ -1776,6 +1812,8 @@ func _show_developer_access_dialog() -> void:
 		developer_access_code_value = ""
 		developer_access_error_message = ""
 		overlay.queue_free()
+		_developer_restore_original_scale()
+		developer_original_viewport = Vector2i.ZERO
 	)
 	cancel.name = "DeveloperAccessCancel"
 	var unlock := action(actions, "Unlock Developer Mode", func(): _submit_developer_access(code, error_label), true)
@@ -2193,6 +2231,7 @@ func _developer_button(parent: Node) -> Button:
 
 func _show_developer_console_overlay() -> void:
 	if not developer_mode_unlocked or not developer_console_visible or sim == null: return
+	_developer_sync_landscape_scale()
 	if is_instance_valid(developer_overlay): developer_overlay.queue_free()
 	var overlay := ColorRect.new()
 	overlay.name = "DeveloperConsoleOverlay"
@@ -2226,7 +2265,7 @@ func _show_developer_console_overlay() -> void:
 	content.name = "DeveloperConsoleContent"
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var heading: BoxContainer
-	var mobile_console := size.x < 600.0
+	var mobile_console := size.x < 600.0 or (size.x > size.y and size.y < 600.0)
 	var title := label("Developer Mode", 18 if mobile_console else 22, Style.GOLD)
 	title.name = "DeveloperConsoleTitle"
 	if mobile_console: title.autowrap_mode = TextServer.AUTOWRAP_OFF

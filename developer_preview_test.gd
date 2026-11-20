@@ -42,7 +42,8 @@ func run() -> void:
 	var main_source := FileAccess.get_file_as_string("res://main.gd")
 	expect(shell.contains("previewPresets = { desktop: [900, 1200], tablet: [768, 1024], mobile: [390, 844] }"), "Preview presets use the approved whole-game logical viewport sizes")
 	expect(shell.contains("body.dev-preview #preview-host { inset: var(--dev-toolbar-bottom, 48px) 0 0;") and shell.contains("#dev-toolbar"), "Developer controls stay outside the game canvas and remain available over portrait previews")
-	expect(shell.contains("requestLogicalSize(width, height)") and main_source.contains("get_window().content_scale_size = Vector2i(width, height)"), "Preview updates Godot's logical viewport size as well as the CSS canvas frame")
+	expect(shell.contains("requestLogicalSize(width, height)") and main_source.contains("var requested := Vector2i(width, height)")
+		and main_source.contains("get_window().content_scale_size = requested"), "Preview updates Godot's logical viewport size as well as the CSS canvas frame")
 	expect(not shell.contains("actualDesktop()") and shell.contains("OBTDevPreview = {")
 		and main_source.contains("developer_mode_unlocked = true")
 		and main_source.contains("if OS.is_debug_build():") and main_source.contains("obtRunDevCommand"),
