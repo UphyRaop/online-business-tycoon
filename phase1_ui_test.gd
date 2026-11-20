@@ -84,16 +84,12 @@ func press(title: String) -> void:
 
 func press_category(category: String) -> void:
 	var safe_name := category.replace("&", "and").replace(" ", "_")
-	var category_card := app.find_child("CatalogueCategory_" + safe_name, true, false)
-	if category_card == null:
+	var category_card := app.find_child("CatalogueCategory_" + safe_name, true, false) as Button
+	if category_card == null or category_card.disabled or not category_card.is_visible_in_tree():
 		expect(false, "Missing category card " + category)
 		return
-	for candidate in controls(category_card, "Button"):
-		if candidate.text == "Select Category" and not candidate.disabled and candidate.is_visible_in_tree():
-			candidate.pressed.emit()
-			press("Continue")
-			return
-	expect(false, "Missing category selection action for " + category)
+	category_card.pressed.emit()
+	press("Continue")
 
 func has_visible_label(prefix: String) -> bool:
 	for node in controls(app, "Label"):

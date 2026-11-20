@@ -51,9 +51,8 @@ func run() -> void:
 	await process_frame
 	expect(app.find_child("BuyInventoryProgress", true, false) != null and button("Continue") != null,
 		"Market shows the approved progress indicator and category continuation")
-	var category := app.find_child("CatalogueCategory_Kitchen", true, false)
-	var select_category := category.find_child("BrowseCategory_Kitchen", true, false) as Button
-	if select_category != null: select_category.pressed.emit()
+	var category := app.find_child("CatalogueCategory_Kitchen", true, false) as Button
+	if category != null: category.pressed.emit()
 	click("Continue")
 	await process_frame
 	var product := app.find_child("CatalogueProduct_0", true, false)

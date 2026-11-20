@@ -2132,7 +2132,7 @@ func render() -> void:
 		heading.name = "PageHeading"
 		var page_title := page
 		match page:
-			"Market": page_title = "Market / Buy Inventory"
+			"Market": page_title = "Market"
 			"Business": page_title = "Company Management"
 			"Management": page_title = "Store Management"
 			"My Products": page_title = "Inventory Management"
