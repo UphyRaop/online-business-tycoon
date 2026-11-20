@@ -27,6 +27,8 @@ static func title(app: Control) -> void:
 	var play: VBoxContainer = app.wide_card("Continue Playing")
 	var actions := FlowContainer.new()
 	actions.name = "MainMenuActions"
+	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	actions.custom_minimum_size.x = minf(580.0, maxf(0.0, app.size.x - 66.0))
 	actions.add_theme_constant_override("h_separation", 8)
 	actions.add_theme_constant_override("v_separation", 8)
 	play.add_child(actions)

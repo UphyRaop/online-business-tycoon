@@ -25,6 +25,11 @@ func run() -> void:
 	app = Main.instantiate()
 	root.add_child(app)
 	await process_frame
+	var menu_actions := app.find_child("MainMenuActions", true, false) as FlowContainer
+	var menu_action_buttons := menu_actions.get_children() if menu_actions != null else []
+	expect(menu_actions != null and menu_actions.size.x <= 581.0 and menu_action_buttons.size() == 3
+		and menu_action_buttons.all(func(button): return button.custom_minimum_size.x <= 172.0),
+		"Main Menu actions remain in a compact, bounded row on wide screens with touch-friendly button widths")
 	test_legacy_game_is_visible()
 	test_required_new_game_identity()
 	test_independent_game_saves_and_profiles()
