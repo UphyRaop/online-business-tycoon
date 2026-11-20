@@ -41,8 +41,8 @@ func run() -> void:
 	button(app, "DeveloperModeButton").pressed.emit()
 	var access_dialog := app.find_child("DeveloperAccessDialog", true, false) as ColorRect
 	var access_code := app.find_child("DeveloperAccessCode", true, false) as LineEdit
-	expect(access_dialog != null and access_code != null,
-		"Developer Mode button opens an access-code dialog instead of granting access directly")
+	expect(access_dialog != null and access_code != null and access_code.secret,
+		"Developer Mode button opens a masked access-code dialog instead of granting access directly")
 	if access_dialog != null and access_code != null:
 		access_code.text = "invalid"
 		var unlock := button(app, "DeveloperAccessUnlock")
@@ -107,6 +107,19 @@ func run() -> void:
 	var response: Dictionary = api.execute("capture_screenshot", {"name": "dev-console-test"}, app)
 	expect(response.has("ok") and (response.ok == false or str(response.get("path", "")).contains("obt_dev_tests/screenshots")),
 		"Automation screenshot command returns a structured result for viewport capture")
+	app.screen = "Game"; app.page = "Market"; app.render()
+	await process_frame
+	var header_menu := button(app, "NavigationMenuButton")
+	if header_menu != null: header_menu.pressed.emit()
+	var lock_action := button(app, "DrawerActionLockDeveloperMode")
+	expect(lock_action != null and lock_action.is_visible_in_tree(),
+		"Unlocked debug Developer Mode exposes a Lock Developer Mode action in Main Navigation")
+	if lock_action != null:
+		lock_action.pressed.emit()
+		if app.confirmation != null: app.confirmation.confirmed.emit()
+	expect(not app.developer_save_active and app.active_game_id == "normal-source"
+		and app.sim.state.company_id == normal_copy.company_id,
+		"Lock Developer Mode returns to the unchanged normal game and keeps the DEV save isolated")
 	print("Developer Console UI: %d failures" % failures)
 	app.queue_free(); await process_frame
 	quit(0 if failures == 0 else 1)

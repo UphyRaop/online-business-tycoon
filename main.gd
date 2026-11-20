@@ -112,8 +112,7 @@ var campaign_editing := false
 var shipping_settings_editing := false
 var display_settings_editing := false
 var avatar_crop_source: Image
-var navigation_overlay: Control
-var navigation_drawer: PanelContainer
+var navigation_panel: PanelContainer
 var navigation_open := false
 var navigation_toggle: Button
 var bank_balance_label: Label
@@ -128,6 +127,7 @@ var preorder_show_history := false
 var ad_expanded_campaigns: Dictionary = {}
 var header_mobile_layout := false
 var header_compact_layout := false
+var header_mobile_wrap_layout := false
 var header_date_label: Label
 var header_title_label: Label
 var header_company_label: Label
@@ -476,7 +476,8 @@ func _update_responsive_layout() -> void:
 		inventory_parent.move_child(replacement, inventory_index)
 	var date_label := find_child("GameDate", true, false) as Label
 	if date_label != null and sim != null:
-		if ((viewport_width < 600.0) != header_mobile_layout or (viewport_width < 760.0) != header_compact_layout):
+		if ((viewport_width < 600.0) != header_mobile_layout or (viewport_width < 760.0) != header_compact_layout
+			or (viewport_width < 350.0) != header_mobile_wrap_layout):
 			render()
 			return
 		date_label.text = _game_date_text()
@@ -491,12 +492,11 @@ func _update_responsive_layout() -> void:
 	if is_instance_valid(page_shell):
 		var horizontal_margin := 20 if viewport_width >= 900.0 else 12
 		page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
+	if is_instance_valid(navigation_panel):
+		navigation_panel.custom_minimum_size.x = clampf(viewport_width * 0.78, 260.0, 320.0)
 	if is_instance_valid(page_grid):
 		page_grid.columns = 2 if viewport_width >= 768.0 else 1
 		_reflow_page_cards()
-	if is_instance_valid(navigation_drawer):
-		var drawer_width := clampf(viewport_width * 0.78, 260.0, 320.0)
-		navigation_drawer.offset_right = drawer_width
 	if is_instance_valid(navigation_toggle):
 		navigation_toggle.custom_minimum_size.x = 40
 	if is_instance_valid(bank_balance_label) or is_instance_valid(header_bank_balance_value): _refresh_bank_balance()
@@ -1631,6 +1631,7 @@ func _reset_edit_modes() -> void:
 func primary_navigation(parent: Node) -> Button:
 	header_mobile_layout = size.x < 600.0
 	header_compact_layout = size.x < 760.0
+	header_mobile_wrap_layout = size.x < 350.0
 	var viewport_width := size.x
 	var header := PanelContainer.new()
 	header.name = "UltraCompactGlobalHeader"
@@ -1639,6 +1640,7 @@ func primary_navigation(parent: Node) -> Button:
 	header.add_theme_stylebox_override("panel", Style.box(Color("#101A29"), Color("#34445B"), 9, 7))
 	parent.add_child(header)
 	var rows := stack(header, 3)
+	rows.name = "UltraCompactGlobalHeaderRows"
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rows.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	var heading := row(rows)
@@ -1664,12 +1666,13 @@ func primary_navigation(parent: Node) -> Button:
 	header_company_label.name = "HeaderCompanyName"
 	header_company_label.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	company_info.add_child(header_company_label)
-	if OS.is_debug_build():
-		var developer_button := action(heading, "</>", request_developer_mode_access, false)
-		developer_button.name = "DeveloperModeButton"
-		developer_button.custom_minimum_size = Vector2(44, 40)
-		developer_button.size_flags_horizontal = Control.SIZE_SHRINK_END
-		developer_button.tooltip_text = "Developer Mode access — isolated testing tools"
+	var developer_button := action(heading, "</>", request_developer_mode_access, false)
+	developer_button.name = "DeveloperModeButton"
+	developer_button.custom_minimum_size = Vector2(40, 34)
+	developer_button.add_theme_font_size_override("font_size", 12)
+	developer_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	developer_button.tooltip_text = "Developer Mode access — tools are restricted to authorized debug builds"
+	Style.secondary(developer_button)
 	var details := row(rows)
 	details.name = "GameHeaderSecondaryRow"
 	details.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
@@ -1693,9 +1696,14 @@ func primary_navigation(parent: Node) -> Button:
 		mobile_balance_and_advance.name = "MobileBalanceAndAdvanceRow"
 		mobile_balance_and_advance.add_theme_constant_override("separation", 8)
 		_add_header_bank_balance(mobile_balance_and_advance, true)
-		var mobile_advance := stack(mobile_balance_and_advance, 1)
+		var mobile_advance: VBoxContainer
+		if header_mobile_wrap_layout:
+			mobile_advance = stack(rows, 1)
+			mobile_advance.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		else:
+			mobile_advance = stack(mobile_balance_and_advance, 1)
+			mobile_advance.size_flags_horizontal = Control.SIZE_SHRINK_END
 		mobile_advance.name = "MobileAdvanceDayGroup"
-		mobile_advance.size_flags_horizontal = Control.SIZE_SHRINK_END
 		advance_day_controls(mobile_advance, false)
 	_create_navigation_drawer()
 	return menu_button
@@ -1741,7 +1749,8 @@ func advance_day_controls(parent: Node, horizontal: bool = true) -> void:
 	if not horizontal:
 		var group_title := label("Advance Day", 11, Style.GOLD)
 		group_title.name = "AdvanceDayGroupLabel"
-		group_title.custom_minimum_size.x = 78
+		group_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		group_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		group_title.autowrap_mode = TextServer.AUTOWRAP_OFF
 		parent.add_child(group_title)
 		parent.move_child(group_title, 0)
@@ -1749,7 +1758,11 @@ func advance_day_controls(parent: Node, horizontal: bool = true) -> void:
 	for days in [1, 2, 7, 30]:
 		var button := action(controls, "+%d" % days, request_advance_days.bind(days), days == 1)
 		button.name = "AdvanceDays%d" % days
-		button.custom_minimum_size = Vector2(40 if size.x < 600.0 else 46, 40)
+		if size.x < 600.0:
+			button.custom_minimum_size = Vector2(40 if days == 30 else 34, 34)
+			button.add_theme_font_size_override("font_size", 12)
+		else:
+			button.custom_minimum_size = Vector2(46, 40)
 		button.size_flags_horizontal = Control.SIZE_SHRINK_END
 		button.disabled = day_advance_pending or day_advance_processing
 
@@ -1763,14 +1776,13 @@ func _update_header_text() -> void:
 	if is_instance_valid(header_bank_balance_value): _refresh_bank_balance()
 
 func request_developer_mode_access() -> void:
-	if not OS.is_debug_build(): return
 	if has_form_edits():
 		discard_form_then(_show_developer_access_dialog)
 		return
 	_show_developer_access_dialog()
 
 func _show_developer_access_dialog() -> void:
-	if not OS.is_debug_build() or is_instance_valid(confirmation) or is_instance_valid(developer_access_overlay): return
+	if is_instance_valid(confirmation) or is_instance_valid(developer_access_overlay): return
 	var overlay := ColorRect.new()
 	overlay.name = "DeveloperAccessDialog"
 	overlay.color = Color(0.0, 0.0, 0.0, 0.72)
@@ -1787,10 +1799,11 @@ func _show_developer_access_dialog() -> void:
 	var content := stack(panel, 10)
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_child(label("Developer Mode Access", 20, Style.GOLD))
-	content.add_child(label("Enter the authorized test access code to continue.", 14, Style.MUTED))
+	content.add_child(label("Developer tools are available only in authorized debug builds.", 14, Style.MUTED))
 	var code := LineEdit.new()
 	code.name = "DeveloperAccessCode"
 	code.placeholder_text = "Access code"
+	code.secret = true
 	code.custom_minimum_size.y = 44
 	code.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_child(code)
@@ -1813,12 +1826,17 @@ func _show_developer_access_dialog() -> void:
 	code.grab_focus()
 
 func _submit_developer_access(code: LineEdit, error_label: Label) -> void:
-	if not OS.is_debug_build() or not is_instance_valid(developer_access_overlay): return
+	if not is_instance_valid(developer_access_overlay): return
 	if code.text.strip_edges().to_upper() == "URTN":
-		var overlay := developer_access_overlay
-		developer_access_overlay = null
-		overlay.queue_free()
-		_open_developer_mode_now()
+		if OS.is_debug_build():
+			var overlay := developer_access_overlay
+			developer_access_overlay = null
+			overlay.queue_free()
+			_open_developer_mode_now()
+		else:
+			error_label.text = "Developer tools are disabled in this production build."
+			error_label.visible = true
+			code.clear()
 	else:
 		error_label.text = "Access code not recognized."
 		error_label.visible = true
@@ -1848,22 +1866,25 @@ func _cancel_advance_confirmation() -> void:
 	day_advance_pending = false
 
 func toggle_navigation_drawer() -> void:
-	if not is_instance_valid(navigation_overlay):
+	if not is_instance_valid(navigation_panel):
 		return
 	navigation_open = not navigation_open
-	navigation_overlay.visible = navigation_open
+	navigation_panel.visible = navigation_open
 	if navigation_open:
-		var active := navigation_drawer.find_child("Primary_" + primary_category(page), true, false) as Button
+		var page_scroller := find_child("GameContentScroll", true, false) as ScrollContainer
+		if page_scroller != null:
+			page_scroller.scroll_vertical = 0
+		var active := navigation_panel.find_child("Primary_" + primary_category(page), true, false) as Button
 		if active != null and active.is_inside_tree():
 			active.grab_focus()
 	else:
 		_restore_navigation_focus()
 
 func close_navigation_drawer(restore_focus: bool = true) -> void:
-	if not is_instance_valid(navigation_overlay):
+	if not is_instance_valid(navigation_panel):
 		return
 	navigation_open = false
-	navigation_overlay.visible = false
+	navigation_panel.visible = false
 	if restore_focus:
 		_restore_navigation_focus()
 
@@ -1878,10 +1899,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		close_navigation_drawer()
 		get_viewport().set_input_as_handled()
 		return
-	if event.keycode != KEY_TAB or not is_instance_valid(navigation_drawer):
+	if event.keycode != KEY_TAB or not is_instance_valid(navigation_panel):
 		return
 	var focusable: Array[Control] = []
-	for button in navigation_drawer.find_children("*", "Button", true, false):
+	for button in navigation_panel.find_children("*", "Button", true, false):
 		if button is Button and button.focus_mode != Control.FOCUS_NONE and button.is_visible_in_tree():
 			focusable.append(button)
 	if focusable.is_empty():
@@ -1899,47 +1920,24 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 func _create_navigation_drawer() -> void:
-	var overlay := ColorRect.new()
-	overlay.name = "NavigationOverlay"
-	overlay.color = Color(0.015, 0.025, 0.045, 0.76)
-	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	overlay.visible = false
-	overlay.gui_input.connect(func(event: InputEvent):
-		if event is InputEventMouseButton and event.pressed:
-			close_navigation_drawer()
-			get_viewport().set_input_as_handled()
-		elif event is InputEventScreenTouch and event.pressed:
-			close_navigation_drawer()
-			get_viewport().set_input_as_handled()
-	)
-	add_child(overlay)
-	navigation_overlay = overlay
 	var drawer := PanelContainer.new()
 	drawer.name = "PrimaryNavigation"
-	drawer.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	drawer.offset_left = 0
-	drawer.offset_top = 0
-	drawer.offset_bottom = 0
-	drawer.offset_right = clampf(size.x * 0.78, 260.0, 320.0)
+	drawer.visible = false
+	drawer.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	drawer.custom_minimum_size.x = clampf(size.x * 0.78, 260.0, 320.0)
 	drawer.mouse_filter = Control.MOUSE_FILTER_STOP
-	drawer.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 0, 16))
-	overlay.add_child(drawer)
-	navigation_drawer = drawer
+	drawer.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 9, 12))
+	navigation_panel = drawer
 	var content := stack(drawer, 10)
 	var heading := row(content)
 	var title := label("Navigation", 22)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(title)
 	var close_button := action(heading, "Close", close_navigation_drawer)
+	close_button.name = "PrimaryNavigationClose"
 	close_button.custom_minimum_size = Vector2(72, 44)
 	_apply_drawer_icon(close_button, DRAWER_ICON_PATHS.Close, 18)
-	var nav_scroll := ScrollContainer.new()
-	nav_scroll.name = "NavigationScroll"
-	nav_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	nav_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	content.add_child(nav_scroll)
-	var nav_list := stack(nav_scroll, 8)
+	var nav_list := stack(content, 8)
 	nav_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for index in NAV.size():
 		var target: String = NAV[index]
@@ -1977,6 +1975,11 @@ func _create_navigation_drawer() -> void:
 	main_menu_action.custom_minimum_size.y = 46
 	_apply_drawer_icon(main_menu_action, DRAWER_ICON_PATHS["Main Menu"], 20)
 	Style.secondary(main_menu_action)
+	if OS.is_debug_build() and developer_save_active:
+		var lock_action := action(content, "Lock Developer Mode", leave_developer_mode)
+		lock_action.name = "DrawerActionLockDeveloperMode"
+		lock_action.custom_minimum_size.y = 46
+		Style.secondary(lock_action)
 
 func _apply_drawer_icon(button: Button, path: String, max_width: int = 20) -> void:
 	var icon := load(path) as Texture2D
@@ -2025,8 +2028,7 @@ func secondary_navigation(parent: Node) -> void:
 
 func render() -> void:
 	edit_checks.clear()
-	navigation_overlay = null
-	navigation_drawer = null
+	navigation_panel = null
 	navigation_toggle = null
 	bank_balance_label = null
 	header_bank_balance_label = null
@@ -2120,6 +2122,8 @@ func render() -> void:
 	shell.add_child(scroll)
 	body = stack(scroll, 8)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if is_instance_valid(navigation_panel):
+		body.add_child(navigation_panel)
 	var right_space := Control.new()
 	right_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(right_space)
@@ -2261,7 +2265,7 @@ func developer_console() -> void:
 	if developer_save_active:
 		action(save_actions, "Reset DEV Scenario", func(): confirm_action("Reset DEV scenario?", "Discard the current isolated DEV scenario and create a fresh baseline?", "Reset DEV", func(): _run_dev_command("reset_dev", {"id": dev_record.id})))
 		action(save_actions, "Restore DEV Test Snapshot", func(): confirm_action("Restore DEV snapshot?", "Replace the current isolated DEV state with the original snapshot copied for testing?", "Restore Snapshot", func(): _run_dev_command("restore_dev_snapshot", {"id": dev_record.id})))
-		action(save_actions, "Exit Developer Mode", leave_developer_mode)
+		action(save_actions, "Lock Developer Mode", leave_developer_mode)
 	var saved: Array[Dictionary] = DevStore.list_tests()
 	if not saved.is_empty():
 		var saves_card := card("Saved DEV Companies")
