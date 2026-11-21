@@ -45,10 +45,12 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 	var panel: VBoxContainer = app.wide_card("Quick Purchase")
 	panel.name = "BuyInventoryWorkflow"
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var compact_landscape := app.size.y <= 450.0 and app.size.x > app.size.y
+	panel.add_theme_constant_override("separation", 4 if compact_landscape else 8)
 	var outer_panel := panel.get_parent() as PanelContainer
 	if outer_panel != null:
 		outer_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		outer_panel.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 12, 12))
+		outer_panel.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 12, 6 if compact_landscape else 12))
 	var row := HFlowContainer.new()
 	row.name = "BuyInventoryProgress"
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -58,7 +60,7 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 		var step := Label.new()
 		step.name = "BuyStep%d" % index
 		step.text = "%d  %s" % [index + 1, str(names[index])]
-		step.add_theme_font_size_override("font_size", 12)
+		step.add_theme_font_size_override("font_size", 10 if compact_landscape else 12)
 		step.add_theme_color_override("font_color", Style.GOLD if index == selected else Style.MUTED)
 		row.add_child(step)
 		if index < 4:
@@ -99,6 +101,9 @@ static func _footer_button(app: Control, title: String, callback: Callable, name
 	var button: Button = app.action(footer, title, callback, title == "Continue" or title == "Confirm Purchase")
 	button.name = name
 	button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	if app.size.y <= 450.0 and app.size.x > app.size.y:
+		button.custom_minimum_size.y = 38
+		button.add_theme_font_size_override("font_size", 12)
 	button.disabled = disabled
 	return button
 
@@ -123,15 +128,20 @@ static func show_categories(app: Control) -> void:
 	catalogue.add_child(grid)
 	for category in Catalog.CATEGORIES:
 		var name := str(category)
+		var category_product_count := Catalog.PRODUCTS.filter(func(product: Dictionary) -> bool:
+			return str(product.get("category", "")) == name
+		).size()
 		var card := Button.new()
 		card.name = "CatalogueCategory_" + _safe_name(name)
-		card.text = name
+		card.text = "%s\n%d products" % [name, category_product_count]
 		card.icon = load(_category_icon_path(name)) as Texture2D
 		card.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		card.add_theme_font_size_override("font_size", 13 if app.size.x < 600.0 else 14)
 		card.add_theme_constant_override("h_separation", 10)
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		card.custom_minimum_size = Vector2(0, 56)
+		card.custom_minimum_size = Vector2(0, 62)
+		card.tooltip_text = "%s · %d products" % [name, category_product_count]
 		card.focus_mode = Control.FOCUS_ALL
 		card.mouse_filter = Control.MOUSE_FILTER_STOP
 		var selected := int(app.catalog_category) == Catalog.CATEGORIES.find(name)

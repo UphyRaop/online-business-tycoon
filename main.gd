@@ -128,6 +128,7 @@ var ad_expanded_campaigns: Dictionary = {}
 var header_mobile_layout := false
 var header_compact_layout := false
 var header_mobile_wrap_layout := false
+var compact_landscape_layout := false
 var header_date_label: Label
 var header_title_label: Label
 var header_company_label: Label
@@ -481,6 +482,10 @@ func profit_color(cents: int) -> Color:
 func _update_responsive_layout() -> void:
 	_sync_gameplay_landscape_scale()
 	var viewport_width := size.x
+	var compact_landscape := size.y <= 450.0 and size.x > size.y
+	if compact_landscape != compact_landscape_layout:
+		render()
+		return
 	Market.update_responsive_layout(self)
 	for metric_row in find_children("ResponsiveMetric", "BoxContainer", true, false):
 		var responsive_metric := metric_row as BoxContainer
@@ -1626,9 +1631,9 @@ func primary_navigation(parent: Node) -> Button:
 	header.name = "UltraCompactGlobalHeader"
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	header.add_theme_stylebox_override("panel", Style.box(Color("#101A29"), Color("#34445B"), 9, 7))
+	header.add_theme_stylebox_override("panel", Style.box(Color("#101A29"), Color("#34445B"), 9, 5 if compact_landscape_layout else 7))
 	parent.add_child(header)
-	var rows := stack(header, 3)
+	var rows := stack(header, 2 if compact_landscape_layout else 3)
 	rows.name = "UltraCompactGlobalHeaderRows"
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rows.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
@@ -1638,7 +1643,7 @@ func primary_navigation(parent: Node) -> Button:
 	heading.add_theme_constant_override("separation", 5)
 	var menu_button := action(heading, "", toggle_navigation_drawer, false)
 	menu_button.name = "NavigationMenuButton"
-	menu_button.custom_minimum_size = Vector2(40, 40)
+	menu_button.custom_minimum_size = Vector2(36, 34) if compact_landscape_layout else Vector2(40, 40)
 	menu_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	menu_button.tooltip_text = "Open navigation menu"
 	_apply_drawer_icon(menu_button, DRAWER_ICON_PATHS.Menu, 20)
@@ -1657,7 +1662,7 @@ func primary_navigation(parent: Node) -> Button:
 	company_info.add_child(header_company_label)
 	var developer_button := action(heading, "</>", request_developer_mode_access, false)
 	developer_button.name = "DeveloperModeButton"
-	developer_button.custom_minimum_size = Vector2(40, 34)
+	developer_button.custom_minimum_size = Vector2(36, 30) if compact_landscape_layout else Vector2(40, 34)
 	developer_button.add_theme_font_size_override("font_size", 12)
 	developer_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	developer_button.tooltip_text = "Developer Mode unlocked for this active game" if developer_mode_unlocked else "Open Developer Mode for the active company"
@@ -1748,7 +1753,10 @@ func advance_day_controls(parent: Node, horizontal: bool = true) -> void:
 	for days in [1, 2, 7, 30]:
 		var button := action(controls, "+%d" % days, request_advance_days.bind(days), days == 1)
 		button.name = "AdvanceDays%d" % days
-		if size.x < 600.0:
+		if compact_landscape_layout:
+			button.custom_minimum_size = Vector2(38 if days == 30 else 32, 30)
+			button.add_theme_font_size_override("font_size", 11)
+		elif size.x < 600.0:
 			button.custom_minimum_size = Vector2(40 if days == 30 else 34, 34)
 			button.add_theme_font_size_override("font_size", 12)
 		else:
@@ -2053,7 +2061,8 @@ func secondary_navigation(parent: Node) -> void:
 	var scroller := ScrollContainer.new()
 	scroller.name = "SecondaryNavigationScroll"
 	scroller.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroller.custom_minimum_size.y = 46
+	var compact_landscape := size.y <= 450.0 and size.x > size.y
+	scroller.custom_minimum_size.y = 34 if compact_landscape else 46
 	scroller.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroller.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	parent.add_child(scroller)
@@ -2076,6 +2085,9 @@ func secondary_navigation(parent: Node) -> void:
 		var tab := secondary_tab(strip, title, route_secondary.bind(target), selected)
 		tab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		_style_secondary_navigation_tab(tab, selected)
+		if compact_landscape:
+			tab.custom_minimum_size.y = 32
+			tab.add_theme_font_size_override("font_size", 11)
 
 func render() -> void:
 	if sim != null: _sync_gameplay_landscape_scale()
@@ -2118,9 +2130,11 @@ func render() -> void:
 	add_child(margin)
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var viewport_width := size.x
+	var compact_landscape := size.y <= 450.0 and size.x > size.y
+	compact_landscape_layout = compact_landscape
 	var horizontal_margin := 20 if viewport_width >= 900.0 else 12
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, horizontal_margin if side in ["left", "right"] else 16)
+		margin.add_theme_constant_override("margin_" + side, horizontal_margin if side in ["left", "right"] else (7 if compact_landscape else 16))
 	var centering := HBoxContainer.new()
 	centering.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -2129,7 +2143,7 @@ func render() -> void:
 	var left_space := Control.new()
 	left_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(left_space)
-	page_shell = stack(centering, 12)
+	page_shell = stack(centering, 6 if compact_landscape else 12)
 	page_shell.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	page_shell.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
@@ -2157,7 +2171,7 @@ func render() -> void:
 			"Inbound Stock": page_title = "Inbound Stock"
 			"Supplier Relationships": page_title = "Supplier Relationships"
 			"Supplier Returns": page_title = "Supplier Returns"
-		var title := label(page_title, 26 if viewport_width < 600.0 else 30)
+		var title := label(page_title, 21 if compact_landscape else (26 if viewport_width < 600.0 else 30))
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		heading.add_child(title)
 	elif screen == "Title":
@@ -2183,7 +2197,7 @@ func render() -> void:
 	# can otherwise reopen a rebuilt step at the old action's vertical position.
 	scroll.follow_focus = page != "Market"
 	shell.add_child(scroll)
-	body = stack(scroll, 8)
+	body = stack(scroll, 4 if compact_landscape else 8)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if screen == "Game" and page == "Market":
 		# The Buy Inventory workflow owns its content scroll area and footer.
@@ -2208,7 +2222,7 @@ func render() -> void:
 	if screen == "Game":
 		secondary_navigation(body)
 	divider(body)
-	page_wide = stack(body, 12)
+	page_wide = stack(body, 6 if compact_landscape else 12)
 	page_wide.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if screen == "Game" and page == "Market":
 		page_wide.size_flags_vertical = Control.SIZE_EXPAND_FILL
