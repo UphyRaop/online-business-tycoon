@@ -30,7 +30,7 @@ Measurements come from source, not production browser inspection. The hierarchy 
 | Legacy CEO / identity prompt | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Browser coverage absent. |
 | Load Game | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Save/load regression coverage only. |
 | Save Game / overwrite dialog | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Browser visual/interaction audit absent. |
-| Settings | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Settings functional suite only. |
+| Settings | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Settings screenshot and route at 1366×768; Edit Display Settings action not tested. |
 | Dashboard | NOT TESTED | NOT TESTED | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Chromium capture; dashboard viewport screenshots cover the requested nine canvas sizes. This does not audit every dashboard action or smaller component. |
 | Global header / Advance Day | PARTIAL | PARTIAL | PARTIAL | NOT TESTED | NOT TESTED | PARTIAL | V4 tokens source-audited; header test passes. Full day-advance browser journeys at each size not run. |
 | Main navigation drawer | NOT TESTED | NOT TESTED | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Local open screenshot and Market route. Non-sticky behavior and all destinations not individually browser-tested in this pass. |
@@ -42,24 +42,24 @@ Measurements come from source, not production browser inspection. The hierarchy 
 | Market — Inbound Inventory | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Test suite covers shipment creation/persistence; browser purchase-to-inbound journey not completed. |
 | Market — Supplier Relationships | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Functional tests only. |
 | Market — Supplier Returns and history | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Functional tests only. |
-| Order — Customer Orders | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Regression coverage only. |
-| Order — Pre-orders | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Regression coverage only. |
-| Order — Returns & Service / Customers | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Customer-service regression coverage only. |
-| Business — Company Management | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | No browser audit. |
-| Business — Store Management / websites | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Functional regression coverage only. |
-| Business — Inventory Management / My Products | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Functional regression coverage only. |
+| Order — Customer Orders / Fulfilment | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Local Chromium screenshots and route navigation at 1366×768 and 390×844. Empty QA company had no orders; fulfilment controls not exercised. |
+| Order — Pre-orders | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Empty-state screenshot and route navigation at desktop and mobile; no preorder fixture to test actions. |
+| Order — Returns & Service / Customers | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Empty-state screenshot and route navigation at desktop and mobile; no cases/customer records to exercise. |
+| Business — Company Management | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Local screenshot, edit-details form opened, and wheel scroll reached Sell Company at 1366×768; no edit or sale submitted. Page heading is reduced by this update from 30 px to 26 px desktop (24 px mobile). |
+| Business — Store Management / websites | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Empty-state screenshot, Owned Stores: 0 verified, new-store form opened but not submitted. Desktop only. |
+| Business — Inventory Management / My Products | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Empty-state and Product Catalogue route screenshot at desktop. Populated editing/listing untested. |
 | Business — Store Listings | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Functional product/store coverage only. |
-| Business — Store Profitability | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Financial regression coverage only. |
-| Marketing — Overview | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Campaign suite only. |
-| Marketing — Ads Manager | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Campaign lifecycle suite only. |
+| Business — Store Profitability | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Empty-state and Store Management action screenshot at desktop. Profitability with a store remains untested. |
+| Marketing — Overview | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Local Chromium before/after screenshots and navigation at desktop. Combined CTR/CPM value wrapped before; separate labeled rows now keep CTR and currency-formatted CPM on one line each. No JavaScript error or document overflow after the fix. |
+| Marketing — Ads Manager | PARTIAL | PARTIAL | NOT TESTED | NOT TESTED | NOT TESTED | PARTIAL | Empty-list screenshot and navigation at desktop. Campaign creation/management not verified; fresh QA company had no stores/products. |
 | Marketing — Campaign Details | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Campaign suite only. |
-| Marketing — Ads Analytics | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Analytics regression coverage only. |
-| Finance — Dashboard | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Financial regression coverage only. |
-| Finance — Income Statement | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Reconciliation tests only. |
-| Finance — Balance Sheet | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Reconciliation tests only. |
-| Finance — Cash Flow Statement | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Reconciliation tests only. |
-| Finance — Expenses / Transactions | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Finance regression tests only. |
-| Profile / achievements | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | CEO profile functional suite only. |
+| Marketing — Ads Analytics | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Local route screenshot and mouse-wheel scroll at desktop; no completed days/campaigns, so populated charts and filters were unavailable. |
+| Finance — Dashboard | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Local empty-company screenshot and route click at desktop; financial regression suites cover reconciliation. |
+| Finance — Statements selector / Income Statement | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Statements screen and selector route opened; no completed activity. Population/value behavior not browser-tested. |
+| Finance — Balance Sheet | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Reconciliation tests only; statement selector option not independently selected in browser. |
+| Finance — Cash Flow Statement | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Reconciliation tests only; statement selector option not independently selected in browser. |
+| Finance — Expenses / Transactions | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Empty-state screenshot and mouse-wheel scroll at desktop; no transaction records for detail inspection. |
+| Profile / achievements | PARTIAL | PARTIAL | PARTIAL | PARTIAL | PARTIAL | PARTIAL | Profile screenshot at desktop and mobile, edit action opened on mobile, scroll works. Fresh profile uses default avatar; achievements and populated progression not deeply inspected. |
 | Profile — Avatar Crop | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Crop behavior suite only; native browser file picker not exercised. |
 | Company sale confirmation | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Company-sale functional suites only. |
 | Developer Mode access dialog | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED | PARTIAL | Existing local Chromium 390×844 cancel/reopen/unlock sequence and Godot UI coverage. Physical iOS keyboard remains untested by Codex. |
@@ -105,6 +105,9 @@ The attempted real browser journey used a disposable profile and reached real su
 - Previous product step: [before, 1366×768](market-product-before-1366.png)
 - Updated product step: [after, 1366×768](market-product-after-1366.png)
 - Updated selected product: [gold selected state, 1366×768](market-product-selected-after-1366.png)
+- Company Management: [before title-size refinement](routes/company-management-before-title-refinement.png) · [after title-size refinement](routes/company-management-after-title-1366.png)
+- Marketing Overview: [before KPI correction](routes/marketing-overview-before-kpi-fix-1366.png) · [after KPI correction](routes/marketing-overview-after-kpi-fix-1366.png)
+- Other local route captures: [Business, Marketing, Finance, Orders, Profile and Settings screenshots](routes/)
 
 All captures are local Release Web export screenshots, not production screenshots.
 

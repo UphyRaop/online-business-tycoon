@@ -99,3 +99,5 @@ This pass fixed the Product step's redundant nested action: each product card is
 - [Selected card](market-product-selected-after-1366.png)
 
 The same pass fixed the Developer Mode unlock double-tap window by guarding the keyboard-dismissal handoff; the focused UI suite and all 33 regression/UI suites passed. The full browser purchase, remaining screen-by-screen audit, physical iPhone Safari, and production browser inspection remain incomplete or blocked as shown in the matrix.
+
+The expanded local browser audit also found and corrected two visual inconsistencies: desktop/game page headings were 30 px, so they now use 26 px on desktop and 24 px on mobile; and the Marketing Overview's combined CTR/CPM value wrapped in the middle of a currency code, so CTR and CPM now appear as separately labeled single-line values. `phase4_ui_test` asserts the desktop heading size and KPI rows, and the final local Chromium capture shows both corrections. Additional route screenshots and coverage states are listed in [UI_UX_AUDIT.md](UI_UX_AUDIT.md).

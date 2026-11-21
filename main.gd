@@ -2207,7 +2207,7 @@ func render() -> void:
 			"Inbound Stock": page_title = "Inbound Stock"
 			"Supplier Relationships": page_title = "Supplier Relationships"
 			"Supplier Returns": page_title = "Supplier Returns"
-		var title := label(page_title, 21 if compact_landscape else (26 if viewport_width < 600.0 else 30))
+		var title := label(page_title, 21 if compact_landscape else (24 if viewport_width < 600.0 else 26))
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		heading.add_child(title)
 	elif screen == "Title":
@@ -2219,7 +2219,7 @@ func render() -> void:
 			"Advertising Analytics": "Ads Analytics", "Management": "Store Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
 		"CEO identity conflict": "Identity choice", "New Game": "Create a Game"}
 		var screen_heading := row(masthead)
-		var screen_title := label(titles.get(screen, screen), 30)
+		var screen_title := label(titles.get(screen, screen), 24 if viewport_width < 600.0 else 26)
 		screen_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		screen_heading.add_child(screen_title)
 		if not global_game_header:
