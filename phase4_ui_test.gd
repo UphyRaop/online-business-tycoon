@@ -86,8 +86,10 @@ func run() -> void:
 	expect(not app.day_advance_pending and app.sim.state.day == 1,
 		"Cancelling Advance Day leaves the simulation date and state unchanged")
 	var page_heading: Control = app.find_child("PageHeading", true, false)
-	expect(page_heading != null and controls(page_heading, "Button").is_empty(),
-		"Save Game and Main Menu are not duplicated beside the page heading")
+	var page_heading_label := controls(page_heading, "Label").front() as Label if page_heading != null and not controls(page_heading, "Label").is_empty() else null
+	expect(page_heading != null and controls(page_heading, "Button").is_empty()
+		and page_heading_label != null and page_heading_label.get_theme_font_size("font_size") == 26,
+		"Page heading stays within the compact 26 px desktop hierarchy without duplicating Save Game or Main Menu")
 	var content_scroll: ScrollContainer = app.find_child("GameContentScroll", true, false)
 	expect(content_scroll != null and not content_scroll.is_ancestor_of(game_date)
 		and not content_scroll.is_ancestor_of(header_balance) and content_scroll.is_ancestor_of(bank_balance),
@@ -105,9 +107,13 @@ func run() -> void:
 	app.sim.state.cash = current_cash
 	app.set_notice("")
 	expect(nav != null and not nav.is_visible_in_tree(), "Primary navigation drawer is hidden by default")
+	var nav_slot := app.find_child("PrimaryNavigationSlot", true, false) as Control
+	expect(nav_slot != null and nav.get_parent() == nav_slot and is_zero_approx(nav_slot.custom_minimum_size.y),
+		"Closed drawer content stays out of the page's measured height")
 	var navigation_state_before: Dictionary = app.sim.state.duplicate(true)
 	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()
-	expect(nav != null and nav.is_visible_in_tree(), "Hamburger opens Main Navigation in normal page flow")
+	expect(nav != null and nav.is_visible_in_tree() and nav_slot.custom_minimum_size.y > 0.0,
+		"Hamburger opens Main Navigation and expands its in-flow slot")
 	await _check_primary_tabs_within_viewport(Vector2i(1280, 720))
 	for tab in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]:
 		var route_name: String = "Order" if tab in ["Order", "Orders"] else tab
@@ -123,7 +129,8 @@ func run() -> void:
 	expect(action_label != null, "Drawer separates navigation from its action section")
 	var close_navigation: Button = nav.find_child("PrimaryNavigationClose", true, false)
 	if close_navigation != null: close_navigation.pressed.emit()
-	expect(not app.navigation_open and not nav.is_visible_in_tree(), "The in-flow navigation Close button collapses Main Navigation")
+	expect(not app.navigation_open and not nav.is_visible_in_tree() and is_zero_approx(nav_slot.custom_minimum_size.y),
+		"The in-flow navigation Close button collapses Main Navigation and releases its page height")
 	expect(content_scroll != null and content_scroll.is_ancestor_of(nav) and not nav.top_level,
 		"Main Navigation participates in the normal scroll layout rather than a viewport overlay")
 	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()
@@ -262,6 +269,12 @@ func run() -> void:
 		"Marketing secondary tabs use a gold selected underline, transparent inactive tabs, 44 px touch area, and visible keyboard focus")
 	press("Advertising")
 	expect(app.page == "Advertising" and has_label("Advertising Overview"), "Marketing Overview opens the advertising overview")
+	var ctr_value := app.find_child("CTRValue", true, false) as Label
+	var cpm_value := app.find_child("CPMValue", true, false) as Label
+	expect(app.find_child("MarketingKPI_CTR_CPM", true, false) != null and ctr_value != null and cpm_value != null
+		and ctr_value.text.ends_with("%") and cpm_value.text == app.money(0)
+		and ctr_value.autowrap_mode == TextServer.AUTOWRAP_OFF and cpm_value.autowrap_mode == TextServer.AUTOWRAP_OFF,
+		"CTR and CPM render as separate single-line values so currency codes cannot split across lines")
 	press("Ads Manager")
 	expect(app.screen == "Campaign Manager" or app.page == "Campaign Manager", "Ads Manager remains reachable")
 	press("Ads Analytics")

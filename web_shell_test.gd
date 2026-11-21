@@ -34,6 +34,16 @@ func _initialize() -> void:
 		and shell.contains("window.dispatchEvent(new Event('resize'))"), "Responsive preview resizes the real canvas frame and notifies Godot")
 	expect(shell.contains("body.dev-preview #preview-host { inset: var(--dev-toolbar-bottom, 48px) 0 0;")
 		and shell.contains("devToolbar.classList.remove('is-visible')") and shell.contains("devToolbar.hidden = true"), "Preview keeps its external toolbar accessible and restores the normal game view on exit")
+	expect(shell.contains("window.visualViewport") and shell.contains("visualViewport.addEventListener('resize', () => syncVisualViewport(true)")
+		and shell.contains("visualViewport.addEventListener('scroll', () => syncVisualViewport(true)"),
+		"Web shell follows iOS Safari visual viewport changes caused by keyboard and orientation")
+	expect(shell.contains("uses-visual-viewport") and shell.contains("Object.defineProperty(window, 'innerHeight'")
+		and shell.contains("visualViewportWindowSize.height")
+		and shell.contains("previewFrame.style.height = height + 'px'")
+		and shell.contains("previewFrame.style.height = style.height")
+		and shell.contains("if (notifyGodot) notifyGameResize();")
+		and shell.contains("window.addEventListener('resize', () => syncVisualViewport(false)"),
+		"Reduced visual viewport resizes the full Godot canvas frame and restores its original dimensions afterward")
 	expect(shell.contains("UR TRADE NETWORK</p>") and shell.contains("PRESENTS</p>")
 		and shell.contains("<span>ONLINE</span><span>BUSINESS</span><span>TYCOON</span>")
 		and shell.contains("A Game by <strong>UphyRaop</strong>"),

@@ -55,11 +55,10 @@ func run() -> void:
 	if category != null: category.pressed.emit()
 	click("Continue")
 	await process_frame
-	var product := app.find_child("CatalogueProduct_0", true, false)
-	expect(product != null and product.find_child("ChooseProduct_0", true, false) != null,
-		"Kitchen category displays its actual catalogue products")
-	var select_product := product.find_child("ChooseProduct_0", true, false) as Button
-	if select_product != null: select_product.pressed.emit()
+	var product := app.find_child("CatalogueProduct_0", true, false) as Button
+	expect(product != null and product.find_child("ChooseProduct_0", true, false) == null,
+		"Kitchen category displays selectable catalogue product cards without a redundant nested action")
+	if product != null: product.pressed.emit()
 	click("Continue")
 	await process_frame
 	expect(app.find_child("CompactSupplierList", true, false) != null and app.find_child("SupplierChoice%d" % int(Catalog.SUPPLIER_SELECTION_INDICES[0]), true, false) != null,

@@ -6,6 +6,7 @@ const Fulfillment = preload("res://fulfillment.gd")
 const Calendar = preload("res://game_calendar.gd")
 const SupplierCredit = preload("res://supplier_credit.gd")
 const Style = preload("res://corporate_theme.gd")
+const BuyInventoryScroll = preload("res://buy_inventory_scroll_container.gd")
 
 const CATALOG_STAGE_META := "product_catalog_stage"
 const SELECTED_SUPPLIER_META := "catalog_selected_supplier"
@@ -44,9 +45,13 @@ static func _refresh_step(app: Control) -> void:
 static func _step_header(app: Control, selected: int) -> VBoxContainer:
 	var panel: VBoxContainer = app.wide_card("Quick Purchase")
 	panel.name = "BuyInventoryWorkflow"
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var compact_landscape := app.size.y <= 450.0 and app.size.x > app.size.y
+	panel.add_theme_constant_override("separation", 4 if compact_landscape else 8)
 	var outer_panel := panel.get_parent() as PanelContainer
 	if outer_panel != null:
-		outer_panel.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 12, 12))
+		outer_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		outer_panel.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 12, 6 if compact_landscape else 12))
 	var row := HFlowContainer.new()
 	row.name = "BuyInventoryProgress"
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -56,7 +61,7 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 		var step := Label.new()
 		step.name = "BuyStep%d" % index
 		step.text = "%d  %s" % [index + 1, str(names[index])]
-		step.add_theme_font_size_override("font_size", 12)
+		step.add_theme_font_size_override("font_size", 10 if compact_landscape else 12)
 		step.add_theme_color_override("font_color", Style.GOLD if index == selected else Style.MUTED)
 		row.add_child(step)
 		if index < 4:
@@ -67,7 +72,58 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 			separator.add_theme_color_override("font_color", Style.MUTED)
 			row.add_child(separator)
 	panel.add_child(row)
-	return panel
+	var content_scroll := BuyInventoryScroll.new() as ScrollContainer
+	content_scroll.name = "BuyInventoryStepScroll"
+	content_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	content_scroll.follow_focus = true
+	content_scroll.mouse_force_pass_scroll_events = true
+	content_scroll.scroll_deadzone = 10
+	panel.add_child(content_scroll)
+	var content := VBoxContainer.new()
+	content.name = "BuyInventoryStepContent"
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 8)
+	content_scroll.add_child(content)
+	var footer := HBoxContainer.new()
+	footer.name = "BuyInventoryNavigationFooter"
+	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_theme_constant_override("separation", 8)
+	panel.add_child(footer)
+	app.set_meta("buy_inventory_footer", footer)
+	return content
+
+static func _allow_touch_scroll_bubbling(control: Control) -> void:
+	# Godot Web can deliver touch gestures as screen events rather than emulated
+	# mouse motion. Let passive descendants bubble those events to the workflow
+	# ScrollContainer while preserving each control's own click/focus behavior.
+	control.mouse_filter = Control.MOUSE_FILTER_PASS
+	for child in control.get_children():
+		if child is Control:
+			_allow_touch_scroll_bubbling(child as Control)
+
+static func _footer_button(app: Control, title: String, callback: Callable, name: String, disabled: bool = false) -> Button:
+	var footer := app.get_meta("buy_inventory_footer", null) as HBoxContainer
+	if footer == null:
+		return null
+	var button: Button = app.action(footer, title, callback, title == "Continue" or title == "Confirm Purchase")
+	button.name = name
+	button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	if app.size.y <= 450.0 and app.size.x > app.size.y:
+		button.custom_minimum_size.y = 38
+		button.add_theme_font_size_override("font_size", 12)
+	button.disabled = disabled
+	return button
+
+static func _footer_spacer(app: Control) -> void:
+	var footer := app.get_meta("buy_inventory_footer", null) as HBoxContainer
+	if footer == null:
+		return
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(spacer)
 
 static func show_categories(app: Control) -> void:
 	var workflow := _step_header(app, 0)
@@ -82,15 +138,20 @@ static func show_categories(app: Control) -> void:
 	catalogue.add_child(grid)
 	for category in Catalog.CATEGORIES:
 		var name := str(category)
+		var category_product_count := Catalog.PRODUCTS.filter(func(product: Dictionary) -> bool:
+			return str(product.get("category", "")) == name
+		).size()
 		var card := Button.new()
 		card.name = "CatalogueCategory_" + _safe_name(name)
-		card.text = name
+		card.text = "%s\n%d products" % [name, category_product_count]
 		card.icon = load(_category_icon_path(name)) as Texture2D
 		card.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		card.add_theme_font_size_override("font_size", 13 if app.size.x < 600.0 else 14)
 		card.add_theme_constant_override("h_separation", 10)
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		card.custom_minimum_size = Vector2(0, 56)
+		card.custom_minimum_size = Vector2(0, 62)
+		card.tooltip_text = "%s · %d products" % [name, category_product_count]
 		card.focus_mode = Control.FOCUS_ALL
 		card.mouse_filter = Control.MOUSE_FILTER_STOP
 		var selected := int(app.catalog_category) == Catalog.CATEGORIES.find(name)
@@ -111,19 +172,16 @@ static func show_categories(app: Control) -> void:
 			app.set_meta("buy_selected_product", -1)
 			app.refresh_view(true)
 		card.pressed.connect(choose_category)
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 8)
-	catalogue.add_child(actions)
-	var continue_button: Button = app.action(actions, "Continue", func():
+	_allow_touch_scroll_bubbling(workflow)
+	_footer_spacer(app)
+	_footer_button(app, "Continue", func():
 		if int(app.catalog_category) not in range(Catalog.CATEGORIES.size()):
 			app.set_notice("Select a category to continue.", true)
 			return
 		app.catalog_search = ""
 		app.set_meta(CATALOG_STAGE_META, "products")
 		_refresh_step(app)
-	, true)
-	continue_button.name = "ContinueBuyInventory"
-	continue_button.disabled = int(app.catalog_category) not in range(Catalog.CATEGORIES.size())
+	, "ContinueBuyInventory", int(app.catalog_category) not in range(Catalog.CATEGORIES.size()))
 
 static func show_products(app: Control) -> void:
 	var category_index := int(app.catalog_category)
@@ -138,6 +196,10 @@ static func show_products(app: Control) -> void:
 	catalogue.name = "CategoryProductsPanel"
 	var search: LineEdit = app.field(catalogue, "Search Products", app.catalog_search, 64)
 	search.name = "CatalogueProductSearch"
+	# The shared form field target is intentionally generous. This compact filter
+	# stays usable by touch while avoiding a large blank band above the product grid.
+	search.custom_minimum_size.y = 40
+	search.placeholder_text = "Search products"
 	var product_grid := GridContainer.new()
 	product_grid.name = "CategoryProductList"
 	product_grid.columns = _product_columns(app.size.x)
@@ -156,20 +218,29 @@ static func show_products(app: Control) -> void:
 		if matches: shown += 1
 		var suppliers := _available_suppliers(app.sim.state, product_index)
 		var starting_cost := _starting_landed_cost(app.sim.state, product_index, suppliers)
-		var card: VBoxContainer = _catalog_card(product_grid, str(product.name))
-		card.name = "CatalogueProduct_%d" % product_index
-		app.metric(card, "Available Suppliers", str(suppliers.size()))
-		app.metric(card, "Starting Landed Cost", app.money(starting_cost) if starting_cost > 0 else "Unavailable", Style.GOLD)
+		var card := _product_selection_card(product_grid, str(product.name), product_index)
+		var card_content := card.get_node("ProductCardContent") as VBoxContainer
+		app.metric(card_content, "Available Suppliers", str(suppliers.size()))
+		app.metric(card_content, "Starting Landed Cost", app.money(starting_cost) if starting_cost > 0 else "Unavailable", Style.GOLD)
 		var selected_product := product_index
 		var selected := int(app.get_meta("buy_selected_product", -1)) == product_index
-		var card_panel := card.get_parent() as PanelContainer
-		card_panel.add_theme_stylebox_override("panel", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12, 10))
+		card.add_theme_stylebox_override("normal", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12, 10))
+		card.add_theme_stylebox_override("hover", Style.box(Color("#25364D") if selected else Color("#203149"), Color("#D5AC61"), 12, 10))
+		card.add_theme_stylebox_override("pressed", Style.box(Color("#25364D"), Color("#D5AC61"), 12, 10))
+		card.add_theme_stylebox_override("focus", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61"), 12, 10))
+		card.add_theme_color_override("font_color", Style.TEXT)
+		card.add_theme_color_override("font_hover_color", Style.TEXT)
+		card.add_theme_color_override("font_pressed_color", Style.TEXT)
+		card.add_theme_color_override("font_focus_color", Style.TEXT)
+		card.tooltip_text = "Select %s" % str(product.name)
+		var selected_marker: Label = app.label("Selected" if selected else "Tap to select", 11, Style.GOLD if selected else Style.MUTED)
+		selected_marker.name = "ProductSelectionIndicator_%d" % product_index
+		card_content.add_child(selected_marker)
 		var select_product := func():
 			app.set_meta("buy_selected_product", selected_product)
 			app.refresh_view()
-		var choose_product: Button = app.action(card, "Select Product", select_product, selected)
-		choose_product.name = "ChooseProduct_%d" % product_index
-		card.get_parent().visible = matches
+		card.pressed.connect(select_product)
+		card.visible = matches
 		product_cards.append({"index": product_index, "card": card})
 	var empty: Label = app.label("No products match this search. Clear the search or return to Categories.", 14, Style.MUTED)
 	empty.name = "ProductCatalogueEmptyState"
@@ -185,20 +256,19 @@ static func show_products(app: Control) -> void:
 		for entry in product_cards:
 			var item: Dictionary = Catalog.PRODUCTS[int(entry.index)]
 			var matches := filter.is_empty() or str(item.name).to_lower().contains(filter) or str(item.id).to_lower().contains(filter)
-			(entry.card.get_parent() as Control).visible = matches
+			(entry.card as Control).visible = matches
 			if matches: visible_count += 1
 		empty.text = "No products match this search. Clear the search or return to Categories." if visible_count == 0 else ""
 		empty.visible = visible_count == 0
 		count_label.text = "%d products" % visible_count
 	)
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 8)
-	catalogue.add_child(actions)
-	app.action(actions, "Back", func():
+	_allow_touch_scroll_bubbling(workflow)
+	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "categories")
 		_refresh_step(app)
-	)
-	var continue_button: Button = app.action(actions, "Continue", func():
+	, "BackFromProducts")
+	_footer_spacer(app)
+	_footer_button(app, "Continue", func():
 		var selected_product := int(app.get_meta("buy_selected_product", -1))
 		if selected_product not in range(Catalog.PRODUCTS.size()) or str(Catalog.PRODUCTS[selected_product].category) != category:
 			app.set_notice("Select a product to continue.", true)
@@ -206,9 +276,7 @@ static func show_products(app: Control) -> void:
 		app.selected_product = selected_product
 		app.set_meta(CATALOG_STAGE_META, "suppliers")
 		_refresh_step(app)
-	, true)
-	continue_button.name = "ContinueBuyInventory"
-	continue_button.disabled = int(app.get_meta("buy_selected_product", -1)) not in range(Catalog.PRODUCTS.size())
+	, "ContinueBuyInventory", int(app.get_meta("buy_selected_product", -1)) not in range(Catalog.PRODUCTS.size()))
 
 static func show_supplier_workflow(app: Control) -> void:
 	app.set_meta(CATALOG_STAGE_META, "suppliers")
@@ -306,6 +374,35 @@ static func _catalog_card(parent: Node, title: String) -> VBoxContainer:
 	content.add_child(heading)
 	return content
 
+static func _product_selection_card(parent: Node, title: String, product_index: int) -> Button:
+	var button := Button.new()
+	button.name = "CatalogueProduct_%d" % product_index
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	button.custom_minimum_size.y = 112
+	button.focus_mode = Control.FOCUS_ALL
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.text = ""
+	var content := VBoxContainer.new()
+	content.name = "ProductCardContent"
+	content.anchor_right = 1.0
+	content.anchor_bottom = 1.0
+	content.offset_left = 10
+	content.offset_top = 8
+	content.offset_right = -10
+	content.offset_bottom = -8
+	content.add_theme_constant_override("separation", 6)
+	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var heading := Label.new()
+	heading.text = title
+	heading.add_theme_font_size_override("font_size", 16)
+	heading.add_theme_color_override("font_color", Style.TEXT)
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(heading)
+	button.add_child(content)
+	parent.add_child(button)
+	return button
+
 static func show_supplier_selection(app: Control) -> void:
 	var product := int(app.selected_product)
 	if product not in range(Catalog.PRODUCTS.size()):
@@ -350,23 +447,20 @@ static func show_supplier_selection(app: Control) -> void:
 		choose.name = "SelectSupplier%d" % supplier
 	if _available_suppliers(state, product).is_empty():
 		panel.add_child(app.label("No supplier platforms are currently unlocked for new purchases.", 13, Style.MUTED))
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 8)
-	panel.add_child(actions)
-	app.action(actions, "Back", func():
+	_allow_touch_scroll_bubbling(workflow)
+	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "products")
 		_refresh_step(app)
-	)
-	var next: Button = app.action(actions, "Continue", func():
+	, "BackFromSuppliers")
+	_footer_spacer(app)
+	_footer_button(app, "Continue", func():
 		var supplier := _supplier_for(app, product)
 		if supplier not in _available_suppliers(state, product):
 			app.set_notice("Select an available supplier to continue.", true)
 			return
 		app.set_meta(CATALOG_STAGE_META, "negotiate")
 		_refresh_step(app)
-	, true)
-	next.name = "ContinueBuyInventory"
-	next.disabled = selected not in _available_suppliers(state, product)
+	, "ContinueBuyInventory", selected not in _available_suppliers(state, product))
 
 static func show_negotiation(app: Control) -> void:
 	var product := int(app.selected_product)
@@ -461,20 +555,19 @@ static func show_negotiation(app: Control) -> void:
 	var active_quote := Supply.quote(state, product, supplier)
 	if int(active_quote.get("discount", 0)) > 0 and int(active_quote.get("expires", 0)) >= int(state.day) and not bool(app.get_meta("buy_negotiation_ready_%d_%d" % [product, supplier], false)):
 		result_label.text = "Existing firm supplier offer: %s per unit, valid through %s. Submit the request to review it." % [app.money(int(active_quote.cost)), Calendar.format(int(active_quote.expires))]
-	var next: Button = app.action(panel, "Continue", func():
+	_allow_touch_scroll_bubbling(workflow)
+	_footer_button(app, "Back", func():
+		app.set_meta(CATALOG_STAGE_META, "suppliers")
+		_refresh_step(app)
+	, "BackToSuppliers")
+	_footer_spacer(app)
+	_footer_button(app, "Continue", func():
 		if not bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false)):
 			app.set_notice("Accept the current supplier terms before continuing.", true)
 			return
 		app.set_meta(CATALOG_STAGE_META, "summary")
 		_refresh_step(app)
-	, true)
-	next.name = "ContinueBuyInventory"
-	next.disabled = not bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false))
-	var back: Button = app.action(panel, "Back", func():
-		app.set_meta(CATALOG_STAGE_META, "suppliers")
-		_refresh_step(app)
-	)
-	back.name = "BackToSuppliers"
+	, "ContinueBuyInventory", not bool(app.get_meta("buy_negotiation_accepted_%d_%d" % [product, supplier], false)))
 
 static func show_purchase_summary(app: Control) -> void:
 	var product := int(app.selected_product)
@@ -514,6 +607,8 @@ static func show_purchase_summary(app: Control) -> void:
 		app.refresh_view()
 	)
 	minus.name = "PurchaseQuantityMinus"
+	minus.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	minus.custom_minimum_size = Vector2(48, 44)
 	var quantity_field := PanelContainer.new()
 	quantity_field.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 8, 6))
 	quantity_field.add_child(current_quantity)
@@ -523,6 +618,8 @@ static func show_purchase_summary(app: Control) -> void:
 		app.refresh_view()
 	, true)
 	plus.name = "PurchaseQuantityPlus"
+	plus.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	plus.custom_minimum_size = Vector2(48, 44)
 	minus.disabled = quantity <= int(provider.minimum)
 	plus.disabled = quantity >= Supply.maximum_order_quantity(supplier)
 	var increments := HBoxContainer.new()
@@ -546,8 +643,13 @@ static func show_purchase_summary(app: Control) -> void:
 	if not bool(eligibility.eligible): payment.set_item_text(1, "Supplier Credit · Unavailable")
 	var max_row := HBoxContainer.new()
 	max_row.name = "BuyMaxControls"
+	max_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	max_row.add_theme_constant_override("separation", 8)
 	panel.add_child(max_row)
 	app.metric(max_row, "Available Bank Balance", app.money(int(state.cash)))
+	var balance_metric := max_row.get_child(max_row.get_child_count() - 1) as Control
+	if balance_metric != null:
+		balance_metric.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var max_button: Button = app.action(max_row, "Buy Max", func():
 		var active_offer := Supply.quote(state, product, supplier)
 		var freight := Catalog.inbound_freight(state.country, supplier)
@@ -564,7 +666,9 @@ static func show_purchase_summary(app: Control) -> void:
 		app.refresh_view()
 	, true)
 	max_button.name = "BuyMaximumUnits"
-	max_button.custom_minimum_size.y = 40
+	max_button.custom_minimum_size.y = 44
+	max_button.custom_minimum_size.x = 132
+	max_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	var breakdown := Supply.purchase_breakdown(state, product, supplier, quantity)
 	var quote_panel: VBoxContainer = _nested_card(panel, "Purchase Summary")
 	quote_panel.name = "GeneratedPurchaseQuotation"
@@ -588,14 +692,12 @@ static func show_purchase_summary(app: Control) -> void:
 	var error := str(breakdown.get("error", ""))
 	if not error.is_empty(): quote_panel.add_child(app.label(error, 12, Style.RED))
 	var funds_available := int(state.cash) >= purchase_total if payment.selected == 0 else (bool(eligibility.eligible) and int(eligibility.available) >= purchase_total)
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 8)
-	panel.add_child(actions)
-	app.action(actions, "Back", func():
+	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "negotiate")
 		app.refresh_view()
-	)
-	var confirm: Button = app.action(actions, "Confirm Purchase", func():
+	, "BackFromPurchaseSummary")
+	_footer_spacer(app)
+	_footer_button(app, "Confirm Purchase", func():
 		if bool(app.get_meta("supplier_purchase_processing", false)): return
 		var latest := Supply.purchase_breakdown(state, product, supplier, quantity)
 		if not str(latest.get("error", "")).is_empty():
@@ -642,13 +744,12 @@ static func show_purchase_summary(app: Control) -> void:
 			app.persist("Purchase order placed. The new shipment is open in Inbound Stock.")
 			app.refresh_view(true)
 		)
-	, true)
-	confirm.name = "ConfirmPurchaseOrder"
-	confirm.disabled = not error.is_empty() or not funds_available or quantity < int(provider.minimum)
+	, "ConfirmPurchaseOrder", not error.is_empty() or not funds_available or quantity < int(provider.minimum))
 	payment.item_selected.connect(func(index: int):
 		app.set_meta(payment_key, index)
 		app.refresh_view()
 	)
+	_allow_touch_scroll_bubbling(workflow)
 	var buymax := max_button
 	buymax.disabled = int(state.cash) < (goods_unit + freight_unit) * int(provider.minimum)
 

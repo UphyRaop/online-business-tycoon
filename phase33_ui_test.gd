@@ -44,9 +44,12 @@ func run() -> void:
 	press_category("Electronics")
 	await process_frame
 	var search: LineEdit = app.find_child("CatalogueProductSearch", true, false)
-	var product_card: Control = app.find_child("CatalogueProduct_1", true, false)
+	var product_card := app.find_child("CatalogueProduct_1", true, false) as Button
 	expect(search != null and product_card != null and has_label("Starting Landed Cost") and has_label("Available Suppliers"),
 		"Selecting a category shows product cards with live supplier count and landed cost")
+	expect(product_card != null and app.find_child("ChooseProduct_1", true, false) == null
+		and app.find_child("ProductSelectionIndicator_1", true, false) != null,
+		"Product selection is shown on a compact full-card button without a redundant nested action")
 	if search != null:
 		search.text = "no-such-product"
 		search.text_changed.emit(search.text)
@@ -56,14 +59,8 @@ func run() -> void:
 		search.text = "Wireless Earbuds"
 		search.text_changed.emit(search.text)
 	if product_card != null:
-		var choose_product: Button
-		for candidate in controls(product_card, "Button"):
-			if candidate.text == "Select Product":
-				choose_product = candidate
-				break
-		if choose_product != null:
-			choose_product.pressed.emit()
-			press("Continue")
+		product_card.pressed.emit()
+		press("Continue")
 	await process_frame
 	await process_frame
 	expect(app.selected_product == 1 and app.find_child("CompactSupplierList", true, false) != null,
