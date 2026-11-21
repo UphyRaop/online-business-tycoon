@@ -50,8 +50,9 @@ func run() -> void:
 	var original_state: Dictionary = app.sim.state.duplicate(true)
 	var original_profile: Dictionary = app.ceo_profile.duplicate(true)
 	expect(button(app, "DeveloperModeButton") != null, "Developer Mode is available in gameplay on desktop")
-	for viewport in [Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(768, 1024),
-		Vector2i(1024, 768), Vector2i(390, 844), Vector2i(375, 667), Vector2i(844, 390), Vector2i(667, 375)]:
+	for viewport in [Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(1024, 768),
+		Vector2i(768, 1024), Vector2i(390, 844), Vector2i(375, 667), Vector2i(360, 800),
+		Vector2i(844, 390), Vector2i(667, 375)]:
 		root.size = viewport
 		app.size = viewport
 		app.render()
@@ -74,13 +75,19 @@ func run() -> void:
 			expect(scroll != null and scroll.vertical_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO,
 				"Access dialog can scroll vertically when the mobile keyboard reduces available height at %s" % viewport)
 		if input != null:
+			input.grab_focus()
 			input.text = "invalid"
 			unlock.pressed.emit()
 			var error_label := app.find_child("DeveloperAccessError", true, false) as Label
 			expect(error_label != null and error_label.visible and not app.developer_mode_unlocked,
 				"Incorrect access code is rejected at %s" % viewport)
+			var state_before_cancel: Dictionary = app.sim.state.duplicate(true)
 			button(app, "DeveloperAccessCancel").pressed.emit()
 			await process_frame
+			expect(not is_instance_valid(input) or app.get_viewport().gui_get_focus_owner() != input,
+				"Cancel releases focus from the access code field at %s" % viewport)
+			expect(app.sim.state == state_before_cancel and app.active_game_id == "normal-source",
+				"Cancel leaves the active game and save untouched at %s" % viewport)
 		app.size = Vector2i(1366, 768)
 		app.render()
 		await process_frame
@@ -88,6 +95,7 @@ func run() -> void:
 	var code := app.find_child("DeveloperAccessCode", true, false) as LineEdit
 	code.text = "URTN"
 	button(app, "DeveloperAccessUnlock").pressed.emit()
+	await create_timer(0.4).timeout
 	await process_frame
 	expect(app.developer_mode_unlocked and app.developer_console_visible and app.screen == "Game"
 		and app.page == "Dashboard", "URTN opens Developer Mode over the currently active gameplay screen")
@@ -135,7 +143,9 @@ func run() -> void:
 	app.developer_console_visible = true
 	app.render()
 	await process_frame
-	for viewport in [Vector2i(390, 844), Vector2i(375, 667), Vector2i(360, 800), Vector2i(844, 390)]:
+	for viewport in [Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(1024, 768),
+		Vector2i(768, 1024), Vector2i(390, 844), Vector2i(375, 667), Vector2i(360, 800),
+		Vector2i(844, 390), Vector2i(667, 375)]:
 		app.size = viewport
 		app.render()
 		await process_frame

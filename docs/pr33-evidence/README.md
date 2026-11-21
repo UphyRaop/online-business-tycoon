@@ -46,3 +46,44 @@ The repository contains matrix captures at 1920×1080, 1366×768, 1024×768, 768
 ## Acceptance status
 
 This is **partial verification**, not full game-wide acceptance. Main Menu, registration, Dashboard, navigation, Market, and the listed Buy Inventory steps received browser inspection. Remaining game screens (products/listings, stores/websites, suppliers/returns, advertising/analytics, Orders/Fulfilment/Customers, Finance, Company Management, Settings, Save/Load actions, all Developer Mode tools) still need individual browser visual and interaction audits. The Confirm and Inbound steps need browser screenshots and an end-to-end browser purchase. Physical iPhone Safari was not available and was not tested.
+
+## Developer Mode iPhone keyboard and viewport correction
+
+### Confirmed causes
+
+1. The Web shell sized `#preview-host` and the game frame to `100vh`, while Godot's Web canvas resize policy follows the browser window. iOS Safari reduces the **visual viewport** for its software keyboard without reliably changing the layout viewport used by those dimensions. The canvas and Godot controls could therefore remain taller than the visible Safari area. The first viewport proxy also showed that resizing only the outer host clipped the still-full-height inner game frame; the final correction resizes both.
+2. Cancel and successful unlock removed the focused Godot `LineEdit` without releasing the GUI focus owner or blurring the Web IME element. This could leave the keyboard and reduced viewport active. The dialog also deferred `ensure_control_visible()` for both the input and Unlock button; the latter could scroll the focused input away as the keyboard appeared.
+3. The large lower area is not a hidden-control region. The console panel uses `SIZE_SHRINK_BEGIN` inside a vertical `ScrollContainer`; when the active category has less content than the viewport, the panel remains content-sized and unused canvas is visible. On longer categories, scrolling reaches the final control. No feature or explanation was removed to fill that space.
+
+### Corrections
+
+- The custom Web shell now follows `window.visualViewport` on resize/scroll, resizes the preview host, game frame, and browser dimensions used by Godot, and restores their exact prior styles/descriptors when the viewport returns. Standard resize events do not recursively dispatch additional resize events.
+- Cancel, Escape, and successful unlock explicitly release Godot GUI focus, hide the virtual keyboard, and blur the browser IME element. Successful unlock waits for the Web keyboard-dismissal resize transition before measuring/opening the current-session console. The input is the only control auto-scrolled into view on dialog open.
+- Mobile Developer Mode uses compact Close/Lock controls, 42px minimum action heights, smaller content gaps and bottom padding. All tool categories and descriptions remain present. The access-dialog actions stay in one row at normal phone widths and stack only below 340px.
+- Regression coverage now includes all nine requested viewport sizes for the access dialog and console, Cancel focus release and active-game preservation, scrollability, and Web-shell visual viewport resizing/restoration.
+
+### Verification
+
+- Godot 4.7.2: all 33 regression/UI suites passed; Release Web export completed. `dashboard_inventory_test` still prints the pre-existing resource-leak shutdown warning (2 CanvasItem RIDs, 8 ObjectDB instances, 1 resource), with zero assertion failures.
+- Chromium loaded the local Release Web export and completed the access-dialog cancel/reopen, successful `URTN` entry, console open, mouse-wheel scroll to the bottom Finance action, scroll back, and Close sequence at 390×844. The IME focus element was `BODY` after Cancel and `CANVAS` after closing the console. No JavaScript errors or document overflow were observed.
+- A visual-viewport proxy reduced 390×844 to 390×480 and verified that both the canvas and game host resized to 480px, then returned to 844px. This validates the shell's resize path; it does not emulate an iOS keyboard.
+- Browser viewport captures at 1920×1080, 1366×768, 1024×768, 768×1024, 390×844, 375×667, 360×800, 844×390, and 667×375 showed the canvas matching the viewport and zero document-level horizontal overflow. The automated Godot console suite also checked layout, scroll range and final actions at all nine sizes.
+- Physical iPhone 15 Pro Max screenshots were described by the user as real-device evidence, but image files were not available to this workspace for annotation or direct comparison. Physical iPhone Safari keyboard testing remains **NOT TESTED by Codex**.
+
+### New evidence
+
+- [Developer Mode dashboard, mobile 390×844](dev-mode-dashboard-390x844.png)
+- [Access dialog, mobile 390×844](dev-mode-access-mobile.png)
+- [Dashboard after Cancel and focus release](dev-mode-access-cancelled-mobile.png)
+- [Access dialog with reduced-viewport proxy](dev-mode-access-mobile-viewport-reduced.png)
+- [Access dialog after viewport restoration](dev-mode-access-mobile-viewport-restored.png)
+- [Developer console, mobile top](dev-mode-console-mobile-top.png)
+- [Developer console, scrolled to final Finance action](dev-mode-console-mobile-scrolled.png)
+- [Gameplay after closing Developer Mode](dev-mode-console-closed-mobile.png)
+- [Gameplay viewport, 1920×1080](dev-mode-dashboard-1920x1080.png) · [1366×768](dev-mode-dashboard-1366x768.png) · [1024×768](dev-mode-dashboard-1024x768.png)
+- [Gameplay viewport, 768×1024](dev-mode-dashboard-768x1024.png) · [390×844](dev-mode-dashboard-390x844.png) · [375×667](dev-mode-dashboard-375x667.png) · [360×800](dev-mode-dashboard-360x800.png)
+- [Gameplay viewport, 844×390](dev-mode-dashboard-844x390.png) · [667×375](dev-mode-dashboard-667x375.png)
+
+### Audit status remains partial
+
+This correction does not complete PR #33's full UI/UX audit. Buy Inventory Confirm/Inbound browser screenshots and a browser-driven purchase remain outstanding. The remaining game screens listed in the acceptance checklist above still need individual browser visual and interaction review. Production verification is still blocked by the previously recorded Chromium `ERR_CERT_AUTHORITY_INVALID`; certificate checks were not bypassed. No merge or deployment was performed.

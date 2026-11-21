@@ -1817,8 +1817,8 @@ func _show_developer_access_dialog() -> void:
 	var content := stack(panel, 10)
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.custom_minimum_size.x = maxf(0.0, panel.custom_minimum_size.x - 28.0)
-	content.add_child(label("Developer Mode Access", 20, Style.GOLD))
-	content.add_child(label("Developer tools apply to the active company in this browser. This public convenience code is not owner authentication.", 14, Style.MUTED))
+	content.add_child(label("Developer Mode Access", 18, Style.GOLD))
+	content.add_child(label("Tools apply to this browser’s active company. The public access code is a convenience, not owner authentication.", 13, Style.MUTED))
 	if sim == null:
 		content.add_child(label("Load an existing company before unlocking Developer Mode.", 14, Style.GOLD))
 	var code := LineEdit.new()
@@ -1833,10 +1833,11 @@ func _show_developer_access_dialog() -> void:
 	error_label.name = "DeveloperAccessError"
 	error_label.visible = not developer_access_error_message.is_empty()
 	content.add_child(error_label)
-	var actions: BoxContainer = VBoxContainer.new() if size.x < 430.0 else row(content)
+	var actions: BoxContainer = VBoxContainer.new() if size.x < 340.0 else row(content)
 	if actions.get_parent() == null: content.add_child(actions)
 	actions.add_theme_constant_override("separation", 6)
 	var cancel := action(actions, "Cancel", func():
+		_dismiss_developer_access_input(code)
 		developer_access_overlay = null
 		developer_access_code_value = ""
 		developer_access_error_message = ""
@@ -1856,22 +1857,32 @@ func _show_developer_access_dialog() -> void:
 	code.text_changed.connect(func(value: String): developer_access_code_value = value)
 	code.grab_focus()
 	call_deferred("_ensure_developer_access_focus", code)
-	call_deferred("_ensure_developer_access_focus", unlock)
 
 func _ensure_developer_access_focus(control: Control) -> void:
 	if not is_instance_valid(control) or not control.is_inside_tree(): return
 	var scroll := developer_access_overlay.find_child("DeveloperAccessScroll", true, false) as ScrollContainer if is_instance_valid(developer_access_overlay) else null
 	if scroll != null: scroll.ensure_control_visible(control)
 
+func _dismiss_developer_access_input(code: LineEdit) -> void:
+	if is_instance_valid(code):
+		code.release_focus()
+	# The pressed Cancel/Unlock button may have acquired focus after the LineEdit.
+	# Clear the viewport focus owner too, so neither control retains the IME.
+	get_viewport().gui_release_focus()
+	DisplayServer.virtual_keyboard_hide()
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("if (document.activeElement && document.activeElement.blur) document.activeElement.blur();")
+
 func _submit_developer_access(code: LineEdit, error_label: Label) -> void:
 	if not is_instance_valid(developer_access_overlay): return
 	if code.text.strip_edges().to_upper() == "URTN" and sim != null and not active_game_id.is_empty():
 		var overlay := developer_access_overlay
+		_dismiss_developer_access_input(code)
 		developer_access_overlay = null
 		developer_access_code_value = ""
 		developer_access_error_message = ""
 		overlay.queue_free()
-		_open_developer_mode_now()
+		_open_developer_mode_after_keyboard()
 	else:
 		error_label.text = "Load an existing company first." if code.text.strip_edges().to_upper() == "URTN" else "Access code not recognized."
 		error_label.visible = true
@@ -1881,6 +1892,14 @@ func _submit_developer_access(code: LineEdit, error_label: Label) -> void:
 			var scroll := developer_access_overlay.find_child("DeveloperAccessScroll", true, false) as ScrollContainer
 			if scroll != null: scroll.ensure_control_visible(error_label)
 			code.grab_focus()
+
+func _open_developer_mode_after_keyboard() -> void:
+	# iOS Safari animates visualViewport back to its full height after blur.
+	# Let the Web shell and Godot resize before measuring the active game view.
+	if OS.has_feature("web"):
+		await get_tree().create_timer(0.35).timeout
+	if sim != null and not active_game_id.is_empty():
+		_open_developer_mode_now()
 
 func request_advance_days(days: int) -> void:
 	if sim == null or day_advance_pending or day_advance_processing or days not in [1, 2, 7, 30]:
@@ -1946,8 +1965,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if event.keycode == KEY_ESCAPE:
 		if is_instance_valid(developer_access_overlay):
+			var code := developer_access_overlay.find_child("DeveloperAccessCode", true, false) as LineEdit
+			_dismiss_developer_access_input(code)
 			developer_access_overlay.queue_free()
 			developer_access_overlay = null
+			developer_access_code_value = ""
+			developer_access_error_message = ""
+			_developer_restore_original_scale()
+			developer_original_viewport = Vector2i.ZERO
 		elif developer_console_visible:
 			close_developer_console()
 		elif navigation_open:
@@ -2330,12 +2355,12 @@ func _show_developer_console_overlay() -> void:
 	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 12, 12))
 	center.add_child(panel)
-	var content := stack(panel, 8)
+	var mobile_console := size.x < 600.0 or (size.x > size.y and size.y < 600.0)
+	var content := stack(panel, 6 if mobile_console else 8)
 	content.name = "DeveloperConsoleContent"
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	var heading: BoxContainer
-	var mobile_console := size.x < 600.0 or (size.x > size.y and size.y < 600.0)
 	var title := label("Developer Mode", 18 if mobile_console else 22, Style.GOLD)
 	title.name = "DeveloperConsoleTitle"
 	if mobile_console: title.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -2352,6 +2377,10 @@ func _show_developer_console_overlay() -> void:
 	var lock_button := action(heading, "Lock", leave_developer_mode)
 	lock_button.name = "DeveloperConsoleLock"
 	lock_button.custom_minimum_size.x = 74
+	if mobile_console:
+		heading.alignment = BoxContainer.ALIGNMENT_END
+		close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+		lock_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	content.add_child(label("Active player session · %s · %s · Day %d · %s" % [
 		str(sim.state.get("owner", "Entrepreneur")), str(sim.state.get("company", "Company")),
 		int(sim.state.get("day", 1)), money(int(sim.state.get("cash", 0)))], 13, Style.MUTED))
@@ -2434,12 +2463,12 @@ func _show_developer_console_overlay() -> void:
 			"Scenarios": _dev_scenario_controls(tools)
 	var bottom_padding := Control.new()
 	bottom_padding.name = "DeveloperConsoleBottomPadding"
-	bottom_padding.custom_minimum_size.y = 16
+	bottom_padding.custom_minimum_size.y = 12 if mobile_console else 16
 	bottom_padding.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(bottom_padding)
 	_set_developer_scroll_passthrough(center)
 	for tool_button in overlay.find_children("*", "Button", true, false):
-		(tool_button as Button).custom_minimum_size.y = 46
+		(tool_button as Button).custom_minimum_size.y = 42 if mobile_console else 44
 	developer_overlay = overlay
 	add_child(overlay)
 
