@@ -6,6 +6,7 @@ const Fulfillment = preload("res://fulfillment.gd")
 const Calendar = preload("res://game_calendar.gd")
 const SupplierCredit = preload("res://supplier_credit.gd")
 const Style = preload("res://corporate_theme.gd")
+const BuyInventoryScroll = preload("res://buy_inventory_scroll_container.gd")
 
 const CATALOG_STAGE_META := "product_catalog_stage"
 const SELECTED_SUPPLIER_META := "catalog_selected_supplier"
@@ -71,7 +72,7 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 			separator.add_theme_color_override("font_color", Style.MUTED)
 			row.add_child(separator)
 	panel.add_child(row)
-	var content_scroll := ScrollContainer.new()
+	var content_scroll := BuyInventoryScroll.new() as ScrollContainer
 	content_scroll.name = "BuyInventoryStepScroll"
 	content_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -93,6 +94,15 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 	panel.add_child(footer)
 	app.set_meta("buy_inventory_footer", footer)
 	return content
+
+static func _allow_touch_scroll_bubbling(control: Control) -> void:
+	# Godot Web can deliver touch gestures as screen events rather than emulated
+	# mouse motion. Let passive descendants bubble those events to the workflow
+	# ScrollContainer while preserving each control's own click/focus behavior.
+	control.mouse_filter = Control.MOUSE_FILTER_PASS
+	for child in control.get_children():
+		if child is Control:
+			_allow_touch_scroll_bubbling(child as Control)
 
 static func _footer_button(app: Control, title: String, callback: Callable, name: String, disabled: bool = false) -> Button:
 	var footer := app.get_meta("buy_inventory_footer", null) as HBoxContainer
@@ -162,6 +172,7 @@ static func show_categories(app: Control) -> void:
 			app.set_meta("buy_selected_product", -1)
 			app.refresh_view(true)
 		card.pressed.connect(choose_category)
+	_allow_touch_scroll_bubbling(workflow)
 	_footer_spacer(app)
 	_footer_button(app, "Continue", func():
 		if int(app.catalog_category) not in range(Catalog.CATEGORIES.size()):
@@ -251,6 +262,7 @@ static func show_products(app: Control) -> void:
 		empty.visible = visible_count == 0
 		count_label.text = "%d products" % visible_count
 	)
+	_allow_touch_scroll_bubbling(workflow)
 	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "categories")
 		_refresh_step(app)
@@ -435,6 +447,7 @@ static func show_supplier_selection(app: Control) -> void:
 		choose.name = "SelectSupplier%d" % supplier
 	if _available_suppliers(state, product).is_empty():
 		panel.add_child(app.label("No supplier platforms are currently unlocked for new purchases.", 13, Style.MUTED))
+	_allow_touch_scroll_bubbling(workflow)
 	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "products")
 		_refresh_step(app)
@@ -542,6 +555,7 @@ static func show_negotiation(app: Control) -> void:
 	var active_quote := Supply.quote(state, product, supplier)
 	if int(active_quote.get("discount", 0)) > 0 and int(active_quote.get("expires", 0)) >= int(state.day) and not bool(app.get_meta("buy_negotiation_ready_%d_%d" % [product, supplier], false)):
 		result_label.text = "Existing firm supplier offer: %s per unit, valid through %s. Submit the request to review it." % [app.money(int(active_quote.cost)), Calendar.format(int(active_quote.expires))]
+	_allow_touch_scroll_bubbling(workflow)
 	_footer_button(app, "Back", func():
 		app.set_meta(CATALOG_STAGE_META, "suppliers")
 		_refresh_step(app)
@@ -735,6 +749,7 @@ static func show_purchase_summary(app: Control) -> void:
 		app.set_meta(payment_key, index)
 		app.refresh_view()
 	)
+	_allow_touch_scroll_bubbling(workflow)
 	var buymax := max_button
 	buymax.disabled = int(state.cash) < (goods_unit + freight_unit) * int(provider.minimum)
 

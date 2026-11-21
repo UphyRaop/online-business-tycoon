@@ -226,6 +226,37 @@ func run() -> void:
 	var quantity_label := app.find_child("SupplierPurchaseQuantity", true, false) as Label
 	expect(quantity_label != null and quantity_label.horizontal_alignment == HORIZONTAL_ALIGNMENT_CENTER,
 		"Quantity is displayed centered in the compact navy quantity field")
+	root.size = Vector2i(390, 844)
+	app.size = Vector2(390, 844)
+	app.refresh_view()
+	await settle_frames()
+	var mobile_purchase_scroll := app.find_child("BuyInventoryStepScroll", true, false) as ScrollContainer
+	if mobile_purchase_scroll != null:
+		var touch_start := mobile_purchase_scroll.get_global_rect().position + Vector2(50, 100)
+		var touch_down := InputEventScreenTouch.new()
+		touch_down.index = 1
+		touch_down.position = touch_start
+		touch_down.pressed = true
+		root.push_input(touch_down)
+		var touch_drag := InputEventScreenDrag.new()
+		touch_drag.index = 1
+		touch_drag.position = touch_start + Vector2(0, -120)
+		touch_drag.relative = Vector2(0, -120)
+		root.push_input(touch_drag)
+		await settle_frames()
+		expect(mobile_purchase_scroll.scroll_vertical > 0,
+			"Touchscreen drag scrolls the mobile purchase summary without moving its footer")
+		var touch_up := InputEventScreenTouch.new()
+		touch_up.index = 1
+		touch_up.position = touch_drag.position
+		touch_up.pressed = false
+		root.push_input(touch_up)
+	else:
+		expect(false, "Mobile purchase summary exposes a touch-scroll container")
+	root.size = Vector2i(1280, 720)
+	app.size = Vector2(1280, 720)
+	app.refresh_view()
+	await settle_frames()
 	var quantity_minus := app.find_child("PurchaseQuantityMinus", true, false) as Button
 	var quantity_plus := app.find_child("PurchaseQuantityPlus", true, false) as Button
 	var buy_max := app.find_child("BuyMaximumUnits", true, false) as Button
