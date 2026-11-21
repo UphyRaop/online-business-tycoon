@@ -185,6 +185,10 @@ static func show_products(app: Control) -> void:
 	catalogue.name = "CategoryProductsPanel"
 	var search: LineEdit = app.field(catalogue, "Search Products", app.catalog_search, 64)
 	search.name = "CatalogueProductSearch"
+	# The shared form field target is intentionally generous. This compact filter
+	# stays usable by touch while avoiding a large blank band above the product grid.
+	search.custom_minimum_size.y = 40
+	search.placeholder_text = "Search products"
 	var product_grid := GridContainer.new()
 	product_grid.name = "CategoryProductList"
 	product_grid.columns = _product_columns(app.size.x)
@@ -203,20 +207,29 @@ static func show_products(app: Control) -> void:
 		if matches: shown += 1
 		var suppliers := _available_suppliers(app.sim.state, product_index)
 		var starting_cost := _starting_landed_cost(app.sim.state, product_index, suppliers)
-		var card: VBoxContainer = _catalog_card(product_grid, str(product.name))
-		card.name = "CatalogueProduct_%d" % product_index
-		app.metric(card, "Available Suppliers", str(suppliers.size()))
-		app.metric(card, "Starting Landed Cost", app.money(starting_cost) if starting_cost > 0 else "Unavailable", Style.GOLD)
+		var card := _product_selection_card(product_grid, str(product.name), product_index)
+		var card_content := card.get_node("ProductCardContent") as VBoxContainer
+		app.metric(card_content, "Available Suppliers", str(suppliers.size()))
+		app.metric(card_content, "Starting Landed Cost", app.money(starting_cost) if starting_cost > 0 else "Unavailable", Style.GOLD)
 		var selected_product := product_index
 		var selected := int(app.get_meta("buy_selected_product", -1)) == product_index
-		var card_panel := card.get_parent() as PanelContainer
-		card_panel.add_theme_stylebox_override("panel", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12, 10))
+		card.add_theme_stylebox_override("normal", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12, 10))
+		card.add_theme_stylebox_override("hover", Style.box(Color("#25364D") if selected else Color("#203149"), Color("#D5AC61"), 12, 10))
+		card.add_theme_stylebox_override("pressed", Style.box(Color("#25364D"), Color("#D5AC61"), 12, 10))
+		card.add_theme_stylebox_override("focus", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61"), 12, 10))
+		card.add_theme_color_override("font_color", Style.TEXT)
+		card.add_theme_color_override("font_hover_color", Style.TEXT)
+		card.add_theme_color_override("font_pressed_color", Style.TEXT)
+		card.add_theme_color_override("font_focus_color", Style.TEXT)
+		card.tooltip_text = "Select %s" % str(product.name)
+		var selected_marker: Label = app.label("Selected" if selected else "Tap to select", 11, Style.GOLD if selected else Style.MUTED)
+		selected_marker.name = "ProductSelectionIndicator_%d" % product_index
+		card_content.add_child(selected_marker)
 		var select_product := func():
 			app.set_meta("buy_selected_product", selected_product)
 			app.refresh_view()
-		var choose_product: Button = app.action(card, "Select Product", select_product, selected)
-		choose_product.name = "ChooseProduct_%d" % product_index
-		card.get_parent().visible = matches
+		card.pressed.connect(select_product)
+		card.visible = matches
 		product_cards.append({"index": product_index, "card": card})
 	var empty: Label = app.label("No products match this search. Clear the search or return to Categories.", 14, Style.MUTED)
 	empty.name = "ProductCatalogueEmptyState"
@@ -232,7 +245,7 @@ static func show_products(app: Control) -> void:
 		for entry in product_cards:
 			var item: Dictionary = Catalog.PRODUCTS[int(entry.index)]
 			var matches := filter.is_empty() or str(item.name).to_lower().contains(filter) or str(item.id).to_lower().contains(filter)
-			(entry.card.get_parent() as Control).visible = matches
+			(entry.card as Control).visible = matches
 			if matches: visible_count += 1
 		empty.text = "No products match this search. Clear the search or return to Categories." if visible_count == 0 else ""
 		empty.visible = visible_count == 0
@@ -348,6 +361,35 @@ static func _catalog_card(parent: Node, title: String) -> VBoxContainer:
 	heading.add_theme_font_size_override("font_size", 18)
 	content.add_child(heading)
 	return content
+
+static func _product_selection_card(parent: Node, title: String, product_index: int) -> Button:
+	var button := Button.new()
+	button.name = "CatalogueProduct_%d" % product_index
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	button.custom_minimum_size.y = 112
+	button.focus_mode = Control.FOCUS_ALL
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.text = ""
+	var content := VBoxContainer.new()
+	content.name = "ProductCardContent"
+	content.anchor_right = 1.0
+	content.anchor_bottom = 1.0
+	content.offset_left = 10
+	content.offset_top = 8
+	content.offset_right = -10
+	content.offset_bottom = -8
+	content.add_theme_constant_override("separation", 6)
+	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var heading := Label.new()
+	heading.text = title
+	heading.add_theme_font_size_override("font_size", 16)
+	heading.add_theme_color_override("font_color", Style.TEXT)
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(heading)
+	button.add_child(content)
+	parent.add_child(button)
+	return button
 
 static func show_supplier_selection(app: Control) -> void:
 	var product := int(app.selected_product)

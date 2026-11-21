@@ -94,6 +94,7 @@ var dev_command_callback: JavaScriptObject
 var dev_api := DevAPI.new()
 var developer_mode_unlocked := false
 var developer_console_visible := false
+var developer_access_unlock_pending := false
 var developer_changes_active := false
 var developer_original_viewport := Vector2i.ZERO
 var developer_preview_active := false
@@ -1774,6 +1775,10 @@ func _update_header_text() -> void:
 	if is_instance_valid(header_bank_balance_value): _refresh_bank_balance()
 
 func request_developer_mode_access() -> void:
+	# A successful Web unlock waits briefly for Safari to dismiss its keyboard.
+	# Ignore repeat taps during that transition rather than opening a second dialog.
+	if developer_access_unlock_pending:
+		return
 	if developer_mode_unlocked:
 		developer_console_visible = true
 		_developer_sync_landscape_scale()
@@ -1877,6 +1882,7 @@ func _submit_developer_access(code: LineEdit, error_label: Label) -> void:
 	if not is_instance_valid(developer_access_overlay): return
 	if code.text.strip_edges().to_upper() == "URTN" and sim != null and not active_game_id.is_empty():
 		var overlay := developer_access_overlay
+		developer_access_unlock_pending = true
 		_dismiss_developer_access_input(code)
 		developer_access_overlay = null
 		developer_access_code_value = ""
@@ -1898,8 +1904,13 @@ func _open_developer_mode_after_keyboard() -> void:
 	# Let the Web shell and Godot resize before measuring the active game view.
 	if OS.has_feature("web"):
 		await get_tree().create_timer(0.35).timeout
+	else:
+		# Keep the transition asynchronous in native/debug builds so the same
+		# re-entry guard covers the close/open handoff there as well.
+		await get_tree().process_frame
 	if sim != null and not active_game_id.is_empty():
 		_open_developer_mode_now()
+	developer_access_unlock_pending = false
 
 func request_advance_days(days: int) -> void:
 	if sim == null or day_advance_pending or day_advance_processing or days not in [1, 2, 7, 30]:

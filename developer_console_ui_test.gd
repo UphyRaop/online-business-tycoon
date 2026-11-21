@@ -95,8 +95,16 @@ func run() -> void:
 	var code := app.find_child("DeveloperAccessCode", true, false) as LineEdit
 	code.text = "URTN"
 	button(app, "DeveloperAccessUnlock").pressed.emit()
+	expect(app.developer_access_unlock_pending and app.developer_access_overlay == null,
+		"Successful unlock enters a pending handoff after removing the access dialog")
+	app.request_developer_mode_access()
+	expect(app.developer_access_unlock_pending and app.developer_access_overlay == null
+		and not app.developer_console_visible,
+		"A repeated header tap during keyboard dismissal cannot create a second dialog or console")
 	await create_timer(0.4).timeout
 	await process_frame
+	expect(not app.developer_access_unlock_pending,
+		"Pending access guard clears after the console opens")
 	expect(app.developer_mode_unlocked and app.developer_console_visible and app.screen == "Game"
 		and app.page == "Dashboard", "URTN opens Developer Mode over the currently active gameplay screen")
 	expect(app.sim.state == original_state and app.active_game_id == "normal-source"

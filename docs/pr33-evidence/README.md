@@ -87,3 +87,15 @@ This is **partial verification**, not full game-wide acceptance. Main Menu, regi
 ### Audit status remains partial
 
 This correction does not complete PR #33's full UI/UX audit. Buy Inventory Confirm/Inbound browser screenshots and a browser-driven purchase remain outstanding. The remaining game screens listed in the acceptance checklist above still need individual browser visual and interaction review. Production verification is still blocked by the previously recorded Chromium `ERR_CERT_AUTHORITY_INVALID`; certificate checks were not bypassed. No merge or deployment was performed.
+
+## Latest PR #33 standardization pass
+
+The route-by-route inventory, V4 design tokens, responsive evidence, and explicit coverage states are recorded in [UI_UX_AUDIT.md](UI_UX_AUDIT.md). This remains an incomplete audit: only rows with concrete browser evidence are marked partial/pass, and all unvisited destinations remain NOT TESTED.
+
+This pass fixed the Product step's redundant nested action: each product card is now one full-card selectable button with a selected state. Supplier count and indicative landed cost remain visible. The search field was reduced to a 40 px minimum height and given a placeholder. A local Chromium run confirmed the selected gold border and no JavaScript errors at 1366×768. Before/after evidence:
+
+- [Before](market-product-before-1366.png)
+- [After](market-product-after-1366.png)
+- [Selected card](market-product-selected-after-1366.png)
+
+The same pass fixed the Developer Mode unlock double-tap window by guarding the keyboard-dismissal handoff; the focused UI suite and all 33 regression/UI suites passed. The full browser purchase, remaining screen-by-screen audit, physical iPhone Safari, and production browser inspection remain incomplete or blocked as shown in the matrix.

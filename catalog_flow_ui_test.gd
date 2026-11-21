@@ -161,16 +161,20 @@ func run() -> void:
 		"Continue opens the Product step with persistent Back and Continue controls")
 	verify_purchase_footer("Product")
 	var search := app.find_child("CatalogueProductSearch", true, false) as LineEdit
-	var first_card := app.find_child("CatalogueProduct_0", true, false) as Control
+	var first_card := app.find_child("CatalogueProduct_0", true, false) as Button
 	expect(first_card != null and has_label("Starting Landed Cost") and has_label("Available Suppliers"),
 		"Product cards show catalogue product and indicative supplier pricing information")
+	expect(first_card != null and first_card.find_child("ChooseProduct_0", true, false) == null
+		and app.find_child("ProductSelectionIndicator_0", true, false) != null
+		and search != null and search.custom_minimum_size.y <= 40.0,
+		"Compact product cards use a full-card selection target, visible selection state, and a compact search field")
 	if search != null:
 		search.text = "no-such-product"
 		search.text_changed.emit(search.text)
 		expect(first_card != null and not first_card.is_visible_in_tree(), "Product category filters its products")
 		search.text = "Portable Blender"
 		search.text_changed.emit(search.text)
-	click("Select Product", first_card)
+	await click_control(first_card)
 	click("Continue")
 	await settle_frames()
 	expect(app.selected_product == 0 and str(app.get_meta(Market.CATALOG_STAGE_META, "")) == "suppliers"
