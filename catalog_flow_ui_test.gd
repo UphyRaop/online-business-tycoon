@@ -226,6 +226,23 @@ func run() -> void:
 	var quantity_label := app.find_child("SupplierPurchaseQuantity", true, false) as Label
 	expect(quantity_label != null and quantity_label.horizontal_alignment == HORIZONTAL_ALIGNMENT_CENTER,
 		"Quantity is displayed centered in the compact navy quantity field")
+	var quantity_minus := app.find_child("PurchaseQuantityMinus", true, false) as Button
+	var quantity_plus := app.find_child("PurchaseQuantityPlus", true, false) as Button
+	var buy_max := app.find_child("BuyMaximumUnits", true, false) as Button
+	var quantity_row := app.find_child("PurchaseQuantityControls", true, false) as HBoxContainer
+	var buy_max_row := app.find_child("BuyMaxControls", true, false) as HBoxContainer
+	var balance_metric: Control = buy_max_row.get_child(0) as Control if buy_max_row != null and buy_max_row.get_child_count() > 0 else null
+	expect(quantity_minus != null and quantity_plus != null and quantity_row != null
+		and is_equal_approx(quantity_minus.custom_minimum_size.x, 48.0)
+		and is_equal_approx(quantity_plus.custom_minimum_size.x, 48.0)
+		and quantity_minus.size_flags_horizontal == Control.SIZE_SHRINK_CENTER
+		and quantity_plus.size_flags_horizontal == Control.SIZE_SHRINK_CENTER
+		and buy_max != null and is_equal_approx(buy_max.custom_minimum_size.x, 132.0)
+		and is_equal_approx(buy_max.custom_minimum_size.y, 44.0)
+		and buy_max_row != null and balance_metric != null
+		and (buy_max_row.size_flags_horizontal & Control.SIZE_EXPAND_FILL) != 0
+		and (balance_metric.size_flags_horizontal & Control.SIZE_EXPAND_FILL) != 0,
+		"Quantity stepper uses compact fixed-width touch targets and Buy Max stays compact")
 	for increment in [10, 100, 1000]:
 		expect(app.find_child("QuantityIncrement%d" % int(increment), true, false) != null,
 			"Quantity increment ×%d is available" % int(increment))

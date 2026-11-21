@@ -36,10 +36,10 @@ Measurements come from source, not production browser inspection. The hierarchy 
 | Main navigation drawer | NOT TESTED | NOT TESTED | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Local open screenshot and Market route. Non-sticky behavior and all destinations not individually browser-tested in this pass. |
 | Market — Buy Inventory Category | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | PARTIAL | PARTIAL | Browser category selection in desktop and touch-style mobile; existing captures cover category on desktop/mobile/short landscape. |
 | Market — Buy Inventory Product | PARTIAL | PARTIAL | N/A (no product icon is rendered in this screen) | PASS (real mouse full-card selection) | PARTIAL | PARTIAL | Targeted correction in this update: full-card selection, selected state, supplier count and landed cost preserved; search minimum reduced 48→40 px and placeholder added. Desktop before/after captures included. Full device-by-device review remains open. |
-| Market — Buy Inventory Supplier | NOT TESTED | NOT TESTED | NOT TESTED | PARTIAL | NOT TESTED | NOT TESTED | Local browser reached and captured supplier selection; purchase flow incomplete. |
-| Market — Buy Inventory Negotiate | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Existing workflow UI suite verifies supplier negotiation rules. Current browser journey did not reach it. |
-| Market — Buy Inventory Confirm | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Existing suite verifies purchase calculations/validation; browser interaction not completed. |
-| Market — Inbound Inventory | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Test suite covers shipment creation/persistence; browser purchase-to-inbound journey not completed. |
+| Market — Buy Inventory Supplier | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Disposable local Chromium journey selected the actual AliExpress supplier for Wireless Earbuds and continued to negotiation at 1366×768; supplier economics are covered by functional suites. No all-viewport review. |
+| Market — Buy Inventory Negotiate | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Browser requested a 0% offer and continued; this exercises the real interaction but not discounted acceptance/rejection outcomes. Negotiation model is covered by suites. Screenshot: [negotiation](buy-negotiate-browser-1366.png). |
+| Market — Buy Inventory Confirm | PARTIAL | PARTIAL | NOT TESTED | PASS (one real purchase) | PARTIAL | PARTIAL | Disposable Chromium journey reached Confirm, submitted quantity 1, and created one shipment. Footer remained visible. The Available Bank Balance metric expands into remaining width beside compact Buy Max. Before/after: [before](buy-confirm-before-stepper-fix-1366.png) · [after](buy-confirm-after-stepper-fix-1366.png). Desktop only. |
+| Market — Inbound Inventory | PARTIAL | PARTIAL | NOT TESTED | PASS (opened from purchase) | PARTIAL | PARTIAL | Purchase transitioned to Inbound Stock and displayed PO-0001, product, supplier, quantity, ETA, possible delay, MYR 33.65 total, In Transit status, progress, and New Inventory Purchase. Screenshot: [inbound shipment](buy-inbound-after-stepper-fix-1366.png). Save/reload and other viewports not tested. |
 | Market — Supplier Relationships | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Functional tests only. |
 | Market — Supplier Returns and history | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | Functional tests only. |
 | Order — Customer Orders / Fulfilment | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | PARTIAL | PARTIAL | Local Chromium screenshots and route navigation at 1366×768 and 390×844. Empty QA company had no orders; fulfilment controls not exercised. |
@@ -79,7 +79,7 @@ Measurements come from source, not production browser inspection. The hierarchy 
 | Viewport | Existing local evidence | This task's actual browser interaction | Result |
 |---|---|---|---|
 | 1920×1080 | Dashboard capture; viewport/canvas sizing check | No complete route walk | NOT TESTED |
-| 1366×768 | Main menu, registration, dashboard, drawer, Market; updated product before/after | New registration → Dashboard → Market → category → product select; no purchase | PARTIAL |
+| 1366×768 | Main menu, registration, dashboard, drawer, Market; updated product and Confirm/Inbound screenshots | New registration → Dashboard → Market → Category → Product → AliExpress → 0% negotiation → Confirm → one purchase → Inbound Stock | PARTIAL |
 | 1024×768 | Dashboard capture and canvas sizing check | No complete route walk | NOT TESTED |
 | 768×1024 | Dashboard capture and canvas sizing check | No complete route walk | NOT TESTED |
 | 390×844 | Dashboard and Developer Mode captures; Buy Inventory category capture | Earlier category touch interaction; product flow not repeated | PARTIAL |
@@ -90,7 +90,7 @@ Measurements come from source, not production browser inspection. The hierarchy 
 
 Canvas dimensions matched the requested viewport and the document had no horizontal overflow in the existing viewport captures. That verifies shell sizing only; it does not establish that every page is visually or interactively correct at those sizes. Chromium mobile emulation is not physical iPhone Safari.
 
-The attempted real browser journey used a disposable profile and reached real supplier data after fresh company registration. The runner stopped before negotiation, purchase confirmation, inbound inventory, save/reload, and other gameplay routes. Those paths remain unverified in browser even where functional suites pass.
+The actual purchase journey used a disposable browser context and fresh company data. It completed one 1366×768 purchase through Inbound Stock, with one shipment and no JavaScript error or document-level horizontal overflow. Discounted negotiation outcomes, purchase save/reload, and all-screen/all-viewport journeys remain unverified.
 
 ## Findings and corrections in this update
 
@@ -98,6 +98,7 @@ The attempted real browser journey used a disposable profile and reached real su
 |---|---|---|---|
 | Product selection required a large nested “Select Product” button despite the entire card being the natural selection target. | Medium | Product card is now one keyboard/touch/mouse-accessible Button; selected card gets the gold outline and “Selected” state. Supplier count and landed cost remain shown. | `catalog_flow_ui_test`, `phase33_ui_test`, `phase1_ui_test`, and `supplier_workflow_ui_test`; Chromium click selected the product and displayed the gold outline. |
 | Product search reserved a tall shared-form input and showed no placeholder. | Low | Search field minimum height is 40 px; added “Search products” placeholder. | Product UI test verifies the compact field; Chromium before/after screenshots show shorter field. |
+| Confirm step's Buy Max balance metric was compressed beside its action. | Medium | The Buy Max row and balance metric now claim remaining horizontal width; Buy Max keeps a fixed compact touch size. | `catalog_flow_ui_test` asserts expansion flags; fresh browser screenshot shows the full label, MYR balance, and compact button. A new browser purchase reached Inbound Stock. |
 | Successful Developer Mode unlock had a short re-entry window while waiting for the Web keyboard to dismiss. | Medium | A pending-unlock guard blocks another access dialog until the console handoff completes. No unlock code, game state, cheats or save behavior changed. | `developer_console_ui_test`: immediate second access request is rejected, pending state clears, active profile remains current. |
 
 ## Screenshot evidence

@@ -593,6 +593,8 @@ static func show_purchase_summary(app: Control) -> void:
 		app.refresh_view()
 	)
 	minus.name = "PurchaseQuantityMinus"
+	minus.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	minus.custom_minimum_size = Vector2(48, 44)
 	var quantity_field := PanelContainer.new()
 	quantity_field.add_theme_stylebox_override("panel", Style.box(Color("#101B2E"), Color("#35465D"), 8, 6))
 	quantity_field.add_child(current_quantity)
@@ -602,6 +604,8 @@ static func show_purchase_summary(app: Control) -> void:
 		app.refresh_view()
 	, true)
 	plus.name = "PurchaseQuantityPlus"
+	plus.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	plus.custom_minimum_size = Vector2(48, 44)
 	minus.disabled = quantity <= int(provider.minimum)
 	plus.disabled = quantity >= Supply.maximum_order_quantity(supplier)
 	var increments := HBoxContainer.new()
@@ -625,8 +629,13 @@ static func show_purchase_summary(app: Control) -> void:
 	if not bool(eligibility.eligible): payment.set_item_text(1, "Supplier Credit · Unavailable")
 	var max_row := HBoxContainer.new()
 	max_row.name = "BuyMaxControls"
+	max_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	max_row.add_theme_constant_override("separation", 8)
 	panel.add_child(max_row)
 	app.metric(max_row, "Available Bank Balance", app.money(int(state.cash)))
+	var balance_metric := max_row.get_child(max_row.get_child_count() - 1) as Control
+	if balance_metric != null:
+		balance_metric.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var max_button: Button = app.action(max_row, "Buy Max", func():
 		var active_offer := Supply.quote(state, product, supplier)
 		var freight := Catalog.inbound_freight(state.country, supplier)
@@ -643,7 +652,9 @@ static func show_purchase_summary(app: Control) -> void:
 		app.refresh_view()
 	, true)
 	max_button.name = "BuyMaximumUnits"
-	max_button.custom_minimum_size.y = 40
+	max_button.custom_minimum_size.y = 44
+	max_button.custom_minimum_size.x = 132
+	max_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	var breakdown := Supply.purchase_breakdown(state, product, supplier, quantity)
 	var quote_panel: VBoxContainer = _nested_card(panel, "Purchase Summary")
 	quote_panel.name = "GeneratedPurchaseQuotation"
