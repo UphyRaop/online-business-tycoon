@@ -358,11 +358,13 @@ func set_developer_preview(name: String) -> Dictionary:
 		_update_responsive_layout()
 	return {"ok": true, "code": "preview_selected", "message": "%s portrait preview selected." % name.capitalize(), "width": selected.x, "height": selected.y}
 
-func label(text: String, font_size: int = 16, color: Color = Style.TEXT) -> Label:
+func label(text: String, font_size: int = Style.FONT_BODY, color: Color = Style.TEXT) -> Label:
 	var node := Label.new()
 	node.text = text
 	node.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	node.add_theme_font_size_override("font_size", Style.normalized_font_size(font_size, large_text))
+	# Assign the standard token here. The render pass applies Large Text once;
+	# dialogs/overlays created after render run the same pass when attached.
+	node.add_theme_font_size_override("font_size", Style.normalized_font_size(font_size))
 	node.add_theme_color_override("font_color", color)
 	return node
 
@@ -400,7 +402,7 @@ func action(parent: Node, title: String, callback: Callable, accent: bool = fals
 func secondary_tab(parent: Node, title: String, callback: Callable, selected: bool = false) -> Button:
 	var node := action(parent, title, callback)
 	node.custom_minimum_size = Vector2(120, 44)
-	node.add_theme_font_size_override("font_size", Style.normalized_font_size(Style.FONT_BUTTON, large_text))
+	node.add_theme_font_size_override("font_size", Style.FONT_BUTTON)
 	Style.secondary(node)
 	node.add_theme_stylebox_override("normal", Style.box(Style.SURFACE, Style.GOLD if selected else Style.LINE, 8, 7))
 	node.add_theme_stylebox_override("hover", Style.box(Style.SURFACE.lightened(0.08), Style.GOLD if selected else Style.LINE.lightened(0.16), 8, 7))
@@ -489,7 +491,7 @@ func _create_card(parent: Node, title: String) -> VBoxContainer:
 		page_cards.append(surface)
 	var content := stack(surface)
 	if not title.is_empty():
-		content.add_child(label(title, 20))
+		content.add_child(label(title, Style.FONT_HEADING))
 	return content
 
 func divider(parent: Node) -> void:
@@ -504,11 +506,11 @@ func metric(parent: Node, caption: String, value: String, color: Color = Style.T
 	if OS.has_feature("web"):
 		line.mouse_filter = Control.MOUSE_FILTER_PASS
 	parent.add_child(line)
-	var name := label(caption, 15, Style.MUTED)
+	var name := label(caption, Style.FONT_BODY, Style.MUTED)
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	line.add_child(name)
-	var amount := label(value, 15, color)
+	var amount := label(value, Style.FONT_HEADING, color)
 	amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	amount.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	amount.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -903,7 +905,7 @@ var identity_record: Dictionary = {}
 
 func complete_identity() -> void:
 	var profile := card(identity_record.state.company)
-	profile.add_child(label("Enter your entrepreneur name to continue this saved company.", 15, Style.MUTED))
+	profile.add_child(label("Enter your entrepreneur name to continue this saved company.", Style.FONT_BODY, Style.MUTED))
 	var owner := field(profile, "Entrepreneur name", "")
 	action(profile, "Save and continue", func():
 		var name := owner.text.strip_edges()
@@ -969,7 +971,7 @@ func resolve_identity_conflict(use_existing_identity: bool) -> void:
 
 func identity_conflict_screen() -> void:
 	var view := card("CEO identity needs your choice")
-	view.add_child(label("This older company save names %s, while this browser profile is linked to %s. The two identities will not be merged silently." % [str(identity_conflict_record.get("state", {}).get("owner", "an earlier entrepreneur")), str(ceo_profile.get("full_name", "the current CEO"))], 15, Style.MUTED))
+	view.add_child(label("This older company save names %s, while this browser profile is linked to %s. The two identities will not be merged silently." % [str(identity_conflict_record.get("state", {}).get("owner", "an earlier entrepreneur")), str(ceo_profile.get("full_name", "the current CEO"))], Style.FONT_BODY, Style.MUTED))
 	view.add_child(label("You can associate this company with the current CEO profile. Company accounts and operations stay separate. Cancel leaves the save unchanged.", 14, Style.MUTED))
 	action(view, "Use Current CEO Profile", func(): resolve_identity_conflict(true), true)
 	action(view, "Cancel", func(): resolve_identity_conflict(false))
@@ -1106,7 +1108,7 @@ func company_selection() -> void:
 	back_action.custom_minimum_size.x = 160
 	var owned: Array[Dictionary] = CEOProfile.owned_companies(ceo_profile)
 	if owned.is_empty():
-		view.add_child(label("You do not currently own a company.", 15, Style.MUTED))
+		view.add_child(label("You do not currently own a company.", Style.FONT_BODY, Style.MUTED))
 	else:
 		var name_counts := {}
 		for entry in owned:
@@ -1145,7 +1147,7 @@ func company_selection() -> void:
 func profile_page() -> void:
 	if ceo_profile_corrupt:
 		var damaged := wide_card("CEO Profile Unavailable")
-		damaged.add_child(label("The CEO profile could not be read. Your company saves are safe. Recover this browser profile before editing identity details or switching companies.", 15, Style.RED))
+		damaged.add_child(label("The CEO profile could not be read. Your company saves are safe. Recover this browser profile before editing identity details or switching companies.", Style.FONT_BODY, Style.RED))
 		damaged.add_child(label("This profile will not be replaced automatically.", 14, Style.MUTED))
 		return
 	var info := wide_card("CEO Profile")
@@ -1301,7 +1303,7 @@ func profile_page() -> void:
 		var company_row := VBoxContainer.new()
 		company_row.add_theme_constant_override("separation", 8)
 		companies.add_child(company_row)
-		var description := label("%s · %s" % [str(entry.get("name", "Company")), str(entry.get("country", ""))], 15, Style.GOLD)
+		var description := label("%s · %s" % [str(entry.get("name", "Company")), str(entry.get("country", ""))], Style.FONT_BODY, Style.GOLD)
 		description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		company_row.add_child(description)
 		if str(entry.get("ownership_status", "owned")) == "sold":
@@ -1340,7 +1342,7 @@ func empty_state(title: String, description: String) -> VBoxContainer:
 	var state := VBoxContainer.new()
 	state.name = "EmptyState"
 	state.add_theme_constant_override("separation", 4)
-	state.add_child(label(title, 15, Style.TEXT))
+	state.add_child(label(title, Style.FONT_BODY, Style.TEXT))
 	state.add_child(label(description, 13, Style.MUTED))
 	return state
 
@@ -1404,7 +1406,7 @@ func _show_avatar_crop_modal() -> void:
 	editor_card.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 15, 16))
 	center.add_child(editor_card)
 	var content := stack(editor_card, 4)
-	content.add_child(label("Crop Profile Photo", 22))
+	content.add_child(label("Crop Profile Photo", Style.FONT_HEADING))
 	content.add_child(label("Drag to reposition the photo or adjust the zoom. The preview uses a 3:4 portrait ratio.", 14, Style.MUTED))
 	var mobile_crop := size.x < 600.0
 	var composition := VBoxContainer.new()
@@ -1418,7 +1420,7 @@ func _show_avatar_crop_modal() -> void:
 	preview_section.add_theme_constant_override("separation", 6)
 	preview_section.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	composition.add_child(preview_section)
-	var preview_title := label("Live Preview", 17, Style.GOLD)
+	var preview_title := label("Live Preview", Style.FONT_HEADING, Style.GOLD)
 	preview_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	preview_section.add_child(preview_title)
 	var crop := AvatarCrop.new()
@@ -1895,7 +1897,7 @@ func _show_developer_access_dialog() -> void:
 	var content := stack(panel, 10)
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.custom_minimum_size.x = maxf(0.0, panel.custom_minimum_size.x - 28.0)
-	content.add_child(label("Developer Mode Access", 18, Style.GOLD))
+	content.add_child(label("Developer Mode Access", Style.FONT_HEADING, Style.GOLD))
 	content.add_child(label("Tools apply to this browser’s active company. The public access code is a convenience, not owner authentication.", 13, Style.MUTED))
 	if sim == null:
 		content.add_child(label("Load an existing company before unlocking Developer Mode.", 14, Style.GOLD))
@@ -1931,6 +1933,7 @@ func _show_developer_access_dialog() -> void:
 	Style.primary(unlock)
 	developer_access_overlay = overlay
 	add_child(overlay)
+	_apply_global_typography(overlay)
 	code.text_submitted.connect(func(_value: String): _submit_developer_access(code, error_label))
 	code.text_changed.connect(func(value: String): developer_access_code_value = value)
 	code.grab_focus()
@@ -2098,7 +2101,7 @@ func _create_navigation_drawer() -> void:
 	navigation_panel = drawer
 	var content := stack(drawer, 10)
 	var heading := row(content)
-	var title := label("Navigation", 22)
+	var title := label("Navigation", Style.FONT_HEADING)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(title)
 	var close_button := action(heading, "Close", close_navigation_drawer)
@@ -2583,6 +2586,7 @@ func _show_developer_console_overlay() -> void:
 		(tool_button as Button).custom_minimum_size.y = 42 if mobile_console else 44
 	developer_overlay = overlay
 	add_child(overlay)
+	_apply_global_typography(overlay)
 
 func _refresh_developer_console_overlay() -> void:
 	if is_instance_valid(developer_overlay):
@@ -2690,9 +2694,9 @@ func _dev_scenario_controls(parent: Node = null) -> void:
 
 func setup() -> void:
 	var details := card("Company Registration")
-	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Store Management.", 15, Style.MUTED))
+	details.add_child(label("Register your company and entrepreneur profile. Create stores later under Market / Store Management.", Style.FONT_BODY, Style.MUTED))
 	if active_game_id.is_empty() or ceo_profile.is_empty():
-		details.add_child(label("Choose or create a game and CEO identity before registering a company.", 15, Style.RED))
+		details.add_child(label("Choose or create a game and CEO identity before registering a company.", Style.FONT_BODY, Style.RED))
 		action(details, "Back to Games", func(): show_screen("Title"))
 		return
 	metric(details, "Game", str(ceo_profile.get("game_name", "Game")), Style.GOLD)
@@ -2731,7 +2735,7 @@ func setup() -> void:
 
 func new_game_identity() -> void:
 	var details := card("New Game · CEO Identity")
-	details.add_child(label("Each game keeps its own CEO career, companies, and save slots. Enter the CEO name before registering a company.", 15, Style.MUTED))
+	details.add_child(label("Each game keeps its own CEO career, companies, and save slots. Enter the CEO name before registering a company.", Style.FONT_BODY, Style.MUTED))
 	var owner := field(details, "CEO Name", pending_ceo_name)
 	watch_edits([owner])
 	action(details, "Continue to Company Registration", func(): create_game_for_ceo(owner.text), true)
@@ -2740,7 +2744,7 @@ func new_game_identity() -> void:
 func dashboard() -> void:
 	var totals := sim.report_completed(maxi(1, sim.state.day - 1))
 	var overview := wide_card(sim.state.company)
-	overview.add_child(label(sim.state.owner + ", CEO", 16, Style.MUTED))
+	overview.add_child(label(sim.state.owner + ", CEO", Style.FONT_BODY, Style.MUTED))
 	var balance_card := PanelContainer.new()
 	balance_card.name = "DashboardBankBalanceCard"
 	balance_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2753,7 +2757,7 @@ func dashboard() -> void:
 	var balance_title := label("Bank Balance", 13, Style.GOLD)
 	balance_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	balance_stack.add_child(balance_title)
-	bank_balance_label = label(money(int(sim.state.get("cash", 0))), 22, Style.GOLD)
+	bank_balance_label = label(money(int(sim.state.get("cash", 0))), Style.FONT_HEADING, Style.GOLD)
 	bank_balance_label.name = "DashboardBankBalanceValue"
 	bank_balance_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	bank_balance_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -2846,7 +2850,7 @@ func _add_kpi(parent: GridContainer, caption: String, value: String, color: Colo
 	parent.add_child(panel)
 	var content := stack(panel, 3)
 	content.add_child(label(caption, 12, Style.MUTED))
-	content.add_child(label(value, 16, color))
+	content.add_child(label(value, Style.FONT_HEADING, color))
 	return panel
 
 func advance(days: int) -> void:
@@ -2888,7 +2892,7 @@ func channel_cards(report: Dictionary, scope: String) -> void:
 		channel_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		channel_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		heading.add_child(channel_icon)
-		var channel_name := label(title, 16, Style.GOLD)
+		var channel_name := label(title, Style.FONT_HEADING, Style.GOLD)
 		channel_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		heading.add_child(channel_name)
 		metric(content, "Orders", str(int(totals.orders)))
@@ -2975,7 +2979,7 @@ func business() -> void:
 	company_sale_panel(profile)
 
 func company_sale_panel(parent: Control) -> void:
-	parent.add_child(label("Sell Company", 18, Style.GOLD))
+	parent.add_child(label("Sell Company", Style.FONT_HEADING, Style.GOLD))
 	if not CEOProfile.owns_company(ceo_profile, str(sim.state.get("company_id", ""))):
 		parent.add_child(label("Only companies still owned by this CEO can be sold.", 14, Style.MUTED))
 		return
@@ -3051,7 +3055,7 @@ func financial_dashboard(report: Dictionary) -> void:
 		metric_card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 10, 10))
 		var content := VBoxContainer.new()
 		content.add_child(label(str(item[0]), 12, Style.MUTED))
-		content.add_child(label(str(item[1]), 16, Style.GOLD))
+		content.add_child(label(str(item[1]), Style.FONT_HEADING, Style.GOLD))
 		metric_card.add_child(content)
 		kpis.add_child(metric_card)
 	var forecast := card("Cash Forecast")
@@ -3096,7 +3100,7 @@ func expense_management() -> void:
 	var boundaries := Calendar.bounds(period, anchor)
 	var report := FinanceManagement.completed_period_report(sim, period, anchor)
 	var scope := report_range_label(report)
-	controls.add_child(label(scope, 15, Style.GOLD))
+	controls.add_child(label(scope, Style.FONT_BODY, Style.GOLD))
 	var dates := row(controls)
 	var older := action(dates, "Previous", change_report_end.bind(boundaries.x - 1))
 	older.disabled = boundaries.x <= 1

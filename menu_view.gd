@@ -18,7 +18,7 @@ static func brand(app: Control, parent: Node) -> HBoxContainer:
 	mark.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header.add_child(mark)
-	var name: Label = app.label("Online Business Tycoon", 23, Style.GOLD)
+	var name: Label = app.label("Online Business Tycoon", Style.FONT_HEADING, Style.GOLD)
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	header.add_child(name)
@@ -39,7 +39,7 @@ static func title(app: Control) -> void:
 		button.custom_minimum_size.x = 150 if app.size.x < 600.0 else 172
 	var games := GameStore.list_games()
 	if games.is_empty():
-		play.add_child(app.label("No saved games yet. Start a New Game to begin.", 15, Style.MUTED))
+		play.add_child(app.label("No saved games yet. Start a New Game to begin.", Style.FONT_BODY, Style.MUTED))
 	else:
 		var game_names := {}
 		for game in games:
@@ -92,7 +92,7 @@ static func slots(app: Control, saving: bool) -> void:
 		var slot := Slots.read_for_game(app.active_game_id, id)
 		var view: VBoxContainer = app._create_card(slots_grid, Slots.name_for(id))
 		if slot.is_empty():
-			view.add_child(app.label("Unreadable save" if Slots.occupied_for_game(app.active_game_id, id) else "Empty", 15, Style.MUTED))
+			view.add_child(app.label("Unreadable save" if Slots.occupied_for_game(app.active_game_id, id) else "Empty", Style.FONT_BODY, Style.MUTED))
 		else:
 			describe(app, view, slot)
 		if saving:
@@ -106,7 +106,7 @@ static func slots(app: Control, saving: bool) -> void:
 static func describe(app: Control, parent: Node, slot: Dictionary) -> void:
 	var state: Dictionary = slot.state
 	var metadata: Dictionary = slot.get("metadata", {})
-	parent.add_child(app.label(state.company, 18, Style.GOLD))
+	parent.add_child(app.label(state.company, Style.FONT_HEADING, Style.GOLD))
 	parent.add_child(app.label(str(metadata.get("ceo_name", state.get("owner", "CEO not recorded"))), 14, Style.MUTED))
 	app.metric(parent, "Country", str(Catalog.COUNTRIES[int(state.country)]))
 	app.metric(parent, "Simulation Date", Calendar.format(int(state.day)))

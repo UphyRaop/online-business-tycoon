@@ -102,12 +102,12 @@ static func build(sim: RefCounted, mobile: bool = false, app: Control = null) ->
 	panel.add_child(content)
 	var heading := Label.new()
 	heading.text = "Inventory Overview"
-	heading.add_theme_font_size_override("font_size", 19)
+	heading.add_theme_font_size_override("font_size", Style.FONT_HEADING)
 	content.add_child(heading)
 	var note := Label.new()
 	note.text = "Low stock is based on %d or fewer available units; reserved units are shown separately." % LOW_STOCK_THRESHOLD
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.add_theme_font_size_override("font_size", 12)
+	note.add_theme_font_size_override("font_size", Style.FONT_BUTTON)
 	note.add_theme_color_override("font_color", Style.MUTED)
 	content.add_child(note)
 	var metrics := GridContainer.new()
@@ -126,14 +126,14 @@ static func build(sim: RefCounted, mobile: bool = false, app: Control = null) ->
 	demand.name = "PreorderDemandSummary"
 	demand.text = "Pending pre-order demand: %s units" % _number(data.preorder_demand)
 	demand.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	demand.add_theme_font_size_override("font_size", 13)
+	demand.add_theme_font_size_override("font_size", Style.FONT_BODY)
 	demand.add_theme_color_override("font_color", Style.GOLD if data.preorder_demand > 0 else Style.MUTED)
 	content.add_child(demand)
 	var separator := HSeparator.new()
 	content.add_child(separator)
 	var table_title := Label.new()
 	table_title.text = "Stock by Product"
-	table_title.add_theme_font_size_override("font_size", 15)
+	table_title.add_theme_font_size_override("font_size", Style.FONT_HEADING)
 	content.add_child(table_title)
 	var rows: Array = data.products
 	var row_limit := MOBILE_ROW_LIMIT if mobile else DESKTOP_ROW_LIMIT
@@ -142,7 +142,7 @@ static func build(sim: RefCounted, mobile: bool = false, app: Control = null) ->
 		var empty := Label.new()
 		empty.name = "EmptyProductState"
 		empty.text = "No products added yet."
-		empty.add_theme_font_size_override("font_size", 14)
+		empty.add_theme_font_size_override("font_size", Style.FONT_BODY)
 		empty.add_theme_color_override("font_color", Style.MUTED)
 		content.add_child(empty)
 	for index in visible_count:
@@ -175,12 +175,12 @@ static func _add_metric(parent: GridContainer, title: String, value: String, col
 	var caption := Label.new()
 	caption.text = title
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	caption.add_theme_font_size_override("font_size", 10)
+	caption.add_theme_font_size_override("font_size", Style.FONT_CAPTION)
 	caption.add_theme_color_override("font_color", Style.MUTED)
 	stack.add_child(caption)
 	var amount := Label.new()
 	amount.text = value
-	amount.add_theme_font_size_override("font_size", 16)
+	amount.add_theme_font_size_override("font_size", Style.FONT_HEADING)
 	amount.add_theme_color_override("font_color", color)
 	stack.add_child(amount)
 
@@ -195,18 +195,18 @@ static func _add_mobile_row(parent: VBoxContainer, item: Dictionary) -> void:
 	row.add_child(stack)
 	var title := Label.new()
 	title.text = str(item.name)
-	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_font_size_override("font_size", Style.FONT_BODY)
 	title.add_theme_color_override("font_color", Style.TEXT)
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	stack.add_child(title)
 	var status := Label.new()
 	status.text = "%s · %s" % [str(item.listing_status), str(item.stock_status)]
-	status.add_theme_font_size_override("font_size", 11)
+	status.add_theme_font_size_override("font_size", Style.FONT_CAPTION)
 	status.add_theme_color_override("font_color", Style.RED if str(item.stock_status) == "Out of Stock" else (Style.GOLD if str(item.listing_status) == "Unpublished" or str(item.stock_status) == "Low Stock" else Style.GREEN))
 	stack.add_child(status)
 	var details := Label.new()
 	details.text = "Available %s  ·  Reserved %s  ·  Pre-orders %s" % [_number(item.available), _number(item.reserved), _number(item.preorder_demand)]
-	details.add_theme_font_size_override("font_size", 11)
+	details.add_theme_font_size_override("font_size", Style.FONT_CAPTION)
 	details.add_theme_color_override("font_color", Style.MUTED)
 	details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	stack.add_child(details)
@@ -219,7 +219,7 @@ static func _add_desktop_row(parent: VBoxContainer, item: Dictionary) -> void:
 	var name := Label.new()
 	name.text = str(item.name)
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name.add_theme_font_size_override("font_size", 13)
+	name.add_theme_font_size_override("font_size", Style.FONT_BODY)
 	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var identity := VBoxContainer.new()
 	identity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -227,14 +227,14 @@ static func _add_desktop_row(parent: VBoxContainer, item: Dictionary) -> void:
 	identity.add_child(name)
 	var status := Label.new()
 	status.text = "%s · %s" % [str(item.listing_status), str(item.stock_status)]
-	status.add_theme_font_size_override("font_size", 11)
+	status.add_theme_font_size_override("font_size", Style.FONT_CAPTION)
 	status.add_theme_color_override("font_color", Style.RED if str(item.stock_status) == "Out of Stock" else (Style.GOLD if str(item.listing_status) == "Unpublished" or str(item.stock_status) == "Low Stock" else Style.GREEN))
 	identity.add_child(status)
 	row.add_child(identity)
 	var quantities := Label.new()
 	quantities.text = "Available %s  ·  Reserved %s  ·  Pre-orders %s" % [_number(item.available), _number(item.reserved), _number(item.preorder_demand)]
 	quantities.size_flags_horizontal = Control.SIZE_SHRINK_END
-	quantities.add_theme_font_size_override("font_size", 12)
+	quantities.add_theme_font_size_override("font_size", Style.FONT_BUTTON)
 	quantities.add_theme_color_override("font_color", Style.MUTED)
 	quantities.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	row.add_child(quantities)

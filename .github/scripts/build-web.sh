@@ -17,7 +17,7 @@ suites=(
     phase1_test phase2_test final_test corrective_test phase3_test phase33_test ceo_profile_test
     phase1_ui_test phase2_ui_test final_ui_test phase3_ui_test phase33_ui_test phase4_ui_test phase4_finance_test phase4_inventory_ads_test
     phase4_products_campaign_save_test product_management_test phase4_campaign_lifecycle_test company_sale_test company_sale_ui_test
-    game_store_test game_ui_test control_style_test dashboard_inventory_test chart_legend_test
+    game_store_test game_ui_test control_style_test typography_validation_test dashboard_inventory_test chart_legend_test
     supplier_credit_test supplier_workflow_ui_test catalog_flow_ui_test developer_preview_test developer_test_api_test developer_console_ui_test ultra_compact_header_test web_shell_test
 )
 for suite in "${suites[@]}"; do

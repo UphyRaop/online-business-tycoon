@@ -61,14 +61,14 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 		var step := Label.new()
 		step.name = "BuyStep%d" % index
 		step.text = "%d  %s" % [index + 1, str(names[index])]
-		step.add_theme_font_size_override("font_size", 10 if compact_landscape else 12)
+		step.add_theme_font_size_override("font_size", Style.FONT_CAPTION if compact_landscape else Style.FONT_BUTTON)
 		step.add_theme_color_override("font_color", Style.GOLD if index == selected else Style.MUTED)
 		row.add_child(step)
 		if index < 4:
 			var separator := Label.new()
 			separator.name = "BuyStepSeparator%d" % index
 			separator.text = ">"
-			separator.add_theme_font_size_override("font_size", 11)
+			separator.add_theme_font_size_override("font_size", Style.FONT_CAPTION)
 			separator.add_theme_color_override("font_color", Style.MUTED)
 			row.add_child(separator)
 	panel.add_child(row)
@@ -113,7 +113,7 @@ static func _footer_button(app: Control, title: String, callback: Callable, name
 	button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	if app.size.y <= 450.0 and app.size.x > app.size.y:
 		button.custom_minimum_size.y = 38
-		button.add_theme_font_size_override("font_size", 12)
+		button.add_theme_font_size_override("font_size", Style.FONT_BUTTON)
 	button.disabled = disabled
 	return button
 
@@ -147,7 +147,7 @@ static func show_categories(app: Control) -> void:
 		card.icon = Style.icon_texture(load(_category_icon_path(name)) as Texture2D, Style.ICON_CONTROL)
 		card.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
-		card.add_theme_font_size_override("font_size", 13 if app.size.x < 600.0 else 14)
+		card.add_theme_font_size_override("font_size", Style.FONT_BODY if app.size.x < 600.0 else Style.FONT_HEADING)
 		card.add_theme_constant_override("h_separation", 10)
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		card.custom_minimum_size = Vector2(0, 62)
@@ -337,7 +337,7 @@ static func _nested_card(parent: Node, title: String) -> VBoxContainer:
 	panel.add_child(content)
 	var heading := Label.new()
 	heading.text = title
-	heading.add_theme_font_size_override("font_size", 18)
+	heading.add_theme_font_size_override("font_size", Style.FONT_HEADING)
 	content.add_child(heading)
 	return content
 
@@ -370,7 +370,7 @@ static func _catalog_card(parent: Node, title: String) -> VBoxContainer:
 	panel.add_child(content)
 	var heading := Label.new()
 	heading.text = title
-	heading.add_theme_font_size_override("font_size", 18)
+	heading.add_theme_font_size_override("font_size", Style.FONT_HEADING)
 	content.add_child(heading)
 	return content
 
@@ -395,7 +395,7 @@ static func _product_selection_card(parent: Node, title: String, product_index: 
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var heading := Label.new()
 	heading.text = title
-	heading.add_theme_font_size_override("font_size", 16)
+	heading.add_theme_font_size_override("font_size", Style.FONT_HEADING)
 	heading.add_theme_color_override("font_color", Style.TEXT)
 	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(heading)
@@ -599,7 +599,7 @@ static func show_purchase_summary(app: Control) -> void:
 	current_quantity.name = "SupplierPurchaseQuantity"
 	current_quantity.text = _format_quantity(quantity)
 	current_quantity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	current_quantity.add_theme_font_size_override("font_size", 21)
+	current_quantity.add_theme_font_size_override("font_size", Style.FONT_HEADING)
 	current_quantity.add_theme_color_override("font_color", Color("#E6C37B"))
 	current_quantity.custom_minimum_size = Vector2(96, 40)
 	var minus: Button = app.action(quantity_row, "−", func():
