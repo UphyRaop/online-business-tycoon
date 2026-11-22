@@ -31,6 +31,7 @@ done
 
 mkdir -p web-build
 "$godot" --headless --path . --export-release Web web-build/index.html
+python3 .github/scripts/patch_godot_web_runtime.py web-build/index.js
 for file in index.html index.js index.wasm index.pck; do
     test -s "web-build/$file"
 done

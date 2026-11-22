@@ -24,6 +24,16 @@ func run() -> void:
 	root.size = Vector2i(1366, 768)
 	root.add_child(app)
 	await process_frame
+	var portrait_base := Vector2i(430, 760)
+	for viewport in [Vector2i(844, 390), Vector2i(667, 375)]:
+		expect(app._landscape_content_scale_target(portrait_base, viewport) == viewport,
+			"Pre-game short-landscape pages use the available logical viewport at %s" % viewport)
+	for viewport in [Vector2i(390, 844), Vector2i(1366, 768)]:
+		expect(app._landscape_content_scale_target(portrait_base, viewport) == portrait_base,
+			"Portrait and standard desktop pages keep the configured logical viewport at %s" % viewport)
+	app.screen = "Title"
+	app.render()
+	expect(app.sim == null, "Pre-game responsive layout is tested without creating a simulation")
 	app.sim = Sim.new(Sim.register("Header CEO", "UR Trade Network", "", 0, 0, 0, 58921))
 	app.screen = "Game"
 	app.page = "Dashboard"

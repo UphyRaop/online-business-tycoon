@@ -28,9 +28,9 @@ static func overview(app: Control) -> void:
 	_analytics_kpi(app, kpis, "Attributed Revenue", app.money(totals.attributed_revenue - totals.attributed_refunds))
 	var roas: String = "%.2f×" % (float(totals.attributed_revenue) / totals.spend) if totals.spend > 0 else "—"
 	var lifetime_conversions: int = maxi(0, totals.purchases + totals.preorders - totals.preorders_cancelled)
-	_analytics_kpi(app, kpis, "ROAS · CPA", "%s · %s" % [roas, _unit_cost(app, totals.spend, lifetime_conversions)])
+	_analytics_pair_kpi(app, kpis, "ROAS · CPA", "ROAS", roas, "CPA", _unit_cost(app, totals.spend, lifetime_conversions), "MarketingKPI_ROAS_CPA")
 	_analytics_kpi(app, kpis, "Purchases", _count(totals.purchases))
-	_analytics_kpi(app, kpis, "CTR · CPM", "%.2f%% · %s" % [Ads.ctr_percent(totals.clicks, totals.impressions), app.money(roundi(Ads.cpm_cents(totals.spend, totals.impressions)))])
+	_analytics_pair_kpi(app, kpis, "CTR · CPM", "CTR", "%.2f%%" % Ads.ctr_percent(totals.clicks, totals.impressions), "CPM", app.money(roundi(Ads.cpm_cents(totals.spend, totals.impressions))), "MarketingKPI_CTR_CPM")
 	var profit: int = int(totals.attributed_revenue) - int(totals.attributed_refunds) - int(totals.estimated_costs) + int(totals.estimated_costs_reversed) - int(totals.spend)
 	app.metric(view, "Estimated Advertising Profit", app.money(profit), app.profit_color(profit))
 	var platform_card: VBoxContainer = app.card("Platforms")
@@ -39,7 +39,7 @@ static func overview(app: Control) -> void:
 		platform_card.add_child(app.label("%s · %s CPM · %.1f%% baseline CTR" % [platform.name, baseline_cpm, platform.ctr], 14, Style.MUTED))
 
 static func manager(app: Control) -> void:
-	var view: VBoxContainer = app.card("Ads Manager")
+	var view: VBoxContainer = app.card("")
 	app.action(view, "Create campaign", func():
 		app.campaign_id = 0
 		app.navigate("Campaign Details")
@@ -297,7 +297,9 @@ static func analytics(app: Control) -> void:
 	var campaigns: Dictionary = state.advertising.campaigns
 	var ids: Array = campaigns.keys()
 	ids.sort()
-	var view: VBoxContainer = app.wide_card("Ads Analytics")
+	# The page heading already labels this route. Keep the analytics surface focused
+	# on its reporting controls instead of repeating the same heading inside the card.
+	var view: VBoxContainer = app.wide_card("")
 	var period_choices := ["Daily · Last 7 Days", "Weekly · Last 8 Weeks", "Monthly · Last 12 Months", "All Time"]
 	view.add_child(app.label("Reporting Period", 14, Style.MUTED))
 	var periods: OptionButton = app.dropdown(view, period_choices, clampi(app.ad_period, 0, 3))
@@ -448,6 +450,30 @@ static func _analytics_kpi(app: Control, parent: Control, title: String, value: 
 	var content := VBoxContainer.new()
 	content.add_child(app.label(title, 13, Style.MUTED))
 	content.add_child(app.label(value, 18, Style.GOLD))
+	panel.add_child(content)
+	parent.add_child(panel)
+
+static func _analytics_pair_kpi(app: Control, parent: Control, title: String, first_name: String, first_value: String, second_name: String, second_value: String, control_name: String) -> void:
+	var panel := PanelContainer.new()
+	panel.name = control_name
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 10, 12))
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 4)
+	content.add_child(app.label(title, 13, Style.MUTED))
+	for metric in [[first_name, first_value], [second_name, second_value]]:
+		var metric_row := HBoxContainer.new()
+		metric_row.add_theme_constant_override("separation", 6)
+		var metric_label: Label = app.label(str(metric[0]), 11, Style.MUTED)
+		metric_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		metric_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+		var value_label: Label = app.label(str(metric[1]), 14, Style.GOLD)
+		value_label.name = "%sValue" % str(metric[0]).replace(" ", "")
+		value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		value_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+		metric_row.add_child(metric_label)
+		metric_row.add_child(value_label)
+		content.add_child(metric_row)
 	panel.add_child(content)
 	parent.add_child(panel)
 

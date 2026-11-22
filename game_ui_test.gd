@@ -133,6 +133,22 @@ func test_independent_game_saves_and_profiles() -> void:
 	expect(not second_game_id.is_empty() and second_game_id != first_game_id
 		and app.sim.state.owner == "Riley Founder", "A second game has a separate CEO and game identity")
 	app.open_screen("Save")
+	app.web_storage_sync_pending = true
+	app.dirty = true
+	app.notice = "Saving Manual slot 1 to browser storage…"
+	app.render()
+	expect(has_label("Saving to browser storage… Keep this page open until the save completes."),
+		"Save Game puts the pending browser durability state above the slot list")
+	press("Save to slot 1")
+	expect(Games.read_slot(second_game_id, 1).is_empty()
+		and app.notice.contains("before saving again"),
+		"A second manual save cannot race an in-flight browser-storage write")
+	app.web_storage_sync_pending = false
+	app.dirty = false
+	app.notice = "Saved to manual slot 1."
+	app.render()
+	expect(has_label("Saved to manual slot 1."), "Save Game shows the durable completion message above the slot list")
+	app.notice = ""
 	press("Save to slot 1")
 	var second_slot := Games.read_slot(second_game_id, 1)
 	expect(not second_slot.is_empty() and second_slot.metadata.ceo_name == "Riley Founder"
@@ -212,9 +228,15 @@ func test_delete_confirmation_is_scoped() -> void:
 	var delete_button := _button_in(card, "Delete Game") if card != null else null
 	expect(delete_button != null, "Each saved game has its own Delete Game action")
 	if delete_button == null: return
+	var long_game_name := "Riley's International Online Business Career with Multiple Marketplace Brands"
+	var long_name_profile: Dictionary = CEO.load_game_profile(second_game_id)
+	long_name_profile.game_name = long_game_name
+	expect(Games.update_game_profile(second_game_id, long_name_profile) == OK,
+		"Long game title fixture updates only the disposable test profile")
 	delete_button.pressed.emit()
-	expect(app.confirmation != null and app.confirmation.dialog_text.contains("Other games"),
-		"Deleting a game requires explicit confirmation that explains its limited scope")
+	expect(app.confirmation != null and app.confirmation.title == "Delete Game?"
+		and app.confirmation.dialog_text.contains(long_game_name) and app.confirmation.dialog_text.contains("Other games"),
+		"Delete confirmation keeps a compact title and shows the full long game name and deletion scope in its body")
 	if app.confirmation != null: app.confirmation.get_cancel_button().pressed.emit()
 	expect(not Games.get_game(second_game_id).is_empty(), "Cancel leaves the selected game untouched")
 	card = _game_card(second_game_id)

@@ -44,9 +44,12 @@ func run() -> void:
 	press_category("Electronics")
 	await process_frame
 	var search: LineEdit = app.find_child("CatalogueProductSearch", true, false)
-	var product_card: Control = app.find_child("CatalogueProduct_1", true, false)
+	var product_card := app.find_child("CatalogueProduct_1", true, false) as Button
 	expect(search != null and product_card != null and has_label("Starting Landed Cost") and has_label("Available Suppliers"),
 		"Selecting a category shows product cards with live supplier count and landed cost")
+	expect(product_card != null and app.find_child("ChooseProduct_1", true, false) == null
+		and app.find_child("ProductSelectionIndicator_1", true, false) != null,
+		"Product selection is shown on a compact full-card button without a redundant nested action")
 	if search != null:
 		search.text = "no-such-product"
 		search.text_changed.emit(search.text)
@@ -56,34 +59,40 @@ func run() -> void:
 		search.text = "Wireless Earbuds"
 		search.text_changed.emit(search.text)
 	if product_card != null:
-		var choose_product: Button
-		for candidate in controls(product_card, "Button"):
-			if candidate.text == "Select Product":
-				choose_product = candidate
-				break
-		if choose_product != null:
-			choose_product.pressed.emit()
-			press("Continue")
+		product_card.pressed.emit()
+		press("Continue")
 	await process_frame
 	await process_frame
 	expect(app.selected_product == 1 and app.find_child("CompactSupplierList", true, false) != null,
 		"Choosing a category product opens its supplier selection stage")
 	MarketView.inbound_stock(app)
-	expect(app.find_child("InboundStockPage", true, false) != null, "Inbound Stock is available as an in-page Market workflow")
+	expect(app.find_child("InboundStockPage", true, false) != null
+		and not controls(app, "Label").any(func(node): return node.text == "Inbound Stock"),
+		"Inbound Stock keeps its details without repeating the page title")
 	MarketView.supplier_returns_page(app)
 	expect(app.find_child("SupplierReturnsPage", true, false) != null and app.find_child("SupplierReturnHistory", true, false) != null,
 		"Supplier return actions and history share one Supplier Returns page")
+	expect(not controls(app, "Label").any(func(node): return node.text == "Supplier Returns"),
+		"Supplier Returns does not repeat its page title inside the first card")
 	MarketView.supplier_relationships(app)
-	expect(app.find_child("SupplierRelationshipsPage", true, false) != null, "Supplier trust and credit accounts are available in Market relationships")
+	expect(app.find_child("SupplierRelationshipsPage", true, false) != null
+		and not controls(app, "Label").any(func(node): return node.text == "Supplier Relationships"),
+		"Supplier relationships show trust and credit without a duplicate page title")
 	press("Order")
 	expect(app.page == "Orders" and has_label("Store Operations"), "Order opens the existing fulfillment workspace")
 	press("Pre-orders")
 	expect(has_label("No customer pre-orders yet"), "Pre-orders route has a clear empty state")
 	press("Business")
 	expect(app.page == "Business" and has_label("Owned Stores"), "Business opens the company profile")
+	press("Ads Manager")
+	var manager_titles := controls(app, "Label").filter(func(item): return item.text == "Ads Manager")
+	expect(app.page == "Campaign Manager" and manager_titles.size() == 1,
+		"Ads Manager does not repeat the page title inside its empty-state card")
 	press("Ads Analytics")
 	expect(has_label("Reporting Period") and has_label("Advertising Platform") and has_label("Campaign Status")
 		and has_label("Destination"), "Ads Analytics explains each filter")
+	var analytics_titles := controls(app, "Label").filter(func(item): return item.text == "Ads Analytics")
+	expect(analytics_titles.size() == 1, "Ads Analytics uses one page heading without a duplicate card heading")
 	var filters := controls(app, "OptionButton")
 	expect(filters.size() >= 3 and filters[2].get_item_text(0) == "All Status",
 		"Campaign status dropdown uses the revised All Status label")

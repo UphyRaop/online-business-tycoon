@@ -128,21 +128,14 @@ func browse_catalog_product(category: String, product_id: int) -> void:
 		await process_frame
 		stage = "products"
 	if stage == "products":
-		var product_card: Control = app.find_child("CatalogueProduct_%d" % product_id, true, false)
+		var product_card := app.find_child("CatalogueProduct_%d" % product_id, true, false) as Button
 		if product_card == null:
 			expect(false, "Selected category contains the requested catalogue product")
 			return
-		var choose: Button
-		for candidate in controls(product_card, "Button"):
-			if candidate.text == "Select Product":
-				choose = candidate
-				break
-		if choose == null:
-			expect(false, "Product card provides a selection action")
-			return
-		if choose != null:
-			choose.pressed.emit()
-			press("Continue")
+		expect(product_card.find_child("ChooseProduct_%d" % product_id, true, false) == null,
+			"Product card is the selection action without a redundant nested button")
+		product_card.pressed.emit()
+		press("Continue")
 		await process_frame
 		await process_frame
 	if str(app.get_meta("product_catalog_stage", "")) == "suppliers":

@@ -5,6 +5,7 @@ const Sim = preload("res://simulation.gd")
 const Slots = preload("res://save_slots.gd")
 const Style = preload("res://corporate_theme.gd")
 const Market = preload("res://market_view.gd")
+const TouchScroll = preload("res://touch_scroll_container.gd")
 const Operations = preload("res://operations_view.gd")
 const Products = preload("res://products_view.gd")
 const Menu = preload("res://menu_view.gd")
@@ -91,9 +92,15 @@ var identity_conflict_record: Dictionary = {}
 var avatar_picker_callback: JavaScriptObject
 var dev_preview_size_callback: JavaScriptObject
 var dev_command_callback: JavaScriptObject
+var web_storage_sync_callback: JavaScriptObject
+var web_storage_sync_request_id := 0
+var web_storage_sync_pending := false
+var pending_web_save_messages: Dictionary = {}
+var web_storage_sync_success_callback: Callable
 var dev_api := DevAPI.new()
 var developer_mode_unlocked := false
 var developer_console_visible := false
+var developer_access_unlock_pending := false
 var developer_changes_active := false
 var developer_original_viewport := Vector2i.ZERO
 var developer_preview_active := false
@@ -112,6 +119,7 @@ var shipping_settings_editing := false
 var display_settings_editing := false
 var avatar_crop_source: Image
 var navigation_panel: PanelContainer
+var navigation_slot: Control
 var navigation_open := false
 var navigation_toggle: Button
 var bank_balance_label: Label
@@ -127,6 +135,7 @@ var ad_expanded_campaigns: Dictionary = {}
 var header_mobile_layout := false
 var header_compact_layout := false
 var header_mobile_wrap_layout := false
+var compact_landscape_layout := false
 var header_date_label: Label
 var header_title_label: Label
 var header_company_label: Label
@@ -137,6 +146,8 @@ func _ready() -> void:
 		dev_preview_size_callback = JavaScriptBridge.create_callback(_set_developer_preview_viewport)
 		var js_window := JavaScriptBridge.get_interface("window")
 		js_window.obtSetPreviewLogicalSize = dev_preview_size_callback
+		web_storage_sync_callback = JavaScriptBridge.create_callback(_on_web_storage_sync_complete)
+		js_window.OBTUserFSSyncComplete = web_storage_sync_callback
 		var base_size := get_window().content_scale_size
 		JavaScriptBridge.eval("window.obtPreviewDefaultLogicalSize = [%d, %d];" % [base_size.x, base_size.y])
 		if OS.is_debug_build():
@@ -161,6 +172,46 @@ func _set_developer_preview_viewport(args: Array) -> void:
 	var requested := Vector2i(width, height)
 	get_window().content_scale_size = requested
 	developer_preview_active = developer_mode_unlocked and developer_original_viewport != Vector2i.ZERO and requested != developer_original_viewport
+
+func _on_web_storage_sync_complete(args: Array) -> void:
+	if args.size() < 2:
+		return
+	var request_id := int(args[0])
+	var save_details: Dictionary = pending_web_save_messages.get(request_id, {})
+	if save_details.is_empty():
+		return
+	pending_web_save_messages.erase(request_id)
+	if request_id != web_storage_sync_request_id:
+		return
+	web_storage_sync_pending = false
+	JavaScriptBridge.eval("if (window.OBTSetStorageSyncPending) window.OBTSetStorageSyncPending(false);")
+	if bool(args[1]):
+		developer_changes_active = false
+		dirty = false
+		set_notice(str(save_details.get("message", "Saved to browser storage.")))
+		if web_storage_sync_success_callback.is_valid():
+			var continuation := web_storage_sync_success_callback
+			web_storage_sync_success_callback = Callable()
+			continuation.call()
+		if screen == "Save":
+			refresh_view()
+	else:
+		dirty = true
+		web_storage_sync_success_callback = Callable()
+		var reason := str(args[2]) if args.size() > 2 else "The browser did not confirm durable storage."
+		set_notice("Save data is still in memory and may be lost if this page closes. Keep the game open and retry. " + reason, true)
+		if screen == "Save":
+			refresh_view()
+
+func _begin_web_storage_sync(slot: int, message: String) -> void:
+	web_storage_sync_request_id += 1
+	var request_id := web_storage_sync_request_id
+	pending_web_save_messages[request_id] = {"slot": slot, "message": message}
+	web_storage_sync_pending = true
+	dirty = true
+	set_notice("Saving %s to browser storage…" % Slots.name_for(slot))
+	var source := "if (window.OBTSetStorageSyncPending) window.OBTSetStorageSyncPending(true); if (window.OBTFlushUserFS) { window.OBTFlushUserFS(%d); } else { window.OBTUserFSSyncComplete(%d, false, 'The browser-storage flush hook is unavailable.'); }" % [request_id, request_id]
+	JavaScriptBridge.eval(source)
 
 func _receive_dev_command(args: Array) -> void:
 	var raw := str(args[0]) if not args.is_empty() else "{}"
@@ -226,20 +277,25 @@ func _developer_sync_landscape_scale() -> void:
 	_sync_gameplay_landscape_scale()
 
 func _sync_gameplay_landscape_scale() -> void:
-	if not OS.has_feature("web") or developer_preview_active or sim == null:
+	if not OS.has_feature("web") or developer_preview_active:
 		return
 	var base_size := Vector2i(
 		int(ProjectSettings.get_setting("display/window/size/viewport_width", 430)),
 		int(ProjectSettings.get_setting("display/window/size/viewport_height", 760))
 	)
 	var browser_size := _developer_browser_viewport_size()
+	var target := _landscape_content_scale_target(base_size, browser_size)
+	if get_window().content_scale_size != target:
+		get_window().content_scale_size = target
+
+func _landscape_content_scale_target(base_size: Vector2i, browser_size: Vector2i) -> Vector2i:
 	var target := base_size
 	# Scaling the portrait base by a short landscape height makes controls too
 	# small. Match the Web logical viewport to the available landscape viewport.
+	# Apply before a simulation exists too, so registration/setup remains usable.
 	if browser_size.x > browser_size.y and browser_size.y <= 600:
 		target = browser_size
-	if get_window().content_scale_size != target:
-		get_window().content_scale_size = target
+	return target
 
 func _developer_restore_original_scale() -> void:
 	if developer_original_viewport != Vector2i.ZERO and get_window().content_scale_size != developer_original_viewport:
@@ -480,6 +536,10 @@ func profit_color(cents: int) -> Color:
 func _update_responsive_layout() -> void:
 	_sync_gameplay_landscape_scale()
 	var viewport_width := size.x
+	var compact_landscape := size.y <= 450.0 and size.x > size.y
+	if compact_landscape != compact_landscape_layout:
+		render()
+		return
 	Market.update_responsive_layout(self)
 	for metric_row in find_children("ResponsiveMetric", "BoxContainer", true, false):
 		var responsive_metric := metric_row as BoxContainer
@@ -515,6 +575,7 @@ func _update_responsive_layout() -> void:
 		page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
 	if is_instance_valid(navigation_panel):
 		navigation_panel.custom_minimum_size.x = clampf(viewport_width * 0.78, 260.0, 320.0)
+		_sync_navigation_slot_size()
 	if is_instance_valid(page_grid):
 		page_grid.columns = 2 if viewport_width >= 768.0 else 1
 		_reflow_page_cards()
@@ -628,6 +689,9 @@ func write_progress(slot: int, message: String, explicitly_selected: bool = fals
 	if profile_result != OK:
 		set_notice("%s saved, but this game's CEO profile could not be saved. %s" % [Slots.name_for(slot), error_string(profile_result)], true)
 		return false
+	if OS.has_feature("web") and OS.is_userfs_persistent():
+		_begin_web_storage_sync(slot, message)
+		return true
 	developer_changes_active = false
 	dirty = OS.has_feature("web") and not OS.is_userfs_persistent()
 	set_notice(message + " Browser storage is unavailable. Progress may be lost on reload." if dirty else message, dirty)
@@ -747,8 +811,8 @@ func _select_game(game_id: String) -> bool:
 func delete_game(game_id: String) -> void:
 	var game := GameStore.get_game(game_id)
 	if game.is_empty(): return
-	confirm_action("Delete %s?" % str(game.get("game_name", "Game")),
-		"Permanently remove this game's profile, companies, autosave and manual saves. Other games and retained legacy source files remain untouched.",
+	confirm_action("Delete Game?",
+		"Permanently delete “%s” and remove its profile, companies, autosave and manual saves. Other games and retained legacy source files remain untouched." % str(game.get("game_name", "Game")),
 		"Delete Game", func():
 			var result := GameStore.delete_game_data(game_id)
 			if result != OK:
@@ -802,6 +866,9 @@ func load_slot(slot: int) -> void:
 	request_load(Slots.read_for_game(active_game_id, slot))
 
 func request_load(record: Dictionary) -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before loading another save.", true)
+		return
 	if record.is_empty():
 		set_notice("No readable save was found.", true)
 		return
@@ -920,6 +987,9 @@ func _sync_ceo_profile() -> void:
 	ceo_profile = CEOProfile.sync_company(ceo_profile, sim.state)
 
 func switch_company(company_id: String) -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before switching companies.", true)
+		return
 	var index := CEOProfile.company_index(ceo_profile, company_id)
 	if index < 0:
 		set_notice("That company is no longer in this CEO profile.", true)
@@ -942,7 +1012,10 @@ func switch_company(company_id: String) -> void:
 	if dirty:
 		confirm_action("Switch company?", "Save the current company before switching to %s?" % str(entry.get("name", "Company")), "Switch Company", func():
 			if write_progress(Slots.AUTOSAVE, "Current company preserved."):
-				change.call()
+				if web_storage_sync_pending:
+					web_storage_sync_success_callback = change
+				else:
+					change.call()
 		)
 	else:
 		change.call()
@@ -1471,6 +1544,9 @@ func enter_game(data: Dictionary) -> void:
 	render()
 
 func save_to_slot(slot: int) -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before saving again.", true)
+		return
 	var write := func():
 		write_progress(slot, "Saved to manual slot %d." % slot, true)
 		refresh_view()
@@ -1480,6 +1556,9 @@ func save_to_slot(slot: int) -> void:
 		write.call()
 
 func delete_save(slot: int) -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before deleting a save.", true)
+		return
 	confirm_action("Delete %s?" % Slots.name_for(slot).to_lower(),
 		"Delete this save and its recovery copy?", "Delete", func():
 		var error := Slots.delete_for_game(active_game_id, slot)
@@ -1491,6 +1570,9 @@ func delete_save(slot: int) -> void:
 	)
 
 func leave_game() -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before leaving this game.", true)
+		return
 	var exit_to_title := func():
 		if OS.has_feature("web") and developer_mode_unlocked:
 			JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.disable();")
@@ -1624,9 +1706,9 @@ func primary_navigation(parent: Node) -> Button:
 	header.name = "UltraCompactGlobalHeader"
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	header.add_theme_stylebox_override("panel", Style.box(Color("#101A29"), Color("#34445B"), 9, 7))
+	header.add_theme_stylebox_override("panel", Style.box(Color("#101A29"), Color("#34445B"), 9, 5 if compact_landscape_layout else 7))
 	parent.add_child(header)
-	var rows := stack(header, 3)
+	var rows := stack(header, 2 if compact_landscape_layout else 3)
 	rows.name = "UltraCompactGlobalHeaderRows"
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rows.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
@@ -1636,7 +1718,7 @@ func primary_navigation(parent: Node) -> Button:
 	heading.add_theme_constant_override("separation", 5)
 	var menu_button := action(heading, "", toggle_navigation_drawer, false)
 	menu_button.name = "NavigationMenuButton"
-	menu_button.custom_minimum_size = Vector2(40, 40)
+	menu_button.custom_minimum_size = Vector2(36, 34) if compact_landscape_layout else Vector2(40, 40)
 	menu_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	menu_button.tooltip_text = "Open navigation menu"
 	_apply_drawer_icon(menu_button, DRAWER_ICON_PATHS.Menu, 20)
@@ -1655,7 +1737,7 @@ func primary_navigation(parent: Node) -> Button:
 	company_info.add_child(header_company_label)
 	var developer_button := action(heading, "</>", request_developer_mode_access, false)
 	developer_button.name = "DeveloperModeButton"
-	developer_button.custom_minimum_size = Vector2(40, 34)
+	developer_button.custom_minimum_size = Vector2(36, 30) if compact_landscape_layout else Vector2(40, 34)
 	developer_button.add_theme_font_size_override("font_size", 12)
 	developer_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	developer_button.tooltip_text = "Developer Mode unlocked for this active game" if developer_mode_unlocked else "Open Developer Mode for the active company"
@@ -1746,7 +1828,10 @@ func advance_day_controls(parent: Node, horizontal: bool = true) -> void:
 	for days in [1, 2, 7, 30]:
 		var button := action(controls, "+%d" % days, request_advance_days.bind(days), days == 1)
 		button.name = "AdvanceDays%d" % days
-		if size.x < 600.0:
+		if compact_landscape_layout:
+			button.custom_minimum_size = Vector2(38 if days == 30 else 32, 30)
+			button.add_theme_font_size_override("font_size", 11)
+		elif size.x < 600.0:
 			button.custom_minimum_size = Vector2(40 if days == 30 else 34, 34)
 			button.add_theme_font_size_override("font_size", 12)
 		else:
@@ -1764,6 +1849,10 @@ func _update_header_text() -> void:
 	if is_instance_valid(header_bank_balance_value): _refresh_bank_balance()
 
 func request_developer_mode_access() -> void:
+	# A successful Web unlock waits briefly for Safari to dismiss its keyboard.
+	# Ignore repeat taps during that transition rather than opening a second dialog.
+	if developer_access_unlock_pending:
+		return
 	if developer_mode_unlocked:
 		developer_console_visible = true
 		_developer_sync_landscape_scale()
@@ -1807,8 +1896,8 @@ func _show_developer_access_dialog() -> void:
 	var content := stack(panel, 10)
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.custom_minimum_size.x = maxf(0.0, panel.custom_minimum_size.x - 28.0)
-	content.add_child(label("Developer Mode Access", 20, Style.GOLD))
-	content.add_child(label("Developer tools apply to the active company in this browser. This public convenience code is not owner authentication.", 14, Style.MUTED))
+	content.add_child(label("Developer Mode Access", 18, Style.GOLD))
+	content.add_child(label("Tools apply to this browser’s active company. The public access code is a convenience, not owner authentication.", 13, Style.MUTED))
 	if sim == null:
 		content.add_child(label("Load an existing company before unlocking Developer Mode.", 14, Style.GOLD))
 	var code := LineEdit.new()
@@ -1823,10 +1912,11 @@ func _show_developer_access_dialog() -> void:
 	error_label.name = "DeveloperAccessError"
 	error_label.visible = not developer_access_error_message.is_empty()
 	content.add_child(error_label)
-	var actions: BoxContainer = VBoxContainer.new() if size.x < 430.0 else row(content)
+	var actions: BoxContainer = VBoxContainer.new() if size.x < 340.0 else row(content)
 	if actions.get_parent() == null: content.add_child(actions)
 	actions.add_theme_constant_override("separation", 6)
 	var cancel := action(actions, "Cancel", func():
+		_dismiss_developer_access_input(code)
 		developer_access_overlay = null
 		developer_access_code_value = ""
 		developer_access_error_message = ""
@@ -1846,22 +1936,33 @@ func _show_developer_access_dialog() -> void:
 	code.text_changed.connect(func(value: String): developer_access_code_value = value)
 	code.grab_focus()
 	call_deferred("_ensure_developer_access_focus", code)
-	call_deferred("_ensure_developer_access_focus", unlock)
 
 func _ensure_developer_access_focus(control: Control) -> void:
 	if not is_instance_valid(control) or not control.is_inside_tree(): return
 	var scroll := developer_access_overlay.find_child("DeveloperAccessScroll", true, false) as ScrollContainer if is_instance_valid(developer_access_overlay) else null
 	if scroll != null: scroll.ensure_control_visible(control)
 
+func _dismiss_developer_access_input(code: LineEdit) -> void:
+	if is_instance_valid(code):
+		code.release_focus()
+	# The pressed Cancel/Unlock button may have acquired focus after the LineEdit.
+	# Clear the viewport focus owner too, so neither control retains the IME.
+	get_viewport().gui_release_focus()
+	DisplayServer.virtual_keyboard_hide()
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("if (document.activeElement && document.activeElement.blur) document.activeElement.blur();")
+
 func _submit_developer_access(code: LineEdit, error_label: Label) -> void:
 	if not is_instance_valid(developer_access_overlay): return
 	if code.text.strip_edges().to_upper() == "URTN" and sim != null and not active_game_id.is_empty():
 		var overlay := developer_access_overlay
+		developer_access_unlock_pending = true
+		_dismiss_developer_access_input(code)
 		developer_access_overlay = null
 		developer_access_code_value = ""
 		developer_access_error_message = ""
 		overlay.queue_free()
-		_open_developer_mode_now()
+		_open_developer_mode_after_keyboard()
 	else:
 		error_label.text = "Load an existing company first." if code.text.strip_edges().to_upper() == "URTN" else "Access code not recognized."
 		error_label.visible = true
@@ -1871,6 +1972,19 @@ func _submit_developer_access(code: LineEdit, error_label: Label) -> void:
 			var scroll := developer_access_overlay.find_child("DeveloperAccessScroll", true, false) as ScrollContainer
 			if scroll != null: scroll.ensure_control_visible(error_label)
 			code.grab_focus()
+
+func _open_developer_mode_after_keyboard() -> void:
+	# iOS Safari animates visualViewport back to its full height after blur.
+	# Let the Web shell and Godot resize before measuring the active game view.
+	if OS.has_feature("web"):
+		await get_tree().create_timer(0.35).timeout
+	else:
+		# Keep the transition asynchronous in native/debug builds so the same
+		# re-entry guard covers the close/open handoff there as well.
+		await get_tree().process_frame
+	if sim != null and not active_game_id.is_empty():
+		_open_developer_mode_now()
+	developer_access_unlock_pending = false
 
 func request_advance_days(days: int) -> void:
 	if sim == null or day_advance_pending or day_advance_processing or days not in [1, 2, 7, 30]:
@@ -1899,6 +2013,7 @@ func toggle_navigation_drawer() -> void:
 		return
 	navigation_open = not navigation_open
 	navigation_panel.visible = navigation_open
+	_sync_navigation_slot_size()
 	if navigation_open:
 		var page_scroller := find_child("GameContentScroll", true, false) as ScrollContainer
 		if page_scroller != null:
@@ -1914,6 +2029,7 @@ func close_navigation_drawer(restore_focus: bool = true) -> void:
 		return
 	navigation_open = false
 	navigation_panel.visible = false
+	_sync_navigation_slot_size()
 	if restore_focus:
 		_restore_navigation_focus()
 
@@ -1921,13 +2037,27 @@ func _restore_navigation_focus() -> void:
 	if is_instance_valid(navigation_toggle) and navigation_toggle.is_inside_tree():
 		navigation_toggle.grab_focus()
 
+func _sync_navigation_slot_size() -> void:
+	if not is_instance_valid(navigation_panel):
+		return
+	navigation_panel.position = Vector2.ZERO
+	navigation_panel.size = navigation_panel.get_combined_minimum_size()
+	if is_instance_valid(navigation_slot):
+		navigation_slot.custom_minimum_size.y = navigation_panel.get_combined_minimum_size().y if navigation_open else 0.0
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	if event.keycode == KEY_ESCAPE:
 		if is_instance_valid(developer_access_overlay):
+			var code := developer_access_overlay.find_child("DeveloperAccessCode", true, false) as LineEdit
+			_dismiss_developer_access_input(code)
 			developer_access_overlay.queue_free()
 			developer_access_overlay = null
+			developer_access_code_value = ""
+			developer_access_error_message = ""
+			_developer_restore_original_scale()
+			developer_original_viewport = Vector2i.ZERO
 		elif developer_console_visible:
 			close_developer_console()
 		elif navigation_open:
@@ -2005,6 +2135,9 @@ func _create_navigation_drawer() -> void:
 	)
 	save_action.name = "DrawerActionSave"
 	save_action.custom_minimum_size.y = 46
+	# Save Game opens the save workflow, so keep it visually consistent with
+	# the existing gold primary actions instead of the semantic green success role.
+	Style.primary(save_action)
 	_apply_drawer_icon(save_action, DRAWER_ICON_PATHS["Save Game"], 20)
 	var main_menu_action := action(content, "Main Menu", func():
 		close_navigation_drawer(false)
@@ -2041,7 +2174,8 @@ func secondary_navigation(parent: Node) -> void:
 	var scroller := ScrollContainer.new()
 	scroller.name = "SecondaryNavigationScroll"
 	scroller.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroller.custom_minimum_size.y = 46
+	var compact_landscape := size.y <= 450.0 and size.x > size.y
+	scroller.custom_minimum_size.y = 34 if compact_landscape else 46
 	scroller.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroller.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	parent.add_child(scroller)
@@ -2064,9 +2198,12 @@ func secondary_navigation(parent: Node) -> void:
 		var tab := secondary_tab(strip, title, route_secondary.bind(target), selected)
 		tab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		_style_secondary_navigation_tab(tab, selected)
+		if compact_landscape:
+			tab.custom_minimum_size.y = 32
+			tab.add_theme_font_size_override("font_size", 11)
 
 func render() -> void:
-	if sim != null: _sync_gameplay_landscape_scale()
+	_sync_gameplay_landscape_scale()
 	var restore_access_dialog := is_instance_valid(developer_access_overlay)
 	if restore_access_dialog:
 		var open_code := developer_access_overlay.find_child("DeveloperAccessCode", true, false) as LineEdit
@@ -2077,6 +2214,7 @@ func render() -> void:
 	edit_checks.clear()
 	navigation_panel = null
 	navigation_toggle = null
+	navigation_slot = null
 	bank_balance_label = null
 	header_bank_balance_label = null
 	header_bank_balance_value = null
@@ -2105,9 +2243,11 @@ func render() -> void:
 	add_child(margin)
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var viewport_width := size.x
+	var compact_landscape := size.y <= 450.0 and size.x > size.y
+	compact_landscape_layout = compact_landscape
 	var horizontal_margin := 20 if viewport_width >= 900.0 else 12
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, horizontal_margin if side in ["left", "right"] else 16)
+		margin.add_theme_constant_override("margin_" + side, horizontal_margin if side in ["left", "right"] else (7 if compact_landscape else 16))
 	var centering := HBoxContainer.new()
 	centering.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -2116,7 +2256,7 @@ func render() -> void:
 	var left_space := Control.new()
 	left_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(left_space)
-	page_shell = stack(centering, 12)
+	page_shell = stack(centering, 6 if compact_landscape else 12)
 	page_shell.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	page_shell.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
@@ -2144,7 +2284,7 @@ func render() -> void:
 			"Inbound Stock": page_title = "Inbound Stock"
 			"Supplier Relationships": page_title = "Supplier Relationships"
 			"Supplier Returns": page_title = "Supplier Returns"
-		var title := label(page_title, 26 if viewport_width < 600.0 else 30)
+		var title := label(page_title, 21 if compact_landscape else (24 if viewport_width < 600.0 else 26))
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		heading.add_child(title)
 	elif screen == "Title":
@@ -2156,12 +2296,12 @@ func render() -> void:
 			"Advertising Analytics": "Ads Analytics", "Management": "Store Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
 		"CEO identity conflict": "Identity choice", "New Game": "Create a Game"}
 		var screen_heading := row(masthead)
-		var screen_title := label(titles.get(screen, screen), 30)
+		var screen_title := label(titles.get(screen, screen), 24 if viewport_width < 600.0 else 26)
 		screen_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		screen_heading.add_child(screen_title)
 		if not global_game_header:
 			_developer_button(screen_heading)
-	var scroll := ScrollContainer.new()
+	var scroll := TouchScroll.new() as ScrollContainer
 	scroll.name = "GameContentScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -2170,18 +2310,35 @@ func render() -> void:
 	# can otherwise reopen a rebuilt step at the old action's vertical position.
 	scroll.follow_focus = page != "Market"
 	shell.add_child(scroll)
-	body = stack(scroll, 8)
+	body = stack(scroll, 4 if compact_landscape else 8)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if screen == "Game" and page == "Market":
+		# The Buy Inventory workflow owns its content scroll area and footer.
+		# Let the Market page fill the remaining viewport so only the workflow's
+		# middle content scrolls while its Back/Continue controls stay visible.
+		body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if is_instance_valid(navigation_panel):
-		body.add_child(navigation_panel)
+		navigation_slot = Control.new()
+		navigation_slot.name = "PrimaryNavigationSlot"
+		navigation_slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		navigation_slot.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		navigation_slot.clip_contents = true
+		body.add_child(navigation_slot)
+		body.move_child(navigation_slot, 0)
+		navigation_slot.add_child(navigation_panel)
+		navigation_panel.position = Vector2.ZERO
+		navigation_panel.size = navigation_panel.get_combined_minimum_size()
+		navigation_panel.visible = false
 	var right_space := Control.new()
 	right_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(right_space)
 	if screen == "Game":
 		secondary_navigation(body)
 	divider(body)
-	page_wide = stack(body, 12)
+	page_wide = stack(body, 6 if compact_landscape else 12)
 	page_wide.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if screen == "Game" and page == "Market":
+		page_wide.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_grid = GridContainer.new()
 	page_grid.columns = 2 if size.x >= 768.0 else 1
 	page_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2265,6 +2422,45 @@ func _show_developer_console_overlay() -> void:
 	for side in ["left", "right", "top", "bottom"]:
 		viewport_margin.add_theme_constant_override("margin_" + side, 12)
 	overlay.add_child(viewport_margin)
+	var center := CenterContainer.new()
+	center.name = "DeveloperConsoleCenter"
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	viewport_margin.add_child(center)
+	var panel := PanelContainer.new()
+	panel.name = "DeveloperConsolePanel"
+	panel.custom_minimum_size.x = minf(920.0, maxf(300.0, size.x - 24.0))
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 12, 12))
+	center.add_child(panel)
+	var mobile_console := size.x < 600.0 or (size.x > size.y and size.y < 600.0)
+	var layout := stack(panel, 6 if mobile_console else 8)
+	layout.name = "DeveloperConsoleLayout"
+	layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var heading: BoxContainer
+	var title := label("Developer Mode", 18 if mobile_console else 22, Style.GOLD)
+	title.name = "DeveloperConsoleTitle"
+	if mobile_console: title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if mobile_console:
+		layout.add_child(title)
+		heading = row(layout)
+	else:
+		heading = row(layout)
+		heading.add_child(title)
+	heading.name = "DeveloperConsoleHeader"
+	var close_button := action(heading, "Close", close_developer_console)
+	close_button.name = "DeveloperConsoleClose"
+	close_button.custom_minimum_size.x = 74
+	var lock_button := action(heading, "Lock", leave_developer_mode)
+	lock_button.name = "DeveloperConsoleLock"
+	lock_button.custom_minimum_size.x = 74
+	if mobile_console:
+		heading.alignment = BoxContainer.ALIGNMENT_END
+		close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+		lock_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	var scroll := ScrollContainer.new()
 	scroll.name = "DeveloperConsoleScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -2274,40 +2470,12 @@ func _show_developer_console_overlay() -> void:
 	scroll.scroll_deadzone = 12
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	viewport_margin.add_child(scroll)
-	var center := CenterContainer.new()
-	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	center.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	scroll.add_child(center)
-	var panel := PanelContainer.new()
-	panel.name = "DeveloperConsolePanel"
-	panel.custom_minimum_size.x = minf(920.0, maxf(300.0, size.x - 24.0))
-	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 12, 12))
-	center.add_child(panel)
-	var content := stack(panel, 8)
+	scroll.custom_minimum_size.y = 180
+	layout.add_child(scroll)
+	var content := stack(scroll, 6 if mobile_console else 8)
 	content.name = "DeveloperConsoleContent"
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	var heading: BoxContainer
-	var mobile_console := size.x < 600.0 or (size.x > size.y and size.y < 600.0)
-	var title := label("Developer Mode", 18 if mobile_console else 22, Style.GOLD)
-	title.name = "DeveloperConsoleTitle"
-	if mobile_console: title.autowrap_mode = TextServer.AUTOWRAP_OFF
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	if mobile_console:
-		content.add_child(title)
-		heading = row(content)
-	else:
-		heading = row(content)
-		heading.add_child(title)
-	var close_button := action(heading, "Close", close_developer_console)
-	close_button.name = "DeveloperConsoleClose"
-	close_button.custom_minimum_size.x = 74
-	var lock_button := action(heading, "Lock", leave_developer_mode)
-	lock_button.name = "DeveloperConsoleLock"
-	lock_button.custom_minimum_size.x = 74
 	content.add_child(label("Active player session · %s · %s · Day %d · %s" % [
 		str(sim.state.get("owner", "Entrepreneur")), str(sim.state.get("company", "Company")),
 		int(sim.state.get("day", 1)), money(int(sim.state.get("cash", 0)))], 13, Style.MUTED))
@@ -2390,12 +2558,12 @@ func _show_developer_console_overlay() -> void:
 			"Scenarios": _dev_scenario_controls(tools)
 	var bottom_padding := Control.new()
 	bottom_padding.name = "DeveloperConsoleBottomPadding"
-	bottom_padding.custom_minimum_size.y = 16
+	bottom_padding.custom_minimum_size.y = 12 if mobile_console else 16
 	bottom_padding.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(bottom_padding)
-	_set_developer_scroll_passthrough(center)
+	_set_developer_scroll_passthrough(content)
 	for tool_button in overlay.find_children("*", "Button", true, false):
-		(tool_button as Button).custom_minimum_size.y = 46
+		(tool_button as Button).custom_minimum_size.y = 42 if mobile_console else 44
 	developer_overlay = overlay
 	add_child(overlay)
 
