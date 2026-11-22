@@ -58,7 +58,8 @@ static func box(fill: Color, border: Color, radius: int, padding: int) -> StyleB
 	return style
 
 static func normalized_font_size(requested: int, large_text: bool = false) -> int:
-	return clampi(requested, FONT_CAPTION, FONT_HEADING) + (2 if large_text else 0)
+	var standard_size := clampi(requested, FONT_CAPTION, FONT_HEADING)
+	return mini(FONT_HEADING, standard_size + (2 if large_text else 0))
 
 static func icon_size(requested: int) -> int:
 	return clampi(requested, ICON_INDICATOR, ICON_HEADER)

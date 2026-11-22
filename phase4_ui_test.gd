@@ -101,10 +101,10 @@ func run() -> void:
 	page_heading_label = controls(page_heading, "Label").front() as Label if page_heading != null and not controls(page_heading, "Label").is_empty() else null
 	primary_dashboard_button = app.find_child("Primary_Dashboard", true, false) as Button
 	compact_action = app.find_child("InventoryBrowseProductCatalogue", true, false) as Button
-	expect(page_heading_label != null and page_heading_label.get_theme_font_size("font_size") == Style.FONT_HEADING + 2
-		and primary_dashboard_button != null and primary_dashboard_button.get_theme_font_size("font_size") == Style.FONT_NAVIGATION + 2
-		and compact_action != null and compact_action.get_theme_font_size("font_size") == Style.FONT_BUTTON + 2,
-		"Large Text expands headings, navigation and actions without losing their hierarchy")
+	expect(page_heading_label != null and page_heading_label.get_theme_font_size("font_size") == Style.FONT_HEADING
+			and primary_dashboard_button != null and primary_dashboard_button.get_theme_font_size("font_size") == Style.FONT_HEADING
+			and compact_action != null and compact_action.get_theme_font_size("font_size") == Style.FONT_HEADING,
+			"Large Text increases smaller text but caps headings, navigation and actions at 14 px")
 	app.apply_text_setting(false)
 	await process_frame
 	nav = app.find_child("PrimaryNavigation", true, false)

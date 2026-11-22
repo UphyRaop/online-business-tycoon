@@ -76,9 +76,16 @@ func test_global_v4_tokens() -> void:
 		"V4 typography tokens use the approved 11, 12, 13, and 14 px hierarchy")
 	expect(ThemeStyle.normalized_font_size(26) == 14 and ThemeStyle.normalized_font_size(10) == 11,
 		"Standard typography clamps oversized headings and undersized captions to V4 tokens")
-	expect(ThemeStyle.normalized_font_size(26, true) == 16 and ThemeStyle.normalized_font_size(12, true) == 14,
-		"Large Text expands the standardized hierarchy by two pixels")
-	expect(standard.default_font_size == 13 and large.default_font_size == 15,
+	expect(ThemeStyle.normalized_font_size(11) == 11 and ThemeStyle.normalized_font_size(12) == 12
+		and ThemeStyle.normalized_font_size(13) == 13 and ThemeStyle.normalized_font_size(14) == 14,
+		"Standard caption, button, body, and heading sizes match their approved tokens")
+	expect(ThemeStyle.normalized_font_size(11, true) == 13
+		and ThemeStyle.normalized_font_size(12, true) == 14
+		and ThemeStyle.normalized_font_size(13, true) == 14
+		and ThemeStyle.normalized_font_size(14, true) == 14
+		and ThemeStyle.normalized_font_size(26, true) == 14,
+		"Large Text maps captions to 13 px and caps buttons, body text, headings, and values at 14 px")
+	expect(standard.default_font_size == 13 and large.default_font_size == 14,
 		"Theme body size follows standard and Large Text settings")
 	expect(ThemeStyle.ICON_INDICATOR == 14 and ThemeStyle.ICON_CONTROL == 16
 		and ThemeStyle.ICON_NAVIGATION == 18 and ThemeStyle.ICON_HEADER == 20

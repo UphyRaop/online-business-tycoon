@@ -30,7 +30,7 @@ func run() -> void:
 		max_font_seen = 0
 		app.large_text = large_text
 		app.theme = Style.build(large_text)
-		var limit := 16 if large_text else 14
+		var limit := Style.FONT_HEADING
 		expect(app.theme.default_font_size <= limit
 			and app.theme.get_font_size("font_size", "PopupMenu") <= limit
 			and app.theme.get_font_size("font_size", "AcceptDialog") <= limit,
@@ -122,6 +122,10 @@ func run() -> void:
 		await process_frame
 		if large_text: large_text_max = max_font_seen
 		else: standard_max = max_font_seen
+	expect(standard_max == Style.FONT_HEADING,
+		"Standard runtime scan reaches the 14 px heading/financial token maximum")
+	expect(large_text_max == Style.FONT_HEADING,
+		"Large Text runtime scan reaches, but never exceeds, the 14 px maximum")
 	print("Runtime typography validation: %d visible screen/layout checks, max standard=%d px, max Large Text=%d px, %d failures" % [screen_checks, standard_max, large_text_max, failures])
 	app.queue_free()
 	await process_frame
