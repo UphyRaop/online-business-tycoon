@@ -81,6 +81,8 @@ func run() -> void:
 	press("Ads Analytics")
 	expect(has_label("Reporting Period") and has_label("Advertising Platform") and has_label("Campaign Status")
 		and has_label("Destination"), "Ads Analytics explains each filter")
+	var analytics_titles := controls(app, "Label").filter(func(item): return item.text == "Ads Analytics")
+	expect(analytics_titles.size() == 1, "Ads Analytics uses one page heading without a duplicate card heading")
 	var filters := controls(app, "OptionButton")
 	expect(filters.size() >= 3 and filters[2].get_item_text(0) == "All Status",
 		"Campaign status dropdown uses the revised All Status label")

@@ -114,6 +114,10 @@ func run() -> void:
 		"Console offers separate Close and Lock actions")
 	expect(app.find_child("DeveloperConsolePanel", true, false) != null and app.find_child("DeveloperPrimaryTabs", true, false) != null,
 		"Compact overlay provides Preview Device and Cheats navigation")
+	var console_scroll := app.find_child("DeveloperConsoleScroll", true, false) as ScrollContainer
+	var console_header := app.find_child("DeveloperConsoleHeader", true, false) as Control
+	expect(console_scroll != null and console_header != null and not console_scroll.is_ancestor_of(console_header),
+		"Developer Mode title and Close/Lock header stay outside the scrollable tool content")
 	tap(app, "Preview Device")
 	expect(app.developer_console_tab == "Preview Device" and app.find_child("DeveloperPreviewDevicePanel", true, false) != null,
 		"Preview Device category is available for the current session")
@@ -163,7 +167,7 @@ func run() -> void:
 		if console_panel != null:
 			expect(console_panel.get_global_rect().position.y >= -1,
 				"Developer console top edge stays inside the viewport at %s" % viewport)
-		var console_scroll := app.find_child("DeveloperConsoleScroll", true, false) as ScrollContainer
+		console_scroll = app.find_child("DeveloperConsoleScroll", true, false) as ScrollContainer
 		expect(console_scroll != null and console_scroll.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_DISABLED,
 			"Developer tools use vertical scrolling at %s" % viewport)
 		expect(console_scroll != null and console_scroll.vertical_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO
@@ -198,6 +202,20 @@ func run() -> void:
 				expect(final_rect.position.y >= viewport_rect.position.y - 1
 					and final_rect.end.y <= viewport_rect.end.y + 1,
 					"%s final option is fully visible at the scroll bottom for %s" % [category, viewport])
+				console_header = app.find_child("DeveloperConsoleHeader", true, false) as Control
+				var close_control := button(app, "DeveloperConsoleClose")
+				var lock_control := button(app, "DeveloperConsoleLock")
+				expect(console_header != null and close_control != null and lock_control != null
+					and not console_scroll.is_ancestor_of(console_header),
+					"Developer Mode header remains outside the scrolling content for %s" % viewport)
+				if console_header != null and close_control != null and lock_control != null:
+					var header_rect := console_header.get_global_rect()
+					var close_rect := close_control.get_global_rect()
+					var lock_rect := lock_control.get_global_rect()
+					expect(header_rect.position.y >= -1 and close_rect.position.y >= header_rect.position.y - 1
+						and close_rect.end.y <= header_rect.end.y + 1 and lock_rect.position.y >= header_rect.position.y - 1
+						and lock_rect.end.y <= header_rect.end.y + 1,
+						"Close and Lock remain visible while %s tools are scrolled to the bottom at %s" % [category, viewport])
 			expect(not final_option.disabled and final_option.mouse_filter == Control.MOUSE_FILTER_PASS,
 				"%s final option remains clickable while forwarding scroll at %s" % [category, viewport])
 			console_scroll.scroll_vertical = 0

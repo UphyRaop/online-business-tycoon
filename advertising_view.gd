@@ -297,7 +297,9 @@ static func analytics(app: Control) -> void:
 	var campaigns: Dictionary = state.advertising.campaigns
 	var ids: Array = campaigns.keys()
 	ids.sort()
-	var view: VBoxContainer = app.wide_card("Ads Analytics")
+	# The page heading already labels this route. Keep the analytics surface focused
+	# on its reporting controls instead of repeating the same heading inside the card.
+	var view: VBoxContainer = app.wide_card("")
 	var period_choices := ["Daily · Last 7 Days", "Weekly · Last 8 Weeks", "Monthly · Last 12 Months", "All Time"]
 	view.add_child(app.label("Reporting Period", 14, Style.MUTED))
 	var periods: OptionButton = app.dropdown(view, period_choices, clampi(app.ad_period, 0, 3))

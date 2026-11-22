@@ -2345,43 +2345,35 @@ func _show_developer_console_overlay() -> void:
 	for side in ["left", "right", "top", "bottom"]:
 		viewport_margin.add_theme_constant_override("margin_" + side, 12)
 	overlay.add_child(viewport_margin)
-	var scroll := ScrollContainer.new()
-	scroll.name = "DeveloperConsoleScroll"
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.follow_focus = true
-	scroll.mouse_force_pass_scroll_events = true
-	scroll.scroll_deadzone = 12
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	viewport_margin.add_child(scroll)
 	var center := CenterContainer.new()
+	center.name = "DeveloperConsoleCenter"
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	center.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	scroll.add_child(center)
+	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	viewport_margin.add_child(center)
 	var panel := PanelContainer.new()
 	panel.name = "DeveloperConsolePanel"
 	panel.custom_minimum_size.x = minf(920.0, maxf(300.0, size.x - 24.0))
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 12, 12))
 	center.add_child(panel)
 	var mobile_console := size.x < 600.0 or (size.x > size.y and size.y < 600.0)
-	var content := stack(panel, 6 if mobile_console else 8)
-	content.name = "DeveloperConsoleContent"
-	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var layout := stack(panel, 6 if mobile_console else 8)
+	layout.name = "DeveloperConsoleLayout"
+	layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var heading: BoxContainer
 	var title := label("Developer Mode", 18 if mobile_console else 22, Style.GOLD)
 	title.name = "DeveloperConsoleTitle"
 	if mobile_console: title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if mobile_console:
-		content.add_child(title)
-		heading = row(content)
+		layout.add_child(title)
+		heading = row(layout)
 	else:
-		heading = row(content)
+		heading = row(layout)
 		heading.add_child(title)
+	heading.name = "DeveloperConsoleHeader"
 	var close_button := action(heading, "Close", close_developer_console)
 	close_button.name = "DeveloperConsoleClose"
 	close_button.custom_minimum_size.x = 74
@@ -2392,6 +2384,21 @@ func _show_developer_console_overlay() -> void:
 		heading.alignment = BoxContainer.ALIGNMENT_END
 		close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 		lock_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	var scroll := ScrollContainer.new()
+	scroll.name = "DeveloperConsoleScroll"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.follow_focus = true
+	scroll.mouse_force_pass_scroll_events = true
+	scroll.scroll_deadzone = 12
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size.y = 180
+	layout.add_child(scroll)
+	var content := stack(scroll, 6 if mobile_console else 8)
+	content.name = "DeveloperConsoleContent"
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	content.add_child(label("Active player session · %s · %s · Day %d · %s" % [
 		str(sim.state.get("owner", "Entrepreneur")), str(sim.state.get("company", "Company")),
 		int(sim.state.get("day", 1)), money(int(sim.state.get("cash", 0)))], 13, Style.MUTED))
@@ -2477,7 +2484,7 @@ func _show_developer_console_overlay() -> void:
 	bottom_padding.custom_minimum_size.y = 12 if mobile_console else 16
 	bottom_padding.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(bottom_padding)
-	_set_developer_scroll_passthrough(center)
+	_set_developer_scroll_passthrough(content)
 	for tool_button in overlay.find_children("*", "Button", true, false):
 		(tool_button as Button).custom_minimum_size.y = 42 if mobile_console else 44
 	developer_overlay = overlay
