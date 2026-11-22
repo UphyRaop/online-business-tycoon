@@ -368,7 +368,7 @@ func label(text: String, font_size: int = Style.FONT_BODY, color: Color = Style.
 	node.add_theme_color_override("font_color", color)
 	return node
 
-func stack(parent: Node, gap: int = 8) -> VBoxContainer:
+func stack(parent: Node, gap: int = Style.CARD_CONTENT_GAP) -> VBoxContainer:
 	var box := VBoxContainer.new()
 	if OS.has_feature("web"):
 		box.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -380,7 +380,7 @@ func row(parent: Node) -> HBoxContainer:
 	var box := HBoxContainer.new()
 	if OS.has_feature("web"):
 		box.mouse_filter = Control.MOUSE_FILTER_PASS
-	box.add_theme_constant_override("separation", Style.SPACE_CONTROL)
+	box.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	parent.add_child(box)
 	return box
 
@@ -483,13 +483,13 @@ func _create_card(parent: Node, title: String) -> VBoxContainer:
 	var surface := PanelContainer.new()
 	if OS.has_feature("web"):
 		surface.mouse_filter = Control.MOUSE_FILTER_PASS
-	surface.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 12, Style.CARD_PADDING))
+	surface.add_theme_stylebox_override("panel", Style.card_box(Style.SURFACE, Style.LINE))
 	surface.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	surface.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	parent.add_child(surface)
 	if parent == page_grid:
 		page_cards.append(surface)
-	var content := stack(surface)
+	var content := stack(surface, Style.CARD_CONTENT_GAP)
 	if not title.is_empty():
 		content.add_child(label(title, Style.FONT_HEADING))
 	return content
@@ -501,8 +501,8 @@ func divider(parent: Node) -> void:
 func metric(parent: Node, caption: String, value: String, color: Color = Style.TEXT) -> void:
 	var line := BoxContainer.new()
 	line.name = "ResponsiveMetric"
-	line.vertical = size.x < 600.0
-	line.add_theme_constant_override("separation", 2 if line.vertical else 8)
+	line.vertical = false
+	line.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	if OS.has_feature("web"):
 		line.mouse_filter = Control.MOUSE_FILTER_PASS
 	parent.add_child(line)
@@ -544,8 +544,8 @@ func _update_responsive_layout() -> void:
 	Market.update_responsive_layout(self)
 	for metric_row in find_children("ResponsiveMetric", "BoxContainer", true, false):
 		var responsive_metric := metric_row as BoxContainer
-		responsive_metric.vertical = viewport_width < 600.0
-		responsive_metric.add_theme_constant_override("separation", 2 if responsive_metric.vertical else 8)
+		responsive_metric.vertical = false
+		responsive_metric.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	var inventory_panel := find_child("DashboardInventoryOverview", true, false) as PanelContainer
 	var mobile_layout := viewport_width < 600.0
 	if inventory_panel != null and bool(inventory_panel.get_meta("mobile_layout", false)) != mobile_layout:
@@ -621,11 +621,11 @@ func _reflow_page_cards() -> void:
 		page_left_column = VBoxContainer.new()
 		page_left_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		page_left_column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-		page_left_column.add_theme_constant_override("separation", 18)
+		page_left_column.add_theme_constant_override("separation", Style.CARD_GRID_GAP)
 		page_right_column = VBoxContainer.new()
 		page_right_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		page_right_column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-		page_right_column.add_theme_constant_override("separation", 18)
+		page_right_column.add_theme_constant_override("separation", Style.CARD_GRID_GAP)
 		page_grid.add_child(page_left_column)
 		page_grid.add_child(page_right_column)
 		for panel in page_cards:
@@ -1095,8 +1095,8 @@ func company_selection() -> void:
 	actions.name = "CompanySelectionActions"
 	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	actions.custom_minimum_size.x = minf(360.0, maxf(0.0, size.x - 66.0))
-	actions.add_theme_constant_override("h_separation", 8)
-	actions.add_theme_constant_override("v_separation", 8)
+	actions.add_theme_constant_override("h_separation", Style.BUTTON_GROUP_GAP)
+	actions.add_theme_constant_override("v_separation", Style.BUTTON_GROUP_GAP)
 	view.add_child(actions)
 	var start_action := action(actions, "Start a New Company", func(): show_screen("Setup"), true)
 	start_action.name = "StartAnotherCompany"
@@ -1117,8 +1117,8 @@ func company_selection() -> void:
 		var companies_grid := GridContainer.new()
 		companies_grid.name = "ChooseCompanyCards"
 		companies_grid.columns = 2 if size.x >= 768.0 else 1
-		companies_grid.add_theme_constant_override("h_separation", 12)
-		companies_grid.add_theme_constant_override("v_separation", 10)
+		companies_grid.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+		companies_grid.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 		view.add_child(companies_grid)
 		for entry in owned:
 			var company_name := str(entry.get("name", "Company"))
@@ -1153,10 +1153,10 @@ func profile_page() -> void:
 	var info := wide_card("CEO Profile")
 	var identity_layout: BoxContainer = HBoxContainer.new() if size.x >= 600.0 else VBoxContainer.new()
 	identity_layout.name = "CEOIdentityLayout"
-	identity_layout.add_theme_constant_override("separation", 18)
+	identity_layout.add_theme_constant_override("separation", Style.SPACE_SECTION)
 	info.add_child(identity_layout)
 	var portrait := VBoxContainer.new()
-	portrait.add_theme_constant_override("separation", 8)
+	portrait.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	portrait.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	identity_layout.add_child(portrait)
 	var portrait_width := 170.0 if size.x >= 600.0 else minf(150.0, maxf(132.0, size.x * 0.38))
@@ -1165,7 +1165,7 @@ func profile_page() -> void:
 	portrait.add_child(portrait_frame)
 	var details := VBoxContainer.new()
 	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	details.add_theme_constant_override("separation", 8)
+	details.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	identity_layout.add_child(details)
 	if profile_editing:
 		var full_name := field(details, "Full Name", str(ceo_profile.get("full_name", sim.state.get("owner", ""))))
@@ -1301,7 +1301,7 @@ func profile_page() -> void:
 	companies.add_child(label("Each company keeps separate operations, accounts, and save data.", 14, Style.MUTED))
 	for entry in ceo_profile.get("companies", []):
 		var company_row := VBoxContainer.new()
-		company_row.add_theme_constant_override("separation", 8)
+		company_row.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 		companies.add_child(company_row)
 		var description := label("%s · %s" % [str(entry.get("name", "Company")), str(entry.get("country", ""))], Style.FONT_BODY, Style.GOLD)
 		description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1341,7 +1341,7 @@ func _grouped_integer(value: int) -> String:
 func empty_state(title: String, description: String) -> VBoxContainer:
 	var state := VBoxContainer.new()
 	state.name = "EmptyState"
-	state.add_theme_constant_override("separation", 4)
+	state.add_theme_constant_override("separation", Style.SPACE_TIGHT)
 	state.add_child(label(title, Style.FONT_BODY, Style.TEXT))
 	state.add_child(label(description, 13, Style.MUTED))
 	return state
@@ -1403,7 +1403,7 @@ func _show_avatar_crop_modal() -> void:
 	editor_card.custom_minimum_size.x = maxf(280.0, modal_width)
 	editor_card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	editor_card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	editor_card.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 15, 16))
+	editor_card.add_theme_stylebox_override("panel", Style.card_box(Style.SURFACE, Style.GOLD, 12))
 	center.add_child(editor_card)
 	var content := stack(editor_card, 4)
 	content.add_child(label("Crop Profile Photo", Style.FONT_HEADING))
@@ -1411,13 +1411,13 @@ func _show_avatar_crop_modal() -> void:
 	var mobile_crop := size.x < 600.0
 	var composition := VBoxContainer.new()
 	composition.alignment = BoxContainer.ALIGNMENT_CENTER
-	composition.add_theme_constant_override("separation", 8)
+	composition.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	content.add_child(composition)
 	var crop_width := minf(200.0 if mobile_crop else 300.0, maxf(180.0 if mobile_crop else 240.0, size.x - (64.0 if mobile_crop else 88.0)))
 	var preview_section := VBoxContainer.new()
 	preview_section.name = "AvatarCropPreviewSection"
 	preview_section.alignment = BoxContainer.ALIGNMENT_CENTER
-	preview_section.add_theme_constant_override("separation", 6)
+	preview_section.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	preview_section.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	composition.add_child(preview_section)
 	var preview_title := label("Live Preview", Style.FONT_HEADING, Style.GOLD)
@@ -1432,7 +1432,7 @@ func _show_avatar_crop_modal() -> void:
 	var controls := VBoxContainer.new()
 	controls.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	controls.custom_minimum_size.x = crop_width
-	controls.add_theme_constant_override("separation", 6)
+	controls.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	composition.add_child(controls)
 	controls.add_child(label("Zoom", 14, Style.MUTED))
 	var zoom := HSlider.new()
@@ -1716,7 +1716,7 @@ func primary_navigation(parent: Node) -> Button:
 	var heading := row(rows)
 	heading.name = "GameHeaderPrimaryRow"
 	heading.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	heading.add_theme_constant_override("separation", 5)
+	heading.add_theme_constant_override("separation", Style.PAGE_CONTENT_GAP)
 	var menu_button := action(heading, "", toggle_navigation_drawer, false)
 	menu_button.name = "NavigationMenuButton"
 	menu_button.custom_minimum_size = Vector2(36, 34) if compact_landscape_layout else Vector2(40, 40)
@@ -1747,7 +1747,7 @@ func primary_navigation(parent: Node) -> Button:
 	var details := row(rows)
 	details.name = "GameHeaderSecondaryRow"
 	details.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	details.add_theme_constant_override("separation", 6)
+	details.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	header_date_label = label(_game_date_text(), 12 if viewport_width < 600.0 else 13, Style.MUTED)
 	header_date_label.name = "GameDate"
 	header_date_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1891,10 +1891,10 @@ func _show_developer_access_dialog() -> void:
 	var panel := PanelContainer.new()
 	panel.name = "DeveloperAccessPanel"
 	panel.custom_minimum_size.x = minf(400.0, maxf(280.0, size.x - 28.0))
-	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 10, 14))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Style.SURFACE, Style.GOLD))
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	center.add_child(panel)
-	var content := stack(panel, 10)
+	var content := stack(panel, Style.CARD_CONTENT_GAP)
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.custom_minimum_size.x = maxf(0.0, panel.custom_minimum_size.x - 28.0)
 	content.add_child(label("Developer Mode Access", Style.FONT_HEADING, Style.GOLD))
@@ -1915,7 +1915,7 @@ func _show_developer_access_dialog() -> void:
 	content.add_child(error_label)
 	var actions: BoxContainer = VBoxContainer.new() if size.x < 340.0 else row(content)
 	if actions.get_parent() == null: content.add_child(actions)
-	actions.add_theme_constant_override("separation", 6)
+	actions.add_theme_constant_override("separation", Style.BUTTON_GROUP_GAP)
 	var cancel := action(actions, "Cancel", func():
 		_dismiss_developer_access_input(code)
 		developer_access_overlay = null
@@ -2097,9 +2097,9 @@ func _create_navigation_drawer() -> void:
 	drawer.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	drawer.custom_minimum_size.x = clampf(size.x * 0.78, 260.0, 320.0)
 	drawer.mouse_filter = Control.MOUSE_FILTER_STOP
-	drawer.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 9, 12))
+	drawer.add_theme_stylebox_override("panel", Style.card_box(Style.SURFACE, Style.GOLD, 9))
 	navigation_panel = drawer
-	var content := stack(drawer, 10)
+	var content := stack(drawer, Style.CARD_CONTENT_GAP)
 	var heading := row(content)
 	var title := label("Navigation", Style.FONT_HEADING)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2108,7 +2108,7 @@ func _create_navigation_drawer() -> void:
 	close_button.name = "PrimaryNavigationClose"
 	close_button.custom_minimum_size = Vector2(72, 44)
 	_apply_drawer_icon(close_button, DRAWER_ICON_PATHS.Close, 18)
-	var nav_list := stack(content, 8)
+	var nav_list := stack(content, Style.CARD_CONTENT_GAP)
 	nav_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for index in NAV.size():
 		var target: String = NAV[index]
@@ -2119,7 +2119,7 @@ func _create_navigation_drawer() -> void:
 		)
 		item.name = "Primary_" + target
 		item.tooltip_text = target
-		item.custom_minimum_size.y = 50
+		item.custom_minimum_size.y = TOUCH_HEIGHT
 		item.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		item.focus_mode = Control.FOCUS_ALL
 		_apply_drawer_icon(item, NAV_ICON_PATHS[target], Style.ICON_NAVIGATION)
@@ -2136,7 +2136,7 @@ func _create_navigation_drawer() -> void:
 		open_screen("Save")
 	)
 	save_action.name = "DrawerActionSave"
-	save_action.custom_minimum_size.y = 46
+	save_action.custom_minimum_size.y = TOUCH_HEIGHT
 	# Save Game opens the save workflow, so keep it visually consistent with
 	# the existing gold primary actions instead of the semantic green success role.
 	Style.primary(save_action)
@@ -2146,13 +2146,13 @@ func _create_navigation_drawer() -> void:
 		leave_game()
 	)
 	main_menu_action.name = "DrawerActionMainMenu"
-	main_menu_action.custom_minimum_size.y = 46
+	main_menu_action.custom_minimum_size.y = TOUCH_HEIGHT
 	_apply_drawer_icon(main_menu_action, DRAWER_ICON_PATHS["Main Menu"], 20)
 	Style.secondary(main_menu_action)
 	if developer_mode_unlocked:
 		var lock_action := action(content, "Lock Developer Mode", leave_developer_mode)
 		lock_action.name = "DrawerActionLockDeveloperMode"
-		lock_action.custom_minimum_size.y = 46
+		lock_action.custom_minimum_size.y = TOUCH_HEIGHT
 		Style.secondary(lock_action)
 
 func _apply_drawer_icon(button: Button, path: String, max_width: int = 20) -> void:
@@ -2183,7 +2183,7 @@ func secondary_navigation(parent: Node) -> void:
 	parent.add_child(scroller)
 	var strip := HBoxContainer.new()
 	strip.name = "SecondaryNavigationTabs"
-	strip.add_theme_constant_override("separation", 6)
+	strip.add_theme_constant_override("separation", Style.NAVIGATION_TAB_GAP)
 	strip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	scroller.add_child(strip)
 	for route in routes:
@@ -2249,7 +2249,7 @@ func render() -> void:
 	compact_landscape_layout = compact_landscape
 	var horizontal_margin := 20 if viewport_width >= 900.0 else 12
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, horizontal_margin if side in ["left", "right"] else (7 if compact_landscape else 16))
+		margin.add_theme_constant_override("margin_" + side, horizontal_margin if side in ["left", "right"] else (7 if compact_landscape else Style.PAGE_MARGIN_VERTICAL))
 	var centering := HBoxContainer.new()
 	centering.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -2258,7 +2258,7 @@ func render() -> void:
 	var left_space := Control.new()
 	left_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(left_space)
-	page_shell = stack(centering, 6 if compact_landscape else 12)
+	page_shell = stack(centering, Style.PAGE_SECTION_GAP)
 	page_shell.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	page_shell.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
@@ -2312,7 +2312,7 @@ func render() -> void:
 	# can otherwise reopen a rebuilt step at the old action's vertical position.
 	scroll.follow_focus = page != "Market"
 	shell.add_child(scroll)
-	body = stack(scroll, 4 if compact_landscape else 8)
+	body = stack(scroll, 4 if compact_landscape else Style.PAGE_CONTENT_GAP)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if screen == "Game" and page == "Market":
 		# The Buy Inventory workflow owns its content scroll area and footer.
@@ -2336,16 +2336,15 @@ func render() -> void:
 	centering.add_child(right_space)
 	if screen == "Game":
 		secondary_navigation(body)
-	divider(body)
-	page_wide = stack(body, 6 if compact_landscape else 12)
+	page_wide = stack(body, Style.PAGE_SECTION_GAP)
 	page_wide.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if screen == "Game" and page == "Market":
 		page_wide.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_grid = GridContainer.new()
 	page_grid.columns = 2 if size.x >= 768.0 else 1
 	page_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	page_grid.add_theme_constant_override("h_separation", 18)
-	page_grid.add_theme_constant_override("v_separation", 18)
+	page_grid.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	page_grid.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	body.add_child(page_grid)
 	status = label(notice, 14, Style.RED if error_notice else Style.GREEN)
 	status.visible = not notice.is_empty()
@@ -2452,7 +2451,7 @@ func _show_developer_console_overlay() -> void:
 	panel.custom_minimum_size.x = minf(920.0, maxf(300.0, size.x - 24.0))
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.GOLD, 12, 12))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Style.SURFACE, Style.GOLD, 12))
 	center.add_child(panel)
 	var mobile_console := size.x < 600.0 or (size.x > size.y and size.y < 600.0)
 	var layout := stack(panel, 6 if mobile_console else 8)
@@ -2507,8 +2506,8 @@ func _show_developer_console_overlay() -> void:
 		content.add_child(label("Developer changes are in memory and not saved yet.", 14, Style.GOLD))
 	var primary_tabs := HFlowContainer.new()
 	primary_tabs.name = "DeveloperPrimaryTabs"
-	primary_tabs.add_theme_constant_override("h_separation", 5)
-	primary_tabs.add_theme_constant_override("v_separation", 5)
+	primary_tabs.add_theme_constant_override("h_separation", Style.NAVIGATION_TAB_GAP)
+	primary_tabs.add_theme_constant_override("v_separation", Style.NAVIGATION_TAB_GAP)
 	content.add_child(primary_tabs)
 	for tab in ["Preview Device", "Cheats"]:
 		var tab_button := action(primary_tabs, tab, func():
@@ -2521,8 +2520,8 @@ func _show_developer_console_overlay() -> void:
 		preview.name = "DeveloperPreviewDevicePanel"
 		preview.add_child(label("Resize the game view without changing the active company or its simulation.", 13, Style.MUTED))
 		var presets := HFlowContainer.new()
-		presets.add_theme_constant_override("h_separation", 6)
-		presets.add_theme_constant_override("v_separation", 6)
+		presets.add_theme_constant_override("h_separation", Style.BUTTON_GROUP_GAP)
+		presets.add_theme_constant_override("v_separation", Style.BUTTON_GROUP_GAP)
 		preview.add_child(presets)
 		for device in ["desktop", "tablet", "mobile"]:
 			var caption: String = {"desktop": "Desktop · 900 × 1200", "tablet": "Tablet · 768 × 1024", "mobile": "Mobile · 390 × 844"}[device]
@@ -2554,8 +2553,8 @@ func _show_developer_console_overlay() -> void:
 		)
 		var categories := HFlowContainer.new()
 		categories.name = "DeveloperCheatTabs"
-		categories.add_theme_constant_override("h_separation", 4)
-		categories.add_theme_constant_override("v_separation", 4)
+		categories.add_theme_constant_override("h_separation", Style.SPACE_TIGHT)
+		categories.add_theme_constant_override("v_separation", Style.SPACE_TIGHT)
 		content.add_child(categories)
 		for tab in ["Finance", "Inventory", "Sales & Orders", "Marketing", "Company", "Time", "Scenarios"]:
 			var selected_tab: String = str(tab)
@@ -2748,10 +2747,9 @@ func dashboard() -> void:
 	var balance_card := PanelContainer.new()
 	balance_card.name = "DashboardBankBalanceCard"
 	balance_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	balance_card.custom_minimum_size.y = 78
-	balance_card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.GOLD, 10, 10))
+	balance_card.add_theme_stylebox_override("panel", Style.card_box(Style.INPUT, Style.GOLD))
 	var balance_stack := VBoxContainer.new()
-	balance_stack.add_theme_constant_override("separation", 2)
+	balance_stack.add_theme_constant_override("separation", Style.SPACE_TIGHT)
 	balance_stack.alignment = BoxContainer.ALIGNMENT_CENTER
 	balance_card.add_child(balance_stack)
 	var balance_title := label("Bank Balance", 13, Style.GOLD)
@@ -2777,8 +2775,8 @@ func dashboard() -> void:
 		if campaign.status == "active": active_campaigns += 1
 	var kpis := GridContainer.new()
 	kpis.columns = 4 if size.x >= 900.0 else 2
-	kpis.add_theme_constant_override("h_separation", 8)
-	kpis.add_theme_constant_override("v_separation", 8)
+	kpis.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	kpis.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	kpis.name = "DashboardKpis"
 	overview.add_child(kpis)
 	_add_kpi(kpis, "Lifetime Net Sales", money(totals.sales - totals.refunds))
@@ -2794,8 +2792,8 @@ func dashboard() -> void:
 	var channel_grid := GridContainer.new()
 	channel_grid.name = "DashboardShortcuts"
 	channel_grid.columns = 3 if size.x >= 900.0 else (2 if size.x >= 600.0 else 1)
-	channel_grid.add_theme_constant_override("h_separation", 12)
-	channel_grid.add_theme_constant_override("v_separation", 12)
+	channel_grid.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	channel_grid.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	page_wide.add_child(channel_grid)
 	var store_card := _create_card(channel_grid, "Store Management")
 	store_card.name = "DashboardStoreManagement"
@@ -2844,7 +2842,7 @@ func dashboard() -> void:
 
 func _add_kpi(parent: GridContainer, caption: String, value: String, color: Color = Style.TEXT) -> PanelContainer:
 	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 9, 10))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Style.INPUT, Style.LINE, 9))
 	panel.custom_minimum_size.x = 105
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(panel)
@@ -2872,8 +2870,8 @@ func channel_cards(report: Dictionary, scope: String) -> void:
 	var summaries := GridContainer.new()
 	summaries.name = "SalesChannelSummaryGrid"
 	summaries.columns = 2 if size.x >= 600.0 else 1
-	summaries.add_theme_constant_override("h_separation", 12)
-	summaries.add_theme_constant_override("v_separation", 8)
+	summaries.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	summaries.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	channels.add_child(summaries)
 	for channel in 2:
 		var totals: Dictionary = report.channels[channel]
@@ -2881,9 +2879,9 @@ func channel_cards(report: Dictionary, scope: String) -> void:
 		var summary: PanelContainer = PanelContainer.new()
 		summary.name = "SalesChannel%d" % channel
 		summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		summary.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 9, 10))
+		summary.add_theme_stylebox_override("panel", Style.card_box(Style.INPUT, Style.LINE, 9))
 		summaries.add_child(summary)
-		var content := stack(summary, 5)
+		var content := stack(summary, Style.CARD_CONTENT_GAP)
 		var heading := row(content)
 		var icon_path: String = NAV_ICON_PATHS.Market if channel == 0 else NAV_ICON_PATHS.Business
 		var channel_icon := TextureRect.new()
@@ -3040,8 +3038,8 @@ func financial_dashboard(report: Dictionary) -> void:
 	var summary := FinanceManagement.dashboard(sim.state, report)
 	var kpis := GridContainer.new()
 	kpis.columns = 3 if size.x >= 900.0 else 2
-	kpis.add_theme_constant_override("h_separation", 10)
-	kpis.add_theme_constant_override("v_separation", 10)
+	kpis.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	kpis.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	view.add_child(kpis)
 	for item in [
 		["Company Cash", money(summary.cash)], ["Revenue", money(summary.revenue)],
@@ -3052,7 +3050,7 @@ func financial_dashboard(report: Dictionary) -> void:
 	]:
 		var metric_card := PanelContainer.new()
 		metric_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		metric_card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 10, 10))
+		metric_card.add_theme_stylebox_override("panel", Style.card_box(Style.INPUT, Style.LINE))
 		var content := VBoxContainer.new()
 		content.add_child(label(str(item[0]), 12, Style.MUTED))
 		content.add_child(label(str(item[1]), Style.FONT_HEADING, Style.GOLD))
@@ -3124,7 +3122,7 @@ func expense_management() -> void:
 	for entry in transactions:
 		var day := int(entry.day)
 		var day_card := PanelContainer.new()
-		day_card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 8, 10))
+		day_card.add_theme_stylebox_override("panel", Style.card_box(Style.INPUT, Style.LINE, 8))
 		var day_content := VBoxContainer.new()
 		var summary := row(day_content)
 		var day_label := label(Calendar.format(day), 14, Style.GOLD)

@@ -20,8 +20,8 @@ static func overview(app: Control) -> void:
 		for field in Ads.METRIC_FIELDS + ["estimated_profit"]: totals[field] += int(metric.get(field, 0))
 	var kpis := GridContainer.new()
 	kpis.columns = 3 if app.size.x >= 900.0 else 2
-	kpis.add_theme_constant_override("h_separation", 8)
-	kpis.add_theme_constant_override("v_separation", 8)
+	kpis.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	kpis.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	view.add_child(kpis)
 	_analytics_kpi(app, kpis, "Active Campaigns", str(active))
 	_analytics_kpi(app, kpis, "Ad Spend", app.money(totals.spend))
@@ -346,8 +346,8 @@ static func analytics(app: Control) -> void:
 	var cpm: String = app.money(roundi(Ads.cpm_cents(totals.spend, totals.impressions))) if totals.impressions > 0 else "Unavailable"
 	var kpis := GridContainer.new()
 	kpis.columns = 3 if app.size.x >= 700.0 else 2
-	kpis.add_theme_constant_override("h_separation", 10)
-	kpis.add_theme_constant_override("v_separation", 10)
+	kpis.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	kpis.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	view.add_child(kpis)
 	_analytics_kpi(app, kpis, "Total Ad Spend", app.money(totals.spend))
 	_analytics_kpi(app, kpis, "Attributed Revenue", app.money(totals.attributed_revenue - totals.attributed_refunds))
@@ -446,7 +446,7 @@ static func analytics(app: Control) -> void:
 static func _analytics_kpi(app: Control, parent: Control, title: String, value: String) -> void:
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 10, 12))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Style.INPUT, Style.LINE))
 	var content := VBoxContainer.new()
 	content.add_child(app.label(title, 13, Style.MUTED))
 	content.add_child(app.label(value, Style.FONT_HEADING, Style.GOLD))
@@ -457,13 +457,13 @@ static func _analytics_pair_kpi(app: Control, parent: Control, title: String, fi
 	var panel := PanelContainer.new()
 	panel.name = control_name
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 10, 12))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Style.INPUT, Style.LINE))
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 4)
+	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	content.add_child(app.label(title, 13, Style.MUTED))
 	for metric in [[first_name, first_value], [second_name, second_value]]:
 		var metric_row := HBoxContainer.new()
-		metric_row.add_theme_constant_override("separation", 6)
+		metric_row.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 		var metric_label: Label = app.label(str(metric[0]), 11, Style.MUTED)
 		metric_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		metric_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -480,9 +480,9 @@ static func _analytics_pair_kpi(app: Control, parent: Control, title: String, fi
 static func _analytics_card(app: Control, parent: Control, title: String) -> VBoxContainer:
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 12, 14))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Style.SURFACE, Style.LINE, 12))
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 8)
+	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	content.add_child(app.label(title, Style.FONT_HEADING))
 	panel.add_child(content)
 	parent.add_child(panel)

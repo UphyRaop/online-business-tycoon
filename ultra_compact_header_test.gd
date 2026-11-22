@@ -142,6 +142,13 @@ func run() -> void:
 			expect(app.navigation_open and nav_panel != null and nav_panel.is_visible_in_tree()
 				and scroller != null and scroller.is_ancestor_of(nav_panel) and not nav_panel.top_level,
 				"Hamburger opens Main Navigation in normal scroll flow at %s" % viewport)
+			var scroll_content := scroller.get_child(0) as Control if scroller != null and scroller.get_child_count() > 0 else null
+			var scroll_fixture := Control.new()
+			scroll_fixture.name = "QA_NavigationScrollFixture"
+			scroll_fixture.custom_minimum_size.y = maxf(500.0, scroller.size.y + 200.0) if scroller != null else 700.0
+			if scroll_content != null:
+				scroll_content.add_child(scroll_fixture)
+			await process_frame
 			var nav_start_y := nav_panel.get_global_rect().position.y if nav_panel != null else 0.0
 			if scroller != null:
 				scroller.scroll_vertical = mini(scroller.get_v_scroll_bar().max_value, 80.0)
@@ -150,6 +157,8 @@ func run() -> void:
 					"Main Navigation scrolls away naturally at %s" % viewport)
 				scroller.scroll_vertical = 0
 				await process_frame
+			if scroll_fixture.get_parent() != null: scroll_fixture.get_parent().remove_child(scroll_fixture)
+			scroll_fixture.queue_free()
 			menu.pressed.emit()
 			expect(not app.navigation_open, "Hamburger closes Main Navigation at %s" % viewport)
 		# Header controls stay shared when the user opens non-game gameplay screens.

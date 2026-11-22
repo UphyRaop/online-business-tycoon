@@ -96,9 +96,9 @@ static func build(sim: RefCounted, mobile: bool = false, app: Control = null) ->
 	panel.name = "DashboardInventoryOverview"
 	panel.set_meta("mobile_layout", mobile)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 12, 14))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Style.SURFACE, Style.LINE, 12))
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 10)
+	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	panel.add_child(content)
 	var heading := Label.new()
 	heading.text = "Inventory Overview"
@@ -113,8 +113,8 @@ static func build(sim: RefCounted, mobile: bool = false, app: Control = null) ->
 	var metrics := GridContainer.new()
 	metrics.name = "InventorySummaryMetrics"
 	metrics.columns = 3 if mobile else 6
-	metrics.add_theme_constant_override("h_separation", 6)
-	metrics.add_theme_constant_override("v_separation", 6)
+	metrics.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	metrics.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	content.add_child(metrics)
 	_add_metric(metrics, "Total Units", _number(data.total_units), Style.TEXT)
 	_add_metric(metrics, "Available", _number(data.available_units), Style.GREEN)
@@ -153,8 +153,8 @@ static func build(sim: RefCounted, mobile: bool = false, app: Control = null) ->
 			_add_desktop_row(content, item)
 	var actions := FlowContainer.new()
 	actions.name = "InventoryOverviewActions"
-	actions.add_theme_constant_override("h_separation", 8)
-	actions.add_theme_constant_override("v_separation", 6)
+	actions.add_theme_constant_override("h_separation", Style.BUTTON_GROUP_GAP)
+	actions.add_theme_constant_override("v_separation", Style.BUTTON_GROUP_GAP)
 	content.add_child(actions)
 	if app != null:
 		if rows.is_empty():
@@ -167,10 +167,10 @@ static func build(sim: RefCounted, mobile: bool = false, app: Control = null) ->
 static func _add_metric(parent: GridContainer, title: String, value: String, color: Color) -> void:
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 8, 7))
+	card.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 8, Style.CARD_INNER_PADDING))
 	parent.add_child(card)
 	var stack := VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 2)
+	stack.add_theme_constant_override("separation", Style.SPACE_TIGHT)
 	card.add_child(stack)
 	var caption := Label.new()
 	caption.text = title
@@ -188,10 +188,10 @@ static func _add_mobile_row(parent: VBoxContainer, item: Dictionary) -> void:
 	var row := PanelContainer.new()
 	row.name = "InventoryProductRow"
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 7, 8))
+	row.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 7, Style.CARD_INNER_PADDING))
 	parent.add_child(row)
 	var stack := VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 3)
+	stack.add_theme_constant_override("separation", Style.SPACE_TIGHT)
 	row.add_child(stack)
 	var title := Label.new()
 	title.text = str(item.name)
@@ -214,7 +214,7 @@ static func _add_mobile_row(parent: VBoxContainer, item: Dictionary) -> void:
 static func _add_desktop_row(parent: VBoxContainer, item: Dictionary) -> void:
 	var row := HBoxContainer.new()
 	row.name = "InventoryProductRow"
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	parent.add_child(row)
 	var name := Label.new()
 	name.text = str(item.name)
@@ -223,7 +223,7 @@ static func _add_desktop_row(parent: VBoxContainer, item: Dictionary) -> void:
 	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var identity := VBoxContainer.new()
 	identity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	identity.add_theme_constant_override("separation", 2)
+	identity.add_theme_constant_override("separation", Style.SPACE_TIGHT)
 	identity.add_child(name)
 	var status := Label.new()
 	status.text = "%s · %s" % [str(item.listing_status), str(item.stock_status)]
