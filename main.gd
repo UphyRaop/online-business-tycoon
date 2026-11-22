@@ -92,6 +92,11 @@ var identity_conflict_record: Dictionary = {}
 var avatar_picker_callback: JavaScriptObject
 var dev_preview_size_callback: JavaScriptObject
 var dev_command_callback: JavaScriptObject
+var web_storage_sync_callback: JavaScriptObject
+var web_storage_sync_request_id := 0
+var web_storage_sync_pending := false
+var pending_web_save_messages: Dictionary = {}
+var web_storage_sync_success_callback: Callable
 var dev_api := DevAPI.new()
 var developer_mode_unlocked := false
 var developer_console_visible := false
@@ -141,6 +146,8 @@ func _ready() -> void:
 		dev_preview_size_callback = JavaScriptBridge.create_callback(_set_developer_preview_viewport)
 		var js_window := JavaScriptBridge.get_interface("window")
 		js_window.obtSetPreviewLogicalSize = dev_preview_size_callback
+		web_storage_sync_callback = JavaScriptBridge.create_callback(_on_web_storage_sync_complete)
+		js_window.OBTUserFSSyncComplete = web_storage_sync_callback
 		var base_size := get_window().content_scale_size
 		JavaScriptBridge.eval("window.obtPreviewDefaultLogicalSize = [%d, %d];" % [base_size.x, base_size.y])
 		if OS.is_debug_build():
@@ -165,6 +172,46 @@ func _set_developer_preview_viewport(args: Array) -> void:
 	var requested := Vector2i(width, height)
 	get_window().content_scale_size = requested
 	developer_preview_active = developer_mode_unlocked and developer_original_viewport != Vector2i.ZERO and requested != developer_original_viewport
+
+func _on_web_storage_sync_complete(args: Array) -> void:
+	if args.size() < 2:
+		return
+	var request_id := int(args[0])
+	var save_details: Dictionary = pending_web_save_messages.get(request_id, {})
+	if save_details.is_empty():
+		return
+	pending_web_save_messages.erase(request_id)
+	if request_id != web_storage_sync_request_id:
+		return
+	web_storage_sync_pending = false
+	JavaScriptBridge.eval("if (window.OBTSetStorageSyncPending) window.OBTSetStorageSyncPending(false);")
+	if bool(args[1]):
+		developer_changes_active = false
+		dirty = false
+		set_notice(str(save_details.get("message", "Saved to browser storage.")))
+		if web_storage_sync_success_callback.is_valid():
+			var continuation := web_storage_sync_success_callback
+			web_storage_sync_success_callback = Callable()
+			continuation.call()
+		if screen == "Save":
+			refresh_view()
+	else:
+		dirty = true
+		web_storage_sync_success_callback = Callable()
+		var reason := str(args[2]) if args.size() > 2 else "The browser did not confirm durable storage."
+		set_notice("Save data is still in memory and may be lost if this page closes. Keep the game open and retry. " + reason, true)
+		if screen == "Save":
+			refresh_view()
+
+func _begin_web_storage_sync(slot: int, message: String) -> void:
+	web_storage_sync_request_id += 1
+	var request_id := web_storage_sync_request_id
+	pending_web_save_messages[request_id] = {"slot": slot, "message": message}
+	web_storage_sync_pending = true
+	dirty = true
+	set_notice("Saving %s to browser storage…" % Slots.name_for(slot))
+	var source := "if (window.OBTSetStorageSyncPending) window.OBTSetStorageSyncPending(true); if (window.OBTFlushUserFS) { window.OBTFlushUserFS(%d); } else { window.OBTUserFSSyncComplete(%d, false, 'The browser-storage flush hook is unavailable.'); }" % [request_id, request_id]
+	JavaScriptBridge.eval(source)
 
 func _receive_dev_command(args: Array) -> void:
 	var raw := str(args[0]) if not args.is_empty() else "{}"
@@ -642,6 +689,9 @@ func write_progress(slot: int, message: String, explicitly_selected: bool = fals
 	if profile_result != OK:
 		set_notice("%s saved, but this game's CEO profile could not be saved. %s" % [Slots.name_for(slot), error_string(profile_result)], true)
 		return false
+	if OS.has_feature("web") and OS.is_userfs_persistent():
+		_begin_web_storage_sync(slot, message)
+		return true
 	developer_changes_active = false
 	dirty = OS.has_feature("web") and not OS.is_userfs_persistent()
 	set_notice(message + " Browser storage is unavailable. Progress may be lost on reload." if dirty else message, dirty)
@@ -761,8 +811,8 @@ func _select_game(game_id: String) -> bool:
 func delete_game(game_id: String) -> void:
 	var game := GameStore.get_game(game_id)
 	if game.is_empty(): return
-	confirm_action("Delete %s?" % str(game.get("game_name", "Game")),
-		"Permanently remove this game's profile, companies, autosave and manual saves. Other games and retained legacy source files remain untouched.",
+	confirm_action("Delete Game?",
+		"Permanently delete “%s” and remove its profile, companies, autosave and manual saves. Other games and retained legacy source files remain untouched." % str(game.get("game_name", "Game")),
 		"Delete Game", func():
 			var result := GameStore.delete_game_data(game_id)
 			if result != OK:
@@ -816,6 +866,9 @@ func load_slot(slot: int) -> void:
 	request_load(Slots.read_for_game(active_game_id, slot))
 
 func request_load(record: Dictionary) -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before loading another save.", true)
+		return
 	if record.is_empty():
 		set_notice("No readable save was found.", true)
 		return
@@ -934,6 +987,9 @@ func _sync_ceo_profile() -> void:
 	ceo_profile = CEOProfile.sync_company(ceo_profile, sim.state)
 
 func switch_company(company_id: String) -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before switching companies.", true)
+		return
 	var index := CEOProfile.company_index(ceo_profile, company_id)
 	if index < 0:
 		set_notice("That company is no longer in this CEO profile.", true)
@@ -956,7 +1012,10 @@ func switch_company(company_id: String) -> void:
 	if dirty:
 		confirm_action("Switch company?", "Save the current company before switching to %s?" % str(entry.get("name", "Company")), "Switch Company", func():
 			if write_progress(Slots.AUTOSAVE, "Current company preserved."):
-				change.call()
+				if web_storage_sync_pending:
+					web_storage_sync_success_callback = change
+				else:
+					change.call()
 		)
 	else:
 		change.call()
@@ -1485,6 +1544,9 @@ func enter_game(data: Dictionary) -> void:
 	render()
 
 func save_to_slot(slot: int) -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before saving again.", true)
+		return
 	var write := func():
 		write_progress(slot, "Saved to manual slot %d." % slot, true)
 		refresh_view()
@@ -1494,6 +1556,9 @@ func save_to_slot(slot: int) -> void:
 		write.call()
 
 func delete_save(slot: int) -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before deleting a save.", true)
+		return
 	confirm_action("Delete %s?" % Slots.name_for(slot).to_lower(),
 		"Delete this save and its recovery copy?", "Delete", func():
 		var error := Slots.delete_for_game(active_game_id, slot)
@@ -1505,6 +1570,9 @@ func delete_save(slot: int) -> void:
 	)
 
 func leave_game() -> void:
+	if web_storage_sync_pending:
+		set_notice("Wait for the current save to finish writing to browser storage before leaving this game.", true)
+		return
 	var exit_to_title := func():
 		if OS.has_feature("web") and developer_mode_unlocked:
 			JavaScriptBridge.eval("window.OBTDevPreview && window.OBTDevPreview.disable();")

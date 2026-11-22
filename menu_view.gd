@@ -59,6 +59,12 @@ static func slots(app: Control, saving: bool) -> void:
 	var back: VBoxContainer = app.wide_card("")
 	var back_row: HBoxContainer = app.row(back)
 	app.action(back_row, "Back", app.open_screen.bind("Game" if app.sim != null else "Title"))
+	if app.web_storage_sync_pending:
+		back.add_child(app.label("Saving to browser storage… Keep this page open until the save completes.", 14, Style.GOLD))
+	elif app.dirty and app.error_notice and not app.notice.is_empty():
+		back.add_child(app.label(app.notice, 14, Style.RED))
+	elif app.notice.begins_with("Saved to "):
+		back.add_child(app.label(app.notice, 14, Style.GREEN))
 	if app.active_game_id.is_empty():
 		if saving:
 			back.add_child(app.label("Choose a game before saving.", 14, Style.RED))

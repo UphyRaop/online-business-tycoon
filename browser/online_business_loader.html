@@ -364,6 +364,15 @@
 			progressTrack.classList.remove('is-indeterminate');
 			progressTrack.removeAttribute('aria-valuenow');
 		}
+		window.OBTStorageSyncPending = false;
+		window.OBTSetStorageSyncPending = function (pending) {
+			window.OBTStorageSyncPending = Boolean(pending);
+		};
+		window.addEventListener('beforeunload', function (event) {
+			if (!window.OBTStorageSyncPending) return;
+			event.preventDefault();
+			event.returnValue = '';
+		});
 		async function startGame() {
 			if (startAttempted) return;
 			startAttempted = true;
@@ -374,6 +383,20 @@
 				setStatus('Initializing engine…');
 				const engine = new Engine(GODOT_CONFIG);
 				await engine.startGame({ onProgress: setProgress });
+				window.OBTFlushUserFS = function (requestId) {
+					const complete = window.OBTUserFSSyncComplete;
+					const sync = engine.rtenv && engine.rtenv.obtSyncUserFS;
+					if (typeof complete !== 'function') return;
+					if (typeof sync !== 'function') {
+						complete(requestId, false, 'The Godot browser-storage flush hook is unavailable.');
+						return;
+					}
+					Promise.resolve(sync()).then(function (error) {
+						complete(requestId, !error, error ? String(error.message || error) : '');
+					}).catch(function (error) {
+						complete(requestId, false, String(error && error.message || error));
+					});
+				};
 				progressTrack.classList.remove('is-indeterminate');
 				progressFill.style.width = '100%';
 				progressTrack.setAttribute('aria-valuenow', '100');

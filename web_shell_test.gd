@@ -6,6 +6,8 @@ func _initialize() -> void:
 	var shell := FileAccess.get_file_as_string("res://browser/online_business_loader.html")
 	var main_source := FileAccess.get_file_as_string("res://main.gd")
 	var presets := FileAccess.get_file_as_string("res://export_presets.cfg")
+	var build_script := FileAccess.get_file_as_string("res://.github/scripts/build-web.sh")
+	var runtime_patcher := FileAccess.get_file_as_string("res://.github/scripts/patch_godot_web_runtime.py")
 	expect(not shell.is_empty(), "Custom pre-engine Web loading shell is present")
 	expect(presets.contains('html/custom_html_shell="res://browser/online_business_loader.html"'),
 		"Web export preset selects the durable custom HTML shell")
@@ -13,6 +15,14 @@ func _initialize() -> void:
 		expect(shell.contains(token), "Custom shell retains the Godot 4.7.2 export token %s" % token)
 	expect(shell.contains("onProgress: setProgress") and shell.contains("async function startGame()")
 		and shell.contains("await engine.startGame"), "Loading progress uses Godot's real startGame progress callback")
+	expect(build_script.contains("patch_godot_web_runtime.py web-build/index.js")
+		and runtime_patcher.contains("idbPersistState") and runtime_patcher.contains("sync_userfs:function()")
+		and runtime_patcher.contains("obtSyncUserFS") and runtime_patcher.contains("Godot Web runtime GodotOS anchor"),
+		"Release builds install a version-checked IDBFS flush hook that drains queued browser persistence")
+	expect(shell.contains("window.OBTFlushUserFS") and shell.contains("engine.rtenv.obtSyncUserFS")
+		and shell.contains("window.OBTSetStorageSyncPending") and shell.contains("beforeunload")
+		and main_source.contains("_on_web_storage_sync_complete") and main_source.contains("Saving %s to browser storage"),
+		"Web saves await durable browser storage, warn before closing during an in-flight write, and report completion or failure")
 	expect(shell.contains("Math.min(99, Math.floor(ratio * 100))")
 		and shell.find("await engine.startGame") < shell.find("setAttribute('aria-valuenow', '100')"),
 		"Progress cannot show 100% until Godot initialization resolves")
