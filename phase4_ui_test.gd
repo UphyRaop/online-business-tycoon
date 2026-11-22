@@ -498,9 +498,9 @@ func run() -> void:
 		press(target)
 		expect(app.primary_category(app.page) == target or (target == "Order" and app.primary_category(app.page) == "Order"),
 			"Mobile navigation opens %s" % target)
-	for viewport in [Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(1280, 720),
-		Vector2i(1024, 768), Vector2i(768, 1024), Vector2i(390, 844),
-		Vector2i(375, 812), Vector2i(375, 667), Vector2i(844, 390)]:
+	for viewport in [Vector2i(1920, 1080), Vector2i(1366, 768), Vector2i(1024, 768),
+		Vector2i(768, 1024), Vector2i(430, 932), Vector2i(390, 844),
+		Vector2i(375, 667), Vector2i(360, 800), Vector2i(844, 390), Vector2i(667, 375)]:
 		root.size = viewport
 		await settle("phase4-%dx%d" % [viewport.x, viewport.y])
 		var header_date: Label = app.find_child("GameDate", true, false)
@@ -514,6 +514,20 @@ func run() -> void:
 		await _check_primary_tabs_within_viewport(viewport)
 		expect(app.page_grid.columns == (2 if app.size.x >= 768 else 1),
 			"Page panels use the intended responsive column count at %dx%d (actual: %d columns at %.1f px / viewport %.1f px)" % [viewport.x, viewport.y, app.page_grid.columns, app.size.x, app.get_viewport_rect().size.x])
+		var layout_width: float = app.size.x
+		var expected_page_width := minf(1100.0, maxf(280.0, layout_width - (40.0 if layout_width >= 900.0 else 24.0)))
+		expect(is_equal_approx(app.page_shell.custom_minimum_size.x, expected_page_width)
+			and app.page_grid.get_theme_constant("h_separation", "GridContainer") == Style.CARD_GRID_GAP
+			and app.page_grid.get_theme_constant("v_separation", "GridContainer") == Style.CARD_GRID_GAP,
+			"Global page width and compact card grid spacing conform at %dx%d" % [viewport.x, viewport.y])
+		var metric_rows := controls(app, "BoxContainer").filter(func(control): return str(control.name) == "ResponsiveMetric")
+		var compact_metric_rows := true
+		for metric_row in metric_rows:
+			var metric_box := metric_row as BoxContainer
+			if metric_box.vertical or metric_box.get_theme_constant("separation", "BoxContainer") != Style.INFO_ROW_GAP:
+				compact_metric_rows = false
+		expect(compact_metric_rows,
+			"Information cards keep labels and values on compact horizontal rows at %dx%d" % [viewport.x, viewport.y])
 		var expected_grid_children: int = 0 if app.size.x >= 768 and app.page_cards.size() == 1 else (2 if app.size.x >= 768 else app.page_cards.size())
 		expect(app.page_grid.get_child_count() == expected_grid_children,
 			"Card layout reflows without unused columns at %dx%d" % [viewport.x, viewport.y])
@@ -526,6 +540,20 @@ func run() -> void:
 		expect(dashboard_balance != null and shortcuts != null
 			and shortcuts.get_children().map(func(item): return str(item.name)) == ["DashboardStoreManagement", "DashboardListingProducts", "DashboardProductSourcing"],
 			"Dashboard places Bank Balance and the three approved shortcuts in their required order at %dx%d" % [viewport.x, viewport.y])
+		var overview_panel := app.find_child("DashboardInventoryOverview", true, false) as PanelContainer
+		var overview_style := overview_panel.get_theme_stylebox("panel") as StyleBoxFlat if overview_panel != null else null
+		expect(overview_style != null and overview_style.content_margin_left == Style.CARD_PADDING
+			and overview_style.content_margin_top == Style.CARD_PADDING,
+			"Dashboard's dynamic inventory card uses the shared compact padding at %dx%d" % [viewport.x, viewport.y])
+		app.navigate("Market")
+		await process_frame
+		await process_frame
+		var market_tabs := app.find_child("SecondaryNavigationScroll", true, false) as ScrollContainer
+		var market_workflow := app.find_child("BuyInventoryWorkflow", true, false) as Control
+		expect(market_tabs != null and market_tabs.horizontal_scroll_mode == ScrollContainer.SCROLL_MODE_AUTO
+			and market_workflow != null and market_tabs.get_global_rect().end.y <= market_workflow.get_global_rect().position.y + Style.PAGE_SECTION_GAP + Style.PAGE_CONTENT_GAP + 1.0,
+			"Market tabs remain reachable and sit directly above compact content at %dx%d" % [viewport.x, viewport.y])
+		app.navigate("Dashboard")
 		if viewport.x == 375:
 			var previous_cash: int = app.sim.state.cash
 			app.sim.state.cash = 9876543210123

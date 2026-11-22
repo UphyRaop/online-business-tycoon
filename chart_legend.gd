@@ -11,15 +11,15 @@ class DotMarker extends Control:
 
 static func build(series: Array[Dictionary]) -> FlowContainer:
 	var flow := FlowContainer.new()
-	flow.add_theme_constant_override("h_separation", 14)
-	flow.add_theme_constant_override("v_separation", 6)
+	flow.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	flow.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for item in series:
 		var name := str(item.get("name", ""))
 		var chip := HBoxContainer.new()
 		chip.custom_minimum_size = Vector2(maxf(90.0, 30.0 + float(name.length()) * 7.5), 26)
 		chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-		chip.add_theme_constant_override("separation", 5)
+		chip.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 		var marker := DotMarker.new()
 		marker.name = "LegendColorMarker"
 		marker.marker_color = item.get("color", Color.WHITE)

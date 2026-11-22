@@ -10,7 +10,7 @@ const LOGO = preload("res://icon.svg")
 
 static func brand(app: Control, parent: Node) -> HBoxContainer:
 	var header: HBoxContainer = app.row(parent)
-	header.add_theme_constant_override("separation", 10)
+	header.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	var mark := TextureRect.new()
 	mark.texture = LOGO
 	mark.custom_minimum_size = Vector2(48, 48)
@@ -30,8 +30,8 @@ static func title(app: Control) -> void:
 	actions.name = "MainMenuActions"
 	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	actions.custom_minimum_size.x = minf(580.0, maxf(0.0, app.size.x - 66.0))
-	actions.add_theme_constant_override("h_separation", 8)
-	actions.add_theme_constant_override("v_separation", 8)
+	actions.add_theme_constant_override("h_separation", Style.BUTTON_GROUP_GAP)
+	actions.add_theme_constant_override("v_separation", Style.BUTTON_GROUP_GAP)
 	play.add_child(actions)
 	for item in [["New Game", app.start_new_game, true], ["Load Game", app.open_screen.bind("Load"), false], ["Settings", app.open_screen.bind("Settings"), false]]:
 		var button: Button = app.action(actions, item[0], item[1], item[2])
@@ -49,8 +49,8 @@ static func title(app: Control) -> void:
 		var cards := GridContainer.new()
 		cards.name = "SavedGameCards"
 		cards.columns = 3 if app.size.x >= 900.0 else (2 if app.size.x >= 600.0 else 1)
-		cards.add_theme_constant_override("h_separation", 10)
-		cards.add_theme_constant_override("v_separation", 10)
+		cards.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+		cards.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 		play.add_child(cards)
 		for game in games:
 			_game_card(app, game, true, cards, game_names)
@@ -75,8 +75,8 @@ static func slots(app: Control, saving: bool) -> void:
 		var cards := GridContainer.new()
 		cards.name = "LoadGameCards"
 		cards.columns = 3 if app.size.x >= 900.0 else (2 if app.size.x >= 600.0 else 1)
-		cards.add_theme_constant_override("h_separation", 10)
-		cards.add_theme_constant_override("v_separation", 10)
+		cards.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+		cards.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 		back.add_child(cards)
 		for game in games:
 			_game_card(app, game, true, cards, {})
@@ -85,8 +85,8 @@ static func slots(app: Control, saving: bool) -> void:
 	var slots_grid := GridContainer.new()
 	slots_grid.name = "GameSaveSlots"
 	slots_grid.columns = 3 if app.size.x >= 900.0 else (2 if app.size.x >= 600.0 else 1)
-	slots_grid.add_theme_constant_override("h_separation", 10)
-	slots_grid.add_theme_constant_override("v_separation", 10)
+	slots_grid.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	slots_grid.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	back.add_child(slots_grid)
 	for id in order:
 		var slot := Slots.read_for_game(app.active_game_id, id)

@@ -31,7 +31,18 @@ const SPACE_TIGHT := 4
 const SPACE_SMALL := 6
 const SPACE_CONTROL := 8
 const SPACE_SECTION := 12
-const CARD_PADDING := 12
+## Shared compact-layout scale. Keep touch target dimensions separate from visual spacing.
+const PAGE_MARGIN_VERTICAL := 10
+const PAGE_CONTENT_GAP := 6
+const PAGE_SECTION_GAP := 8
+const CARD_GRID_GAP := 10
+const CARD_CONTENT_GAP := 6
+const INFO_ROW_GAP := 6
+const NAVIGATION_TAB_GAP := 4
+const BUTTON_GROUP_GAP := 6
+const CARD_PADDING := 10
+const CARD_INNER_PADDING := 8
+const CARD_RADIUS := 10
 const BUTTON_PADDING := 8
 const BUTTON_TOUCH_HEIGHT := 44
 const BUTTON_TOUCH_WIDTH := 44
@@ -56,6 +67,9 @@ static func box(fill: Color, border: Color, radius: int, padding: int) -> StyleB
 	style.set_corner_radius_all(radius)
 	style.set_content_margin_all(padding)
 	return style
+
+static func card_box(fill: Color, border: Color, radius: int = CARD_RADIUS) -> StyleBoxFlat:
+	return box(fill, border, radius, CARD_PADDING)
 
 static func normalized_font_size(requested: int, large_text: bool = false) -> int:
 	var standard_size := clampi(requested, FONT_CAPTION, FONT_HEADING)
@@ -89,6 +103,10 @@ static func build(large_text: bool = false) -> Theme:
 	theme.set_font_size("font_size", "LineEdit", normalized_font_size(FONT_BODY, large_text))
 	theme.set_font_size("font_size", "PopupMenu", normalized_font_size(FONT_BODY, large_text))
 	theme.set_font_size("font_size", "AcceptDialog", normalized_font_size(FONT_BODY, large_text))
+	theme.set_constant("separation", "BoxContainer", CARD_CONTENT_GAP)
+	for type in ["GridContainer", "FlowContainer"]:
+		theme.set_constant("h_separation", type, CARD_GRID_GAP)
+		theme.set_constant("v_separation", type, CARD_GRID_GAP)
 	theme.set_color("font_color", "Label", TEXT)
 	for type in ["Button", "OptionButton", "LineEdit", "PopupMenu"]:
 		theme.set_color("font_color", type, TEXT)

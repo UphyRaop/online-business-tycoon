@@ -47,7 +47,7 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 	panel.name = "BuyInventoryWorkflow"
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var compact_landscape := app.size.y <= 450.0 and app.size.x > app.size.y
-	panel.add_theme_constant_override("separation", 4 if compact_landscape else 8)
+	panel.add_theme_constant_override("separation", Style.SPACE_TIGHT if compact_landscape else Style.CARD_CONTENT_GAP)
 	var outer_panel := panel.get_parent() as PanelContainer
 	if outer_panel != null:
 		outer_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -85,12 +85,12 @@ static func _step_header(app: Control, selected: int) -> VBoxContainer:
 	var content := VBoxContainer.new()
 	content.name = "BuyInventoryStepContent"
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation", 8)
+	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	content_scroll.add_child(content)
 	var footer := HBoxContainer.new()
 	footer.name = "BuyInventoryNavigationFooter"
 	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_theme_constant_override("separation", 8)
+	footer.add_theme_constant_override("separation", Style.BUTTON_GROUP_GAP)
 	panel.add_child(footer)
 	app.set_meta("buy_inventory_footer", footer)
 	return content
@@ -133,8 +133,8 @@ static func show_categories(app: Control) -> void:
 	var grid := GridContainer.new()
 	grid.name = "ProductCategoryGrid"
 	grid.columns = _category_columns(app.size.x)
-	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 10)
+	grid.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	grid.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	catalogue.add_child(grid)
 	for category in Catalog.CATEGORIES:
 		var name := str(category)
@@ -148,7 +148,7 @@ static func show_categories(app: Control) -> void:
 		card.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		card.add_theme_font_size_override("font_size", Style.FONT_BODY if app.size.x < 600.0 else Style.FONT_HEADING)
-		card.add_theme_constant_override("h_separation", 10)
+		card.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		card.custom_minimum_size = Vector2(0, 62)
 		card.tooltip_text = "%s · %d products" % [name, category_product_count]
@@ -157,10 +157,10 @@ static func show_categories(app: Control) -> void:
 		var selected := int(app.catalog_category) == Catalog.CATEGORIES.find(name)
 		var fill := Color("#25364D") if selected else Color("#19283C")
 		var outline := Color("#D5AC61") if selected else Color("#35465D")
-		card.add_theme_stylebox_override("normal", Style.box(fill, outline, 12, 10))
-		card.add_theme_stylebox_override("hover", Style.box(fill.lightened(0.07), Color("#D5AC61"), 12, 10))
-		card.add_theme_stylebox_override("pressed", Style.box(Color("#25364D"), Color("#D5AC61"), 12, 10))
-		card.add_theme_stylebox_override("focus", Style.box(fill, Color("#D5AC61"), 12, 10))
+		card.add_theme_stylebox_override("normal", Style.card_box(fill, outline, 12))
+		card.add_theme_stylebox_override("hover", Style.card_box(fill.lightened(0.07), Color("#D5AC61"), 12))
+		card.add_theme_stylebox_override("pressed", Style.card_box(Color("#25364D"), Color("#D5AC61"), 12))
+		card.add_theme_stylebox_override("focus", Style.card_box(fill, Color("#D5AC61"), 12))
 		card.add_theme_color_override("font_color", Style.TEXT)
 		card.add_theme_color_override("font_hover_color", Style.TEXT)
 		card.add_theme_color_override("font_pressed_color", Style.TEXT)
@@ -204,8 +204,8 @@ static func show_products(app: Control) -> void:
 	product_grid.name = "CategoryProductList"
 	product_grid.columns = _product_columns(app.size.x)
 	product_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	product_grid.add_theme_constant_override("h_separation", 10)
-	product_grid.add_theme_constant_override("v_separation", 10)
+	product_grid.add_theme_constant_override("h_separation", Style.CARD_GRID_GAP)
+	product_grid.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 	catalogue.add_child(product_grid)
 	var product_cards: Array[Dictionary] = []
 	var shown := 0
@@ -224,10 +224,10 @@ static func show_products(app: Control) -> void:
 		app.metric(card_content, "Starting Landed Cost", app.money(starting_cost) if starting_cost > 0 else "Unavailable", Style.GOLD)
 		var selected_product := product_index
 		var selected := int(app.get_meta("buy_selected_product", -1)) == product_index
-		card.add_theme_stylebox_override("normal", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12, 10))
-		card.add_theme_stylebox_override("hover", Style.box(Color("#25364D") if selected else Color("#203149"), Color("#D5AC61"), 12, 10))
-		card.add_theme_stylebox_override("pressed", Style.box(Color("#25364D"), Color("#D5AC61"), 12, 10))
-		card.add_theme_stylebox_override("focus", Style.box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61"), 12, 10))
+		card.add_theme_stylebox_override("normal", Style.card_box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12))
+		card.add_theme_stylebox_override("hover", Style.card_box(Color("#25364D") if selected else Color("#203149"), Color("#D5AC61"), 12))
+		card.add_theme_stylebox_override("pressed", Style.card_box(Color("#25364D"), Color("#D5AC61"), 12))
+		card.add_theme_stylebox_override("focus", Style.card_box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61"), 12))
 		card.add_theme_color_override("font_color", Style.TEXT)
 		card.add_theme_color_override("font_hover_color", Style.TEXT)
 		card.add_theme_color_override("font_pressed_color", Style.TEXT)
@@ -236,6 +236,7 @@ static func show_products(app: Control) -> void:
 		var selected_marker: Label = app.label("Selected" if selected else "Tap to select", 11, Style.GOLD if selected else Style.MUTED)
 		selected_marker.name = "ProductSelectionIndicator_%d" % product_index
 		card_content.add_child(selected_marker)
+		card.custom_minimum_size.y = 96.0
 		var select_product := func():
 			app.set_meta("buy_selected_product", selected_product)
 			app.refresh_view()
@@ -330,10 +331,10 @@ static func _category_icon_path(category: String) -> String:
 static func _nested_card(parent: Node, title: String) -> VBoxContainer:
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", Style.box(Color("#19283C"), Color("#35465D"), 12, 10))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Color("#19283C"), Color("#35465D"), 12))
 	parent.add_child(panel)
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 8)
+	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	panel.add_child(content)
 	var heading := Label.new()
 	heading.text = title
@@ -363,10 +364,10 @@ static func _catalog_card(parent: Node, title: String) -> VBoxContainer:
 	var panel := PanelContainer.new()
 	panel.name = "CatalogueCard"
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", Style.box(Color("#19283C"), Color("#35465D"), 12, 10))
+	panel.add_theme_stylebox_override("panel", Style.card_box(Color("#19283C"), Color("#35465D"), 12))
 	parent.add_child(panel)
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 8)
+	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	panel.add_child(content)
 	var heading := Label.new()
 	heading.text = title
@@ -379,7 +380,7 @@ static func _product_selection_card(parent: Node, title: String, product_index: 
 	button.name = "CatalogueProduct_%d" % product_index
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	button.custom_minimum_size.y = 112
+	button.custom_minimum_size.y = 0
 	button.focus_mode = Control.FOCUS_ALL
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.text = ""
@@ -387,11 +388,11 @@ static func _product_selection_card(parent: Node, title: String, product_index: 
 	content.name = "ProductCardContent"
 	content.anchor_right = 1.0
 	content.anchor_bottom = 1.0
-	content.offset_left = 10
-	content.offset_top = 8
-	content.offset_right = -10
-	content.offset_bottom = -8
-	content.add_theme_constant_override("separation", 6)
+	content.offset_left = Style.CARD_PADDING
+	content.offset_top = Style.CARD_INNER_PADDING
+	content.offset_right = -Style.CARD_PADDING
+	content.offset_bottom = -Style.CARD_INNER_PADDING
+	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var heading := Label.new()
 	heading.text = title
@@ -418,8 +419,8 @@ static func show_supplier_selection(app: Control) -> void:
 	var list := GridContainer.new()
 	list.name = "CompactSupplierList"
 	list.columns = _supplier_columns(app.size.x)
-	list.add_theme_constant_override("h_separation", 8)
-	list.add_theme_constant_override("v_separation", 8)
+	list.add_theme_constant_override("h_separation", Style.CARD_CONTENT_GAP)
+	list.add_theme_constant_override("v_separation", Style.CARD_CONTENT_GAP)
 	panel.add_child(list)
 	var selected := _supplier_for(app, product)
 	for supplier_variant in _available_suppliers(state, product):
@@ -433,7 +434,7 @@ static func show_supplier_selection(app: Control) -> void:
 		var card_panel := card.get_parent() as PanelContainer
 		card_panel.name = "SupplierChoicePanel%d" % supplier
 		card_panel.custom_minimum_size.x = _supplier_card_width(app.size.x)
-		card_panel.add_theme_stylebox_override("panel", Style.box(Color("#25364D") if selected_now else Color("#19283C"), Color("#D5AC61") if selected_now else Color("#35465D"), 12, 10))
+		card_panel.add_theme_stylebox_override("panel", Style.card_box(Color("#25364D") if selected_now else Color("#19283C"), Color("#D5AC61") if selected_now else Color("#35465D"), 12))
 		app.metric(card, "Unit Price", app.money(goods), Style.GOLD)
 		app.metric(card, "Quality · MOQ", "%d%% · %s" % [roundi(float(provider.quality) * 100.0), _format_quantity(int(provider.minimum))])
 		var relation := SupplierCredit.relationship(state, supplier)
@@ -592,7 +593,7 @@ static func show_purchase_summary(app: Control) -> void:
 	var quantity_row := HBoxContainer.new()
 	quantity_row.name = "PurchaseQuantityControls"
 	quantity_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	quantity_row.add_theme_constant_override("separation", 8)
+	quantity_row.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	panel.add_child(app.label("Order Quantity", 12, Style.MUTED))
 	panel.add_child(quantity_row)
 	var current_quantity := Label.new()
@@ -625,7 +626,7 @@ static func show_purchase_summary(app: Control) -> void:
 	var increments := HBoxContainer.new()
 	increments.name = "QuantityIncrements"
 	increments.alignment = BoxContainer.ALIGNMENT_CENTER
-	increments.add_theme_constant_override("separation", 4)
+	increments.add_theme_constant_override("separation", Style.SPACE_TIGHT)
 	panel.add_child(app.label("Quantity Increment", 12, Style.MUTED))
 	panel.add_child(increments)
 	for value in [10, 100, 1000]:
@@ -644,7 +645,7 @@ static func show_purchase_summary(app: Control) -> void:
 	var max_row := HBoxContainer.new()
 	max_row.name = "BuyMaxControls"
 	max_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	max_row.add_theme_constant_override("separation", 8)
+	max_row.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	panel.add_child(max_row)
 	app.metric(max_row, "Available Bank Balance", app.money(int(state.cash)))
 	var balance_metric := max_row.get_child(max_row.get_child_count() - 1) as Control
@@ -836,7 +837,7 @@ static func inbound_stock(app: Control) -> void:
 		app.metric(shipment, "Shipment Status", shipment_status, Style.GREEN if shipment_status == "Received" else Style.GOLD)
 		var progress := HBoxContainer.new()
 		progress.name = "ShipmentProgress"
-		progress.add_theme_constant_override("separation", 4)
+		progress.add_theme_constant_override("separation", Style.SPACE_TIGHT)
 		for step_index in range(3):
 			var status: String = ["Ordered", "In Transit", "Received"][step_index]
 			var step_color: Color = Style.GOLD if step_index == shipment_rank else (Style.GREEN if step_index < shipment_rank else Style.MUTED)
