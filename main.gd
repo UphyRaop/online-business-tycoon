@@ -5,6 +5,7 @@ const Sim = preload("res://simulation.gd")
 const Slots = preload("res://save_slots.gd")
 const Style = preload("res://corporate_theme.gd")
 const Market = preload("res://market_view.gd")
+const TouchScroll = preload("res://touch_scroll_container.gd")
 const Operations = preload("res://operations_view.gd")
 const Products = preload("res://products_view.gd")
 const Menu = preload("res://menu_view.gd")
@@ -229,20 +230,25 @@ func _developer_sync_landscape_scale() -> void:
 	_sync_gameplay_landscape_scale()
 
 func _sync_gameplay_landscape_scale() -> void:
-	if not OS.has_feature("web") or developer_preview_active or sim == null:
+	if not OS.has_feature("web") or developer_preview_active:
 		return
 	var base_size := Vector2i(
 		int(ProjectSettings.get_setting("display/window/size/viewport_width", 430)),
 		int(ProjectSettings.get_setting("display/window/size/viewport_height", 760))
 	)
 	var browser_size := _developer_browser_viewport_size()
+	var target := _landscape_content_scale_target(base_size, browser_size)
+	if get_window().content_scale_size != target:
+		get_window().content_scale_size = target
+
+func _landscape_content_scale_target(base_size: Vector2i, browser_size: Vector2i) -> Vector2i:
 	var target := base_size
 	# Scaling the portrait base by a short landscape height makes controls too
 	# small. Match the Web logical viewport to the available landscape viewport.
+	# Apply before a simulation exists too, so registration/setup remains usable.
 	if browser_size.x > browser_size.y and browser_size.y <= 600:
 		target = browser_size
-	if get_window().content_scale_size != target:
-		get_window().content_scale_size = target
+	return target
 
 func _developer_restore_original_scale() -> void:
 	if developer_original_viewport != Vector2i.ZERO and get_window().content_scale_size != developer_original_viewport:
@@ -2061,6 +2067,9 @@ func _create_navigation_drawer() -> void:
 	)
 	save_action.name = "DrawerActionSave"
 	save_action.custom_minimum_size.y = 46
+	# Save Game opens the save workflow, so keep it visually consistent with
+	# the existing gold primary actions instead of the semantic green success role.
+	Style.primary(save_action)
 	_apply_drawer_icon(save_action, DRAWER_ICON_PATHS["Save Game"], 20)
 	var main_menu_action := action(content, "Main Menu", func():
 		close_navigation_drawer(false)
@@ -2126,7 +2135,7 @@ func secondary_navigation(parent: Node) -> void:
 			tab.add_theme_font_size_override("font_size", 11)
 
 func render() -> void:
-	if sim != null: _sync_gameplay_landscape_scale()
+	_sync_gameplay_landscape_scale()
 	var restore_access_dialog := is_instance_valid(developer_access_overlay)
 	if restore_access_dialog:
 		var open_code := developer_access_overlay.find_child("DeveloperAccessCode", true, false) as LineEdit
@@ -2224,7 +2233,7 @@ func render() -> void:
 		screen_heading.add_child(screen_title)
 		if not global_game_header:
 			_developer_button(screen_heading)
-	var scroll := ScrollContainer.new()
+	var scroll := TouchScroll.new() as ScrollContainer
 	scroll.name = "GameContentScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL

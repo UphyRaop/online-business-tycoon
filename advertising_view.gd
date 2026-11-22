@@ -39,7 +39,7 @@ static func overview(app: Control) -> void:
 		platform_card.add_child(app.label("%s · %s CPM · %.1f%% baseline CTR" % [platform.name, baseline_cpm, platform.ctr], 14, Style.MUTED))
 
 static func manager(app: Control) -> void:
-	var view: VBoxContainer = app.card("Ads Manager")
+	var view: VBoxContainer = app.card("")
 	app.action(view, "Create campaign", func():
 		app.campaign_id = 0
 		app.navigate("Campaign Details")

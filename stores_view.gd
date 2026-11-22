@@ -45,6 +45,7 @@ static func management(app: Control) -> void:
 		var brand: LineEdit = app.field(setup, "Brand name", app.sim.state.brand, 40)
 		var kind: OptionButton = app.dropdown(setup, ["Marketplace", "Website"], 0)
 		var domain: LineEdit = app.field(setup, "Website domain (required for Website)", "", 64)
+		var domain_label := setup.get_child(setup.get_child_count() - 2) as Label
 		var platform: OptionButton = app.dropdown(setup, Stores.MARKETPLACES, 0)
 		var website_platform_names: Array[String] = []
 		website_platform_names.append("Select Website Platform")
@@ -53,14 +54,18 @@ static func management(app: Control) -> void:
 		setup.add_child(website_platform_label)
 		website_platform_label.visible = false
 		var website_platform: OptionButton = app.dropdown(setup, website_platform_names, 0)
-		setup.add_child(app.label("Website platform values are simulated for gameplay and do not represent current real-world prices.", 13, Style.MUTED))
+		var website_platform_note: Label = app.label("Website platform values are simulated for gameplay and do not represent current real-world prices.", 13, Style.MUTED)
+		setup.add_child(website_platform_note)
+		website_platform_note.visible = kind.selected == 1
 		var cost: Label = app.label("", 14, Style.GOLD)
 		setup.add_child(cost)
 		var update_cost := func(_index: int = 0):
 			platform.visible = kind.selected == 0
 			website_platform.visible = kind.selected == 1
 			website_platform_label.visible = kind.selected == 1
-			domain.editable = kind.selected == 1
+			website_platform_note.visible = kind.selected == 1
+			domain_label.visible = kind.selected == 1
+			domain.visible = kind.selected == 1
 			var setup_platform := website_platform.selected - 1 if kind.selected == 1 and website_platform.selected > 0 else -1
 			if kind.selected == 1 and setup_platform < 0:
 				cost.text = "Select a website platform to see its simulated costs."

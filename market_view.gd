@@ -800,7 +800,7 @@ static func supplier_credit_payables(app: Control) -> void:
 
 static func inbound_stock(app: Control) -> void:
 	var state: Dictionary = app.sim.state
-	var view: VBoxContainer = app.wide_card("Inbound Stock")
+	var view: VBoxContainer = app.wide_card("")
 	view.name = "InboundStockPage"
 	view.add_child(app.label("Track supplier orders until their inventory is received into the shared company stock.", 13, Style.MUTED))
 	var focused_id := int(app.get_meta("focused_inbound_purchase_id", -1))
@@ -881,7 +881,7 @@ static func inbound_stock(app: Control) -> void:
 
 static func supplier_returns_page(app: Control) -> void:
 	var state: Dictionary = app.sim.state
-	var intro: VBoxContainer = app.wide_card("Supplier Returns")
+	var intro: VBoxContainer = app.wide_card("")
 	intro.name = "SupplierReturnsPage"
 	intro.add_child(app.label("Return only unreserved warehouse inventory to its original supplier. Return history is shown below.", 13, Style.MUTED))
 	var selected_product := int(app.get_meta("supplier_returns_product", int(app.selected_product)))
@@ -957,7 +957,7 @@ static func _supplier_return_form(app: Control, product: int) -> void:
 static func supplier_relationships(app: Control) -> void:
 	var state: Dictionary = app.sim.state
 	SupplierCredit.ensure(state)
-	var intro: VBoxContainer = app.wide_card("Supplier Relationships")
+	var intro: VBoxContainer = app.wide_card("")
 	intro.name = "SupplierRelationshipsPage"
 	intro.add_child(app.label("Trust reflects settled purchases and timely repayments. Credit remains limited by supplier terms and company financial condition.", 13, Style.MUTED))
 	var relationships: Dictionary = state.supplier_credit.get("relationships", {})

@@ -142,6 +142,8 @@ func run() -> void:
 		"Open Main Navigation scrolls naturally with page content")
 	if content_scroll != null: content_scroll.scroll_vertical = 0
 	await process_frame
+	expect(content_scroll != null and content_scroll.get_script().resource_path == "res://touch_scroll_container.gd",
+		"The main page scrolling area uses the reusable touch-scroll container")
 	expect(app.sim.state == navigation_state_before,
 		"Opening and closing Main Navigation does not modify game state")
 	var tab_key := InputEventKey.new()
@@ -175,6 +177,9 @@ func run() -> void:
 	await process_frame
 	nav = app.find_child("PrimaryNavigation", true, false) as PanelContainer
 	var save_button: Button = app.find_child("DrawerActionSave", true, false)
+	var save_button_style := save_button.get_theme_stylebox("normal") as StyleBoxFlat if save_button != null else null
+	expect(save_button_style != null and save_button_style.bg_color == Style.GOLD,
+		"Drawer Save Game action uses the V4 gold primary style")
 	save_button.pressed.emit()
 	expect(app.screen == "Save", "Drawer Save Game opens the existing save screen")
 	press("Back")
@@ -190,6 +195,26 @@ func run() -> void:
 	expect(app.page == "My Products" and has_label("Product portfolio"), "Market secondary route opens My Products")
 	press("Management")
 	expect(app.page == "Management" and has_label("Owned stores · 0"), "Store Management is available under Business")
+	app.show_new_store_form = true
+	app.refresh_view()
+	var website_platform_note: Label = controls(app, "Label").filter(func(item):
+		return item.text.begins_with("Website platform values are simulated")
+	).front()
+	var domain_label: Label = controls(app, "Label").filter(func(item):
+		return item.text == "Website Domain (Required for Website)"
+	).front()
+	var domain_field: LineEdit = controls(app, "LineEdit").filter(func(item): return item.max_length == 64).front()
+	var store_kinds: Array = controls(app, "OptionButton")
+	if not store_kinds.is_empty(): select(store_kinds[0], 0)
+	expect(website_platform_note != null and not website_platform_note.visible
+		and domain_label != null and not domain_label.visible and domain_field != null and not domain_field.visible,
+		"Marketplace registration hides website-only pricing and domain controls")
+	if not store_kinds.is_empty(): select(store_kinds[0], 1)
+	expect(website_platform_note != null and website_platform_note.visible
+		and domain_label.visible and domain_field.visible,
+		"Website registration shows its platform-pricing explanation and domain controls")
+	app.show_new_store_form = false
+	app.refresh_view()
 
 	var marketplace_error := Stores.create(app.sim.state, "Harbor Marketplace", 0, "Harbor", "", 0)
 	var marketplace_id := int(app.sim.state.stores.back().id)
@@ -510,6 +535,43 @@ func run() -> void:
 	var modal_cancel: Variant = mobile_actions.filter(func(button): return button.text == "Cancel").back()
 	if modal_cancel != null: modal_cancel.pressed.emit()
 	press("Cancel")
+	root.size = Vector2i(667, 375)
+	await settle("phase4-navigation-touch-scroll")
+	app.navigate("Dashboard")
+	var landscape_menu := app.find_child("NavigationMenuButton", true, false) as Button
+	if landscape_menu != null: landscape_menu.pressed.emit()
+	await process_frame
+	var landscape_scroll := app.find_child("GameContentScroll", true, false) as ScrollContainer
+	var landscape_drawer := app.find_child("PrimaryNavigation", true, false) as Control
+	var landscape_bar := landscape_scroll.get_v_scroll_bar() if landscape_scroll != null else null
+	expect(landscape_scroll != null and landscape_bar != null and landscape_bar.max_value > landscape_bar.page + 0.5
+		and landscape_drawer != null, "Small-landscape navigation has a touch-scrollable in-flow drawer")
+	if landscape_scroll != null and landscape_drawer != null and landscape_bar != null and landscape_bar.max_value > landscape_bar.page + 0.5:
+		var drawer_rect := landscape_drawer.get_global_rect()
+		var swipe_start := Vector2(drawer_rect.position.x + drawer_rect.size.x * 0.55,
+			minf(drawer_rect.end.y - 20.0, float(root.size.y) - 28.0))
+		var swipe_down := InputEventScreenTouch.new()
+		swipe_down.index = 29
+		swipe_down.position = swipe_start
+		swipe_down.pressed = true
+		root.push_input(swipe_down)
+		await process_frame
+		var swipe_drag := InputEventScreenDrag.new()
+		swipe_drag.index = 29
+		swipe_drag.position = swipe_start + Vector2(0, -110)
+		swipe_drag.relative = Vector2(0, -110)
+		root.push_input(swipe_drag)
+		await process_frame
+		expect(landscape_scroll.scroll_vertical > 0,
+			"Touch swipe inside the drawer reveals lower navigation actions at 667×375")
+		var swipe_up := InputEventScreenTouch.new()
+		swipe_up.index = 29
+		swipe_up.position = swipe_drag.position
+		swipe_up.pressed = false
+		root.push_input(swipe_up)
+		app.close_navigation_drawer(false)
+	root.size = Vector2i(390, 844)
+	await settle("phase4-navigation-touch-scroll-restored")
 	print("Phase 4 navigation and Management UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 
