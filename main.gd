@@ -41,7 +41,7 @@ const DRAWER_ICON_PATHS := {
 	"Main Menu": "res://assets/navigation/exit.svg",
 }
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
-const TOUCH_HEIGHT := 54
+const TOUCH_HEIGHT := 44
 const PREFERENCES := "user://display.cfg"
 
 var sim: Sim
@@ -141,7 +141,10 @@ var header_title_label: Label
 var header_company_label: Label
 
 func _ready() -> void:
-	theme = Style.build()
+	var settings := ConfigFile.new()
+	if settings.load(PREFERENCES) == OK:
+		large_text = settings.get_value("display", "large_text", false) == true
+	theme = Style.build(large_text)
 	if OS.has_feature("web"):
 		dev_preview_size_callback = JavaScriptBridge.create_callback(_set_developer_preview_viewport)
 		var js_window := JavaScriptBridge.get_interface("window")
@@ -158,10 +161,6 @@ func _ready() -> void:
 		notice = "Some older saves could not be migrated yet. Their original files remain available. " + str(migration.error)
 		error_notice = true
 	get_viewport().size_changed.connect(_update_responsive_layout)
-	var settings := ConfigFile.new()
-	if settings.load(PREFERENCES) == OK:
-		large_text = settings.get_value("display", "large_text", false) == true
-	theme.default_font_size = 18 if large_text else 16
 	render()
 
 func _set_developer_preview_viewport(args: Array) -> void:
@@ -363,11 +362,11 @@ func label(text: String, font_size: int = 16, color: Color = Style.TEXT) -> Labe
 	var node := Label.new()
 	node.text = text
 	node.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	node.add_theme_font_size_override("font_size", font_size + (2 if large_text else 0))
+	node.add_theme_font_size_override("font_size", Style.normalized_font_size(font_size, large_text))
 	node.add_theme_color_override("font_color", color)
 	return node
 
-func stack(parent: Node, gap: int = 10) -> VBoxContainer:
+func stack(parent: Node, gap: int = 8) -> VBoxContainer:
 	var box := VBoxContainer.new()
 	if OS.has_feature("web"):
 		box.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -379,7 +378,7 @@ func row(parent: Node) -> HBoxContainer:
 	var box := HBoxContainer.new()
 	if OS.has_feature("web"):
 		box.mouse_filter = Control.MOUSE_FILTER_PASS
-	box.add_theme_constant_override("separation", 8)
+	box.add_theme_constant_override("separation", Style.SPACE_CONTROL)
 	parent.add_child(box)
 	return box
 
@@ -401,7 +400,7 @@ func action(parent: Node, title: String, callback: Callable, accent: bool = fals
 func secondary_tab(parent: Node, title: String, callback: Callable, selected: bool = false) -> Button:
 	var node := action(parent, title, callback)
 	node.custom_minimum_size = Vector2(120, 44)
-	node.add_theme_font_size_override("font_size", 12)
+	node.add_theme_font_size_override("font_size", Style.normalized_font_size(Style.FONT_BUTTON, large_text))
 	Style.secondary(node)
 	node.add_theme_stylebox_override("normal", Style.box(Style.SURFACE, Style.GOLD if selected else Style.LINE, 8, 7))
 	node.add_theme_stylebox_override("hover", Style.box(Style.SURFACE.lightened(0.08), Style.GOLD if selected else Style.LINE.lightened(0.16), 8, 7))
@@ -417,7 +416,7 @@ func _style_secondary_navigation_tab(node: Button, selected: bool) -> void:
 	normal.bg_color = Color.TRANSPARENT
 	normal.border_color = Style.GOLD if selected else Color.TRANSPARENT
 	normal.border_width_bottom = 2 if selected else 0
-	normal.set_content_margin_all(7)
+	normal.set_content_margin_all(Style.SPACE_SMALL)
 	normal.content_margin_left = 10
 	normal.content_margin_right = 10
 	var hover := normal.duplicate() as StyleBoxFlat
@@ -482,7 +481,7 @@ func _create_card(parent: Node, title: String) -> VBoxContainer:
 	var surface := PanelContainer.new()
 	if OS.has_feature("web"):
 		surface.mouse_filter = Control.MOUSE_FILTER_PASS
-	surface.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 15, 16))
+	surface.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 12, Style.CARD_PADDING))
 	surface.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	surface.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	parent.add_child(surface)
@@ -1596,7 +1595,7 @@ func apply_text_setting(enabled: bool) -> void:
 	var result := settings.save(PREFERENCES)
 	large_text = enabled
 	display_settings_editing = false
-	theme.default_font_size = 18 if enabled else 16
+	theme = Style.build(large_text)
 	set_notice("Settings saved." if result == OK else "Applied for this session. Settings could not be saved.", result != OK)
 	render()
 
@@ -2120,7 +2119,7 @@ func _create_navigation_drawer() -> void:
 		item.custom_minimum_size.y = 50
 		item.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		item.focus_mode = Control.FOCUS_ALL
-		_apply_drawer_icon(item, NAV_ICON_PATHS[target], 21)
+		_apply_drawer_icon(item, NAV_ICON_PATHS[target], Style.ICON_NAVIGATION)
 		if target == primary_category(page):
 			Style.primary(item)
 			item.add_theme_color_override("icon_normal_color", Style.INK)
@@ -2158,7 +2157,7 @@ func _apply_drawer_icon(button: Button, path: String, max_width: int = 20) -> vo
 	if icon == null:
 		push_warning("Navigation icon failed to load: " + path)
 		return
-	button.icon = icon
+	button.icon = Style.icon_texture(icon, max_width)
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 func secondary_navigation(parent: Node) -> void:
@@ -2370,6 +2369,7 @@ func render() -> void:
 		_show_developer_console_overlay()
 	if screen != "Game":
 		if restore_access_dialog: _show_developer_access_dialog()
+		_apply_global_typography(self)
 		return
 	match page:
 		"Dashboard": dashboard()
@@ -2396,6 +2396,23 @@ func render() -> void:
 	if developer_mode_unlocked and developer_console_visible:
 		_show_developer_console_overlay()
 	if restore_access_dialog: _show_developer_access_dialog()
+	_apply_global_typography(self)
+
+func _apply_global_typography(node: Control) -> void:
+	if node is Label:
+		var current_size := node.get_theme_font_size("font_size")
+		if current_size > 0:
+			node.add_theme_font_size_override("font_size", Style.normalized_font_size(current_size, large_text))
+	elif node is LineEdit or node is TextEdit:
+		node.add_theme_font_size_override("font_size", Style.normalized_font_size(Style.FONT_BODY, large_text))
+	elif node is OptionButton:
+		node.add_theme_font_size_override("font_size", Style.normalized_font_size(Style.FONT_BUTTON, large_text))
+	elif node is BaseButton:
+		var size := Style.FONT_NAVIGATION if node.name.begins_with("Primary_") else Style.FONT_BUTTON
+		node.add_theme_font_size_override("font_size", Style.normalized_font_size(size, large_text))
+	for child in node.get_children():
+		if child is Control:
+			_apply_global_typography(child as Control)
 
 func _developer_button(parent: Node) -> Button:
 	var button := action(parent, "</>", request_developer_mode_access, false)
@@ -2781,21 +2798,21 @@ func dashboard() -> void:
 	(store_card.get_parent() as Control).name = "DashboardStoreManagement"
 	store_card.add_child(label("Create and manage your stores.", 14, Style.MUTED))
 	var store_button := action(store_card, "Manage Stores", navigate.bind("Management"), true)
-	store_button.icon = load(NAV_ICON_PATHS.Business) as Texture2D
+	store_button.icon = Style.icon_texture(load(NAV_ICON_PATHS.Business) as Texture2D, Style.ICON_CONTROL)
 	store_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	var listing_card := _create_card(channel_grid, "Listing Products")
 	listing_card.name = "DashboardListingProducts"
 	(listing_card.get_parent() as Control).name = "DashboardListingProducts"
 	listing_card.add_child(label("Manage your published and unpublished product listings.", 14, Style.MUTED))
 	var listing_button := action(listing_card, "My Products", navigate.bind("My Products"))
-	listing_button.icon = load(NAV_ICON_PATHS.Market) as Texture2D
+	listing_button.icon = Style.icon_texture(load(NAV_ICON_PATHS.Market) as Texture2D, Style.ICON_CONTROL)
 	listing_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	var sourcing_card := _create_card(channel_grid, "Product Sourcing")
 	sourcing_card.name = "DashboardProductSourcing"
 	(sourcing_card.get_parent() as Control).name = "DashboardProductSourcing"
 	sourcing_card.add_child(label("Discover products, compare suppliers and purchase inventory.", 14, Style.MUTED))
 	var sourcing_button := action(sourcing_card, "Browse Product Catalogue", navigate.bind("Product Catalogue"))
-	sourcing_button.icon = load(NAV_ICON_PATHS.Market) as Texture2D
+	sourcing_button.icon = Style.icon_texture(load(NAV_ICON_PATHS.Market) as Texture2D, Style.ICON_CONTROL)
 	sourcing_button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	var alerts: VBoxContainer = card("Business Alerts")
 	if active_marketplaces == 0 and active_websites == 0:
@@ -2866,8 +2883,8 @@ func channel_cards(report: Dictionary, scope: String) -> void:
 		var heading := row(content)
 		var icon_path: String = NAV_ICON_PATHS.Market if channel == 0 else NAV_ICON_PATHS.Business
 		var channel_icon := TextureRect.new()
-		channel_icon.texture = load(icon_path) as Texture2D
-		channel_icon.custom_minimum_size = Vector2(18, 18)
+		channel_icon.texture = Style.icon_texture(load(icon_path) as Texture2D, Style.ICON_NAVIGATION)
+		channel_icon.custom_minimum_size = Vector2(Style.ICON_NAVIGATION, Style.ICON_NAVIGATION)
 		channel_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		channel_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		heading.add_child(channel_icon)

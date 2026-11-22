@@ -144,7 +144,7 @@ static func show_categories(app: Control) -> void:
 		var card := Button.new()
 		card.name = "CatalogueCategory_" + _safe_name(name)
 		card.text = "%s\n%d products" % [name, category_product_count]
-		card.icon = load(_category_icon_path(name)) as Texture2D
+		card.icon = Style.icon_texture(load(_category_icon_path(name)) as Texture2D, Style.ICON_CONTROL)
 		card.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		card.add_theme_font_size_override("font_size", 13 if app.size.x < 600.0 else 14)

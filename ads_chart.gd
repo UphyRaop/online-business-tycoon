@@ -1,5 +1,7 @@
 extends Control
 
+const Style = preload("res://corporate_theme.gd")
+
 var chart_labels: Array[String] = []
 var series: Array[Dictionary] = []
 
@@ -20,8 +22,10 @@ func _has_data() -> bool:
 	return false
 
 func _draw() -> void:
+	var active_theme := get_theme()
+	var large_text := active_theme != null and active_theme.default_font_size > Style.FONT_BODY
 	if not _has_data():
-		draw_string(ThemeDB.fallback_font, Vector2(4, maxf(20.0, size.y * 0.68)), "No recorded activity for this period", HORIZONTAL_ALIGNMENT_LEFT, maxf(120.0, size.x - 8.0), 12, Color("#a6b5c8"))
+		draw_string(ThemeDB.fallback_font, Vector2(4, maxf(20.0, size.y * 0.68)), "No recorded activity for this period", HORIZONTAL_ALIGNMENT_LEFT, maxf(120.0, size.x - 8.0), Style.normalized_font_size(Style.FONT_BODY, large_text), Color("#a6b5c8"))
 		return
 	var bounds := Rect2(Vector2(34, 8), Vector2(maxf(80, size.x - 44), maxf(80, size.y - 38)))
 	for line in range(0, 4):
@@ -50,4 +54,4 @@ func _draw() -> void:
 	for index in chart_labels.size():
 		if chart_labels.size() <= 6 or index == 0 or index == chart_labels.size() - 1 or index % maxi(1, chart_labels.size() / 5) == 0:
 			var x := bounds.position.x + (bounds.size.x * 0.5 if chart_labels.size() == 1 else bounds.size.x * float(index) / float(chart_labels.size() - 1))
-			draw_string(ThemeDB.fallback_font, Vector2(x - 20, size.y - 4), chart_labels[index], HORIZONTAL_ALIGNMENT_CENTER, 40, 10, Color("#a6b5c8"))
+			draw_string(ThemeDB.fallback_font, Vector2(x - 20, size.y - 4), chart_labels[index], HORIZONTAL_ALIGNMENT_CENTER, 40, Style.normalized_font_size(Style.FONT_CAPTION, large_text), Color("#a6b5c8"))

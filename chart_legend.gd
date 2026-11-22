@@ -1,5 +1,7 @@
 extends RefCounted
 
+const Style = preload("res://corporate_theme.gd")
+
 class DotMarker extends Control:
 	var marker_color: Color = Color.WHITE
 
@@ -21,7 +23,7 @@ static func build(series: Array[Dictionary]) -> FlowContainer:
 		var marker := DotMarker.new()
 		marker.name = "LegendColorMarker"
 		marker.marker_color = item.get("color", Color.WHITE)
-		marker.custom_minimum_size = Vector2(16, 16)
+		marker.custom_minimum_size = Vector2(Style.ICON_CONTROL, Style.ICON_CONTROL)
 		marker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		chip.add_child(marker)
 		var caption := Label.new()
