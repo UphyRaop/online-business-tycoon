@@ -240,7 +240,7 @@ static func order_card(app: Control, order: Dictionary, cases_only: bool) -> voi
 	if order.case_status == "open":
 		app.divider(view)
 		var suffix := " · escalated" if order.escalated else ""
-		view.add_child(app.label("%s · %s%s" % [order.reason, Calendar.format(order.case_day), suffix], 15, Style.GOLD))
+		view.add_child(app.label("%s · %s%s" % [order.reason, Calendar.format(order.case_day), suffix], Style.FONT_BODY, Style.GOLD))
 		if order.return_requested:
 			view.add_child(app.label("Returned stock is resellable." if order.restockable else "Defective return will be written off.", 14, Style.MUTED))
 			app.action(view, "Approve return and refund", refund.bind(app, order.id), true)
@@ -270,7 +270,7 @@ static func tracking(app: Control, view: VBoxContainer, order: Dictionary) -> vo
 		view.add_child(app.label("Pre-order · %s" % _preorder_status(str(order.get("preorder_status", "awaiting_stock"))), 14, Style.GOLD))
 	match order.status:
 		"queued":
-			view.add_child(app.label("Awaiting dispatch", 15, Style.GOLD))
+			view.add_child(app.label("Awaiting dispatch", Style.FONT_BODY, Style.GOLD))
 			var method: OptionButton = app.dropdown(view, methods(app), order.method)
 			app.action(view, "Dispatch order", func():
 				finish(app, Fulfillment.ship(state, order.id, method.selected), "Order dispatched.")

@@ -8,6 +8,7 @@ func _initialize() -> void:
 	test_semantic_button_roles()
 	test_action_semantics()
 	test_safe_text_formatting()
+	test_global_v4_tokens()
 	print("Shared control styling: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 
@@ -66,6 +67,36 @@ func test_safe_text_formatting() -> void:
 		"Sentence formatting trims spacing and uppercases only the sentence start")
 	expect(ThemeStyle.sentence_text("iPhone listings use WooCommerce.") == "iPhone listings use WooCommerce.",
 		"Sentence formatting does not alter proper names")
+
+func test_global_v4_tokens() -> void:
+	var standard := ThemeStyle.build()
+	var large := ThemeStyle.build(true)
+	expect(ThemeStyle.FONT_CAPTION == 11 and ThemeStyle.FONT_BUTTON == 12
+		and ThemeStyle.FONT_BODY == 13 and ThemeStyle.FONT_HEADING == 14,
+		"V4 typography tokens use the approved 11, 12, 13, and 14 px hierarchy")
+	expect(ThemeStyle.normalized_font_size(26) == 14 and ThemeStyle.normalized_font_size(10) == 11,
+		"Standard typography clamps oversized headings and undersized captions to V4 tokens")
+	expect(ThemeStyle.normalized_font_size(11) == 11 and ThemeStyle.normalized_font_size(12) == 12
+		and ThemeStyle.normalized_font_size(13) == 13 and ThemeStyle.normalized_font_size(14) == 14,
+		"Standard caption, button, body, and heading sizes match their approved tokens")
+	expect(ThemeStyle.normalized_font_size(11, true) == 13
+		and ThemeStyle.normalized_font_size(12, true) == 14
+		and ThemeStyle.normalized_font_size(13, true) == 14
+		and ThemeStyle.normalized_font_size(14, true) == 14
+		and ThemeStyle.normalized_font_size(26, true) == 14,
+		"Large Text maps captions to 13 px and caps buttons, body text, headings, and values at 14 px")
+	expect(standard.default_font_size == 13 and large.default_font_size == 14,
+		"Theme body size follows standard and Large Text settings")
+	expect(ThemeStyle.ICON_INDICATOR == 14 and ThemeStyle.ICON_CONTROL == 16
+		and ThemeStyle.ICON_NAVIGATION == 18 and ThemeStyle.ICON_HEADER == 20
+		and ThemeStyle.icon_size(24) == 20,
+		"V4 icon tokens define the approved size ladder and maximum")
+	var image := Image.create(48, 48, false, Image.FORMAT_RGBA8)
+	image.fill(Color.WHITE)
+	var resized := ThemeStyle.icon_texture(ImageTexture.create_from_image(image), ThemeStyle.ICON_CONTROL)
+	expect(resized != null and resized.get_width() == ThemeStyle.ICON_CONTROL
+		and resized.get_height() == ThemeStyle.ICON_CONTROL,
+		"Oversized source icons are resampled to their declared V4 control size")
 
 func contrast_ratio(background: Color, foreground: Color) -> float:
 	var lighter := maxf(background.get_luminance(), foreground.get_luminance())

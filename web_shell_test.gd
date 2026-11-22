@@ -4,6 +4,7 @@ var failures := 0
 
 func _initialize() -> void:
 	var shell := FileAccess.get_file_as_string("res://browser/online_business_loader.html")
+	var prototype := FileAccess.get_file_as_string("res://browser/index.html")
 	var main_source := FileAccess.get_file_as_string("res://main.gd")
 	var presets := FileAccess.get_file_as_string("res://export_presets.cfg")
 	var build_script := FileAccess.get_file_as_string("res://.github/scripts/build-web.sh")
@@ -63,6 +64,17 @@ func _initialize() -> void:
 		"Shell respects reduced-motion and small/mobile safe-area layouts")
 	expect(not shell.contains('id="status-splash"') and not shell.contains('id="status-notice"'),
 		"Default Godot splash/notice markup is replaced rather than displayed underneath")
+	expect(shell.contains("--font-caption: 11px") and shell.contains("--font-button: 12px")
+		and shell.contains("--font-body: 13px") and shell.contains("--font-heading: 14px"),
+		"Pre-engine loading shell uses the shared V4 typography hierarchy")
+	var oversized_css := RegEx.new()
+	oversized_css.compile("font-size\\s*:\\s*(?:1[5-9]|[2-9][0-9])px")
+	expect(oversized_css.search(shell) == null,
+		"Shipped pre-engine loading screen has no hardcoded font-size declaration above 14 px")
+	expect(prototype.contains("--font-caption:11px") and prototype.contains("--font-button:12px")
+		and prototype.contains("--font-body:13px") and prototype.contains("--font-heading:14px")
+		and oversized_css.search(prototype) == null,
+		"Standalone browser prototype also follows the V4 size hierarchy and has no oversized font declarations")
 	print("Custom Web loader shell: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 

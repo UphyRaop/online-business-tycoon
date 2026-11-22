@@ -13,10 +13,10 @@ static func show(app: Control, product: int, store_id: int = -1) -> VBoxContaine
 	if store_id >= 0:
 		view.add_child(app.label("This configuration applies only to the selected store and product listing.", 14, Style.MUTED))
 	else:
-		view.add_child(app.label("Primary product: " + Catalog.PRODUCTS[product].name, 15, Style.GOLD))
+		view.add_child(app.label("Primary product: " + Catalog.PRODUCTS[product].name, Style.FONT_BODY, Style.GOLD))
 	var currency: String = Catalog.CURRENCIES[state.country]
 	var form: VBoxContainer = app.stack(view, 8)
-	form.add_child(app.label("Create an offer", 18))
+	form.add_child(app.label("Create an offer", Style.FONT_HEADING))
 	form.visible = false
 	var chooser: VBoxContainer = app.stack(form, 8)
 	chooser.add_child(app.label("Choose the type of offer to create.", 14, Style.MUTED))
@@ -216,7 +216,7 @@ static func show(app: Control, product: int, store_id: int = -1) -> VBoxContaine
 static func _existing_offer(app: Control, parent: VBoxContainer, product: int, store_id: int, mode: int, offer: Dictionary, edit_action: Callable) -> void:
 	var is_bundle := mode == 1
 	var card: VBoxContainer = app.stack(parent, 6)
-	card.add_child(app.label("Bundle" if is_bundle else "Upsell", 18))
+	card.add_child(app.label("Bundle" if is_bundle else "Upsell", Style.FONT_HEADING))
 	var shown_price := _format_price(app, int(offer.get("price", 0))) if int(offer.get("price", 0)) > 0 else "%d%% off" % int(offer.get("discount", 0))
 	var status := "Enabled" if offer.get("enabled", true) else "Disabled"
 	if is_bundle:

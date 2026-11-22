@@ -18,7 +18,22 @@ const WARNING_FILL := Color("#ffd166")
 const WARNING_INK := Color("#0c121c")
 const DISABLED_FILL := Color("#252f3d")
 const DISABLED_TEXT := Color("#c1cad6")
-const BUTTON_TOUCH_HEIGHT := 48
+const FONT_CAPTION := 11
+const FONT_BUTTON := 12
+const FONT_BODY := 13
+const FONT_HEADING := 14
+const FONT_NAVIGATION := 13
+const ICON_INDICATOR := 14
+const ICON_CONTROL := 16
+const ICON_NAVIGATION := 18
+const ICON_HEADER := 20
+const SPACE_TIGHT := 4
+const SPACE_SMALL := 6
+const SPACE_CONTROL := 8
+const SPACE_SECTION := 12
+const CARD_PADDING := 12
+const BUTTON_PADDING := 8
+const BUTTON_TOUCH_HEIGHT := 44
 const BUTTON_TOUCH_WIDTH := 44
 const ROLE_PRIMARY := "primary"
 const ROLE_NAVIGATION := "navigation"
@@ -42,9 +57,38 @@ static func box(fill: Color, border: Color, radius: int, padding: int) -> StyleB
 	style.set_content_margin_all(padding)
 	return style
 
-static func build() -> Theme:
+static func normalized_font_size(requested: int, large_text: bool = false) -> int:
+	var standard_size := clampi(requested, FONT_CAPTION, FONT_HEADING)
+	return mini(FONT_HEADING, standard_size + (2 if large_text else 0))
+
+static func icon_size(requested: int) -> int:
+	return clampi(requested, ICON_INDICATOR, ICON_HEADER)
+
+static func icon_texture(texture: Texture2D, requested: int) -> Texture2D:
+	if texture == null:
+		return null
+	var image := texture.get_image()
+	if image == null or image.is_empty():
+		return texture
+	var maximum := icon_size(requested)
+	var longest_side := maxi(image.get_width(), image.get_height())
+	if longest_side <= maximum:
+		return texture
+	var scale := float(maximum) / float(longest_side)
+	var width := maxi(1, roundi(float(image.get_width()) * scale))
+	var height := maxi(1, roundi(float(image.get_height()) * scale))
+	image.resize(width, height, Image.INTERPOLATE_LANCZOS)
+	return ImageTexture.create_from_image(image)
+
+static func build(large_text: bool = false) -> Theme:
 	var theme := Theme.new()
-	theme.default_font_size = 16
+	theme.default_font_size = normalized_font_size(FONT_BODY, large_text)
+	theme.set_font_size("font_size", "Label", normalized_font_size(FONT_BODY, large_text))
+	theme.set_font_size("font_size", "Button", normalized_font_size(FONT_BUTTON, large_text))
+	theme.set_font_size("font_size", "OptionButton", normalized_font_size(FONT_BUTTON, large_text))
+	theme.set_font_size("font_size", "LineEdit", normalized_font_size(FONT_BODY, large_text))
+	theme.set_font_size("font_size", "PopupMenu", normalized_font_size(FONT_BODY, large_text))
+	theme.set_font_size("font_size", "AcceptDialog", normalized_font_size(FONT_BODY, large_text))
 	theme.set_color("font_color", "Label", TEXT)
 	for type in ["Button", "OptionButton", "LineEdit", "PopupMenu"]:
 		theme.set_color("font_color", type, TEXT)
@@ -52,13 +96,13 @@ static func build() -> Theme:
 		theme.set_color("font_pressed_color", type, GOLD)
 		theme.set_color("font_focus_color", type, TEXT)
 		theme.set_color("font_disabled_color", type, MUTED.darkened(0.25))
-		theme.set_stylebox("normal", type, box(INPUT, LINE, 9, 10))
-		theme.set_stylebox("hover", type, box(SURFACE.lightened(0.08), LINE.lightened(0.18), 9, 10))
-		theme.set_stylebox("pressed", type, box(SURFACE, GOLD, 9, 10))
-		var focus := box(Color.TRANSPARENT, GOLD, 9, 10)
+		theme.set_stylebox("normal", type, box(INPUT, LINE, 9, BUTTON_PADDING))
+		theme.set_stylebox("hover", type, box(SURFACE.lightened(0.08), LINE.lightened(0.18), 9, BUTTON_PADDING))
+		theme.set_stylebox("pressed", type, box(SURFACE, GOLD, 9, BUTTON_PADDING))
+		var focus := box(Color.TRANSPARENT, GOLD, 9, BUTTON_PADDING)
 		focus.draw_center = false
 		theme.set_stylebox("focus", type, focus)
-		theme.set_stylebox("disabled", type, box(BG, LINE, 9, 10))
+		theme.set_stylebox("disabled", type, box(BG, LINE, 9, BUTTON_PADDING))
 	theme.set_stylebox("panel", "PopupMenu", box(SURFACE, LINE, 9, 8))
 	theme.set_stylebox("panel", "AcceptDialog", box(SURFACE, LINE, 8, 14))
 	for border_name in ["embedded_border", "embedded_unfocused_border"]:
@@ -151,10 +195,10 @@ static func button_role_for_action(title: String) -> String:
 static func role(control: Button, fill: Color, ink: Color) -> void:
 	control.custom_minimum_size.x = maxf(control.custom_minimum_size.x, BUTTON_TOUCH_WIDTH)
 	control.custom_minimum_size.y = maxf(control.custom_minimum_size.y, BUTTON_TOUCH_HEIGHT)
-	control.add_theme_stylebox_override("normal", box(fill, fill, 9, 10))
-	control.add_theme_stylebox_override("hover", box(fill.lightened(0.15), fill.lightened(0.18), 9, 10))
-	control.add_theme_stylebox_override("pressed", box(fill.darkened(0.13), fill.darkened(0.1), 9, 10))
-	var focus := box(fill, GOLD, 9, 10)
+	control.add_theme_stylebox_override("normal", box(fill, fill, 9, BUTTON_PADDING))
+	control.add_theme_stylebox_override("hover", box(fill.lightened(0.15), fill.lightened(0.18), 9, BUTTON_PADDING))
+	control.add_theme_stylebox_override("pressed", box(fill.darkened(0.13), fill.darkened(0.1), 9, BUTTON_PADDING))
+	var focus := box(fill, GOLD, 9, BUTTON_PADDING)
 	control.add_theme_stylebox_override("focus", focus)
 	for color in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		control.add_theme_color_override(color, ink)

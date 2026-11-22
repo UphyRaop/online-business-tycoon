@@ -15,7 +15,7 @@ static func show(app: Control) -> void:
 	var sim: RefCounted = app.sim
 	var state: Dictionary = sim.state
 	var overview: VBoxContainer = app.wide_card("My Products")
-	overview.add_child(app.label("Product portfolio", 15, Style.MUTED))
+	overview.add_child(app.label("Product portfolio", Style.FONT_BODY, Style.MUTED))
 	app.metric(overview, "Active products", str(sim.active_product_count()), Style.GOLD)
 	app.metric(overview, "Default outbound delivery", app.money(Catalog.local_cents(state.country, Catalog.SHIPPING[state.shipping].cost)) + " / order")
 	var filter_row := FlowContainer.new()
@@ -43,7 +43,7 @@ static func show(app: Control) -> void:
 		if selected_id == id:
 			view.add_child(app.label("Selected product", 13, Style.GOLD))
 		var status_color := Style.GREEN if current_status == "Active" else (Style.MUTED if current_status == "Draft" else Style.GOLD)
-		view.add_child(app.label(current_status, 15, status_color))
+		view.add_child(app.label(current_status, Style.FONT_BODY, status_color))
 		var available: int = sim.stock(id)
 		app.metric(view, "Inventory", "%d available · %d inbound" % [available, Supply.incoming(state, id)])
 		var listings := listed_store_names(state, id)

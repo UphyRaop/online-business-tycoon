@@ -88,8 +88,34 @@ func run() -> void:
 	var page_heading: Control = app.find_child("PageHeading", true, false)
 	var page_heading_label := controls(page_heading, "Label").front() as Label if page_heading != null and not controls(page_heading, "Label").is_empty() else null
 	expect(page_heading != null and controls(page_heading, "Button").is_empty()
-		and page_heading_label != null and page_heading_label.get_theme_font_size("font_size") == 26,
-		"Page heading stays within the compact 26 px desktop hierarchy without duplicating Save Game or Main Menu")
+		and page_heading_label != null and page_heading_label.get_theme_font_size("font_size") == Style.FONT_HEADING,
+		"Page heading uses the 14 px V4 heading token without duplicating Save Game or Main Menu")
+	var primary_dashboard_button := app.find_child("Primary_Dashboard", true, false) as Button
+	var compact_action := app.find_child("InventoryBrowseProductCatalogue", true, false) as Button
+	expect(primary_dashboard_button != null and primary_dashboard_button.get_theme_font_size("font_size") == Style.FONT_NAVIGATION
+		and compact_action != null and compact_action.get_theme_font_size("font_size") == Style.FONT_BUTTON,
+		"Primary navigation uses 13 px while game actions use the compact 12 px button token")
+	app.apply_text_setting(true)
+	await process_frame
+	page_heading = app.find_child("PageHeading", true, false)
+	page_heading_label = controls(page_heading, "Label").front() as Label if page_heading != null and not controls(page_heading, "Label").is_empty() else null
+	primary_dashboard_button = app.find_child("Primary_Dashboard", true, false) as Button
+	compact_action = app.find_child("InventoryBrowseProductCatalogue", true, false) as Button
+	expect(page_heading_label != null and page_heading_label.get_theme_font_size("font_size") == Style.FONT_HEADING
+			and primary_dashboard_button != null and primary_dashboard_button.get_theme_font_size("font_size") == Style.FONT_HEADING
+			and compact_action != null and compact_action.get_theme_font_size("font_size") == Style.FONT_HEADING,
+			"Large Text increases smaller text but caps headings, navigation and actions at 14 px")
+	app.apply_text_setting(false)
+	await process_frame
+	nav = app.find_child("PrimaryNavigation", true, false)
+	game_date = app.find_child("GameDate", true, false)
+	menu_button = app.find_child("NavigationMenuButton", true, false)
+	bank_balance = app.find_child("DashboardBankBalanceValue", true, false)
+	header_balance = app.find_child("HeaderBankBalanceValue", true, false)
+	advance_controls = app.find_child("GlobalAdvanceDayControls", true, false)
+	header_primary = app.find_child("GameHeaderPrimaryRow", true, false)
+	header_title = app.find_child("HeaderGameTitle", true, false)
+	header_company = app.find_child("HeaderCompanyName", true, false)
 	var content_scroll: ScrollContainer = app.find_child("GameContentScroll", true, false)
 	expect(content_scroll != null and not content_scroll.is_ancestor_of(game_date)
 		and not content_scroll.is_ancestor_of(header_balance) and content_scroll.is_ancestor_of(bank_balance),

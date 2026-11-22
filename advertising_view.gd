@@ -449,7 +449,7 @@ static func _analytics_kpi(app: Control, parent: Control, title: String, value: 
 	panel.add_theme_stylebox_override("panel", Style.box(Style.INPUT, Style.LINE, 10, 12))
 	var content := VBoxContainer.new()
 	content.add_child(app.label(title, 13, Style.MUTED))
-	content.add_child(app.label(value, 18, Style.GOLD))
+	content.add_child(app.label(value, Style.FONT_HEADING, Style.GOLD))
 	panel.add_child(content)
 	parent.add_child(panel)
 
@@ -483,7 +483,7 @@ static func _analytics_card(app: Control, parent: Control, title: String) -> VBo
 	panel.add_theme_stylebox_override("panel", Style.box(Style.SURFACE, Style.LINE, 12, 14))
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 8)
-	content.add_child(app.label(title, 18))
+	content.add_child(app.label(title, Style.FONT_HEADING))
 	panel.add_child(content)
 	parent.add_child(panel)
 	return content

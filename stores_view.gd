@@ -135,7 +135,7 @@ static func profitability(app: Control) -> void:
 		start_day = int(app.sim.state.day)
 		end_day = int(app.sim.state.day) - 1
 	var date_label := Calendar.format_range(start_day, end_day) if has_completed_days else Calendar.format_range(selected_bounds.x, selected_bounds.y)
-	summary.add_child(app.label(date_label, 15, Style.GOLD))
+	summary.add_child(app.label(date_label, Style.FONT_BODY, Style.GOLD))
 	var dates: HBoxContainer = app.row(summary)
 	var previous: Button = app.action(dates, "Previous", change_profitability_period.bind(app, selected_bounds.x - 1))
 	previous.disabled = selected_bounds.x <= 1
