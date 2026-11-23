@@ -214,6 +214,8 @@ static func _add_mobile_row(parent: VBoxContainer, item: Dictionary) -> void:
 static func _add_desktop_row(parent: VBoxContainer, item: Dictionary) -> void:
 	var row := HBoxContainer.new()
 	row.name = "InventoryProductRow"
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	row.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	parent.add_child(row)
 	var name := Label.new()

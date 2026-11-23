@@ -134,11 +134,12 @@ func run() -> void:
 	app.set_notice("")
 	expect(nav != null and not nav.is_visible_in_tree(), "Primary navigation drawer is hidden by default")
 	var nav_slot := app.find_child("PrimaryNavigationSlot", true, false) as Control
-	expect(nav_slot != null and nav.get_parent() == nav_slot and is_zero_approx(nav_slot.custom_minimum_size.y),
-		"Closed drawer content stays out of the page's measured height")
+	expect(nav_slot != null and nav.get_parent() == nav_slot and not nav_slot.visible
+		and is_zero_approx(nav_slot.custom_minimum_size.y),
+		"Closed drawer content is hidden and consumes neither page height nor container spacing")
 	var navigation_state_before: Dictionary = app.sim.state.duplicate(true)
 	(app.find_child("NavigationMenuButton", true, false) as Button).pressed.emit()
-	expect(nav != null and nav.is_visible_in_tree() and nav_slot.custom_minimum_size.y > 0.0,
+	expect(nav != null and nav.is_visible_in_tree() and nav_slot.visible and nav_slot.custom_minimum_size.y > 0.0,
 		"Hamburger opens Main Navigation and expands its in-flow slot")
 	await _check_primary_tabs_within_viewport(Vector2i(1280, 720))
 	for tab in ["Dashboard", "Market", "Order", "Business", "Marketing", "Finance", "Profile"]:
@@ -155,7 +156,8 @@ func run() -> void:
 	expect(action_label != null, "Drawer separates navigation from its action section")
 	var close_navigation: Button = nav.find_child("PrimaryNavigationClose", true, false)
 	if close_navigation != null: close_navigation.pressed.emit()
-	expect(not app.navigation_open and not nav.is_visible_in_tree() and is_zero_approx(nav_slot.custom_minimum_size.y),
+	expect(not app.navigation_open and not nav.is_visible_in_tree() and not nav_slot.visible
+		and is_zero_approx(nav_slot.custom_minimum_size.y),
 		"The in-flow navigation Close button collapses Main Navigation and releases its page height")
 	expect(content_scroll != null and content_scroll.is_ancestor_of(nav) and not nav.top_level,
 		"Main Navigation participates in the normal scroll layout rather than a viewport overlay")
@@ -524,10 +526,35 @@ func run() -> void:
 		var compact_metric_rows := true
 		for metric_row in metric_rows:
 			var metric_box := metric_row as BoxContainer
-			if metric_box.vertical or metric_box.get_theme_constant("separation", "BoxContainer") != Style.INFO_ROW_GAP:
+			if not (metric_box is HBoxContainer) or metric_box.get_theme_constant("separation", "BoxContainer") != Style.INFO_ROW_GAP \
+				or metric_box.size_flags_horizontal != Control.SIZE_EXPAND_FILL:
 				compact_metric_rows = false
 		expect(compact_metric_rows,
 			"Information cards keep labels and values on compact horizontal rows at %dx%d" % [viewport.x, viewport.y])
+		app.navigate("Profile")
+		await process_frame
+		await process_frame
+		_check_information_rows_fill("CEO Profile", viewport)
+		_check_page_vertical_gaps("CEO Profile", viewport)
+		app.navigate("Expenses")
+		await process_frame
+		await process_frame
+		var expense_rows := controls(app, "BoxContainer").filter(func(control): return str(control.name) == "ResponsiveMetric")
+		if expense_rows.is_empty():
+			var breakdown_heading := controls(app, "Label").filter(func(node): return node.text == "Expense Breakdown")
+			if not breakdown_heading.is_empty():
+				app.metric(breakdown_heading[0].get_parent(), "Layout QA Amount", "MYR 1,234.56")
+				await process_frame
+		_check_information_rows_fill("Expenses", viewport)
+		_check_page_vertical_gaps("Expenses", viewport)
+		app.navigate("Marketing")
+		await process_frame
+		await process_frame
+		_check_page_vertical_gaps("Marketing", viewport)
+		app.navigate("Business")
+		await process_frame
+		await process_frame
+		_check_page_vertical_gaps("Company Management", viewport)
 		var expected_grid_children: int = 0 if app.size.x >= 768 and app.page_cards.size() == 1 else (2 if app.size.x >= 768 else app.page_cards.size())
 		expect(app.page_grid.get_child_count() == expected_grid_children,
 			"Card layout reflows without unused columns at %dx%d" % [viewport.x, viewport.y])
@@ -626,6 +653,15 @@ func run() -> void:
 		app.close_navigation_drawer(false)
 	root.size = Vector2i(390, 844)
 	await settle("phase4-navigation-touch-scroll-restored")
+	app.show_screen("Settings")
+	await process_frame
+	await process_frame
+	var settings_heading := app.find_child("PageHeading", true, false) as Control
+	var settings_first_card: Control = app.page_grid.get_child(0) as Control if app.page_grid != null and app.page_grid.get_child_count() > 0 else null
+	var settings_title_to_content := settings_first_card.get_global_rect().position.y - settings_heading.get_global_rect().end.y if settings_heading != null and settings_first_card != null else -1.0
+	expect(settings_heading != null and settings_first_card != null and not app.page_wide.visible
+		and settings_title_to_content >= -1.0 and settings_title_to_content <= Style.PAGE_SHELL_GAP + 1.5,
+		"A screen without tabs hides its unused page wrapper and places the first card directly below its title (%.1f px)" % settings_title_to_content)
 	print("Phase 4 navigation and Management UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
 
@@ -667,3 +703,59 @@ func _check_primary_tabs_within_viewport(viewport: Vector2i) -> void:
 		await app.get_tree().process_frame
 	if opened_here:
 		app.close_navigation_drawer(false)
+
+func _check_information_rows_fill(scope: String, viewport: Vector2i) -> void:
+	var rows := controls(app, "BoxContainer").filter(func(control): return str(control.name) == "ResponsiveMetric")
+	var aligned := not rows.is_empty()
+	for item in rows:
+		var metric_row := item as BoxContainer
+		var parent := metric_row.get_parent() as Control
+		var row_bounds := metric_row.get_global_rect()
+		var parent_bounds := parent.get_global_rect() if parent != null else Rect2()
+		var value := metric_row.get_child(1) as Label if metric_row.get_child_count() > 1 else null
+		if not (metric_row is HBoxContainer) or metric_row.size_flags_horizontal != Control.SIZE_EXPAND_FILL \
+			or parent == null or absf(row_bounds.size.x - parent_bounds.size.x) > 1.5 \
+			or value == null or value.horizontal_alignment != HORIZONTAL_ALIGNMENT_RIGHT:
+			aligned = false
+	expect(aligned, "%s label/value rows fill their parent width and right-align amounts at %dx%d (%d rows)" % [scope, viewport.x, viewport.y, rows.size()])
+	if viewport.x in [390, 1366] and not rows.is_empty():
+		var sample := rows[0] as Control
+		var parent := sample.get_parent() as Control
+		print("LAYOUT_ROW %s %dx%d row=%.1fpx parent=%.1fpx value_right=%s" % [scope, viewport.x, viewport.y,
+			sample.get_global_rect().size.x, parent.get_global_rect().size.x,
+			str((sample.get_child(1) as Label).horizontal_alignment == HORIZONTAL_ALIGNMENT_RIGHT)])
+
+func _check_page_vertical_gaps(scope: String, viewport: Vector2i) -> void:
+	var heading := app.find_child("PageHeading", true, false) as Control
+	var header := app.find_child("UltraCompactGlobalHeader", true, false) as Control
+	var tabs := app.find_child("SecondaryNavigationScroll", true, false) as Control
+	var header_gap_ok := false
+	var title_gap_ok := false
+	var content_gap_ok := false
+	var first_content: Control
+	if app.page_wide != null and app.page_wide.visible and app.page_wide.get_child_count() > 0:
+		first_content = app.page_wide
+	elif app.page_grid != null and app.page_grid.visible and app.page_grid.get_child_count() > 0:
+		first_content = app.page_grid
+	var title_gap := -1.0
+	var content_gap := -1.0
+	var header_gap := -1.0
+	if header != null and heading != null:
+		header_gap = heading.get_global_rect().position.y - header.get_global_rect().end.y
+		header_gap_ok = header_gap >= -1.0 and header_gap <= 4.0
+	if heading != null and first_content != null:
+		if tabs != null:
+			title_gap = tabs.get_global_rect().position.y - heading.get_global_rect().end.y
+			content_gap = first_content.get_global_rect().position.y - tabs.get_global_rect().end.y
+			title_gap_ok = title_gap >= -1.0 and title_gap <= Style.PAGE_SHELL_GAP + 1.5
+			content_gap_ok = content_gap >= -1.0 and content_gap <= Style.PAGE_BODY_GAP + 1.5
+		else:
+			# Profile and utility pages without secondary tabs use the compact
+			# title-to-first-card spacing directly.
+			content_gap = first_content.get_global_rect().position.y - heading.get_global_rect().end.y
+			content_gap_ok = content_gap >= -1.0 and content_gap <= Style.PAGE_SHELL_GAP + 1.5
+			title_gap_ok = content_gap_ok
+	expect(header_gap_ok and title_gap_ok and content_gap_ok,
+		"%s actual header/title/tabs/content gaps stay compact at %dx%d (header: %.1f px, title: %.1f px, content: %.1f px)" % [scope, viewport.x, viewport.y, header_gap, title_gap, content_gap])
+	if viewport.x in [390, 1366]:
+		print("LAYOUT_GAP %s %dx%d header-to-title=%.1fpx title-to-tabs=%.1fpx tabs-to-content=%.1fpx" % [scope, viewport.x, viewport.y, header_gap, title_gap, content_gap])

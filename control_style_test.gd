@@ -93,11 +93,12 @@ func test_global_v4_tokens() -> void:
 		"V4 icon tokens define the approved size ladder and maximum")
 	expect(ThemeStyle.PAGE_MARGIN_VERTICAL == 10 and ThemeStyle.PAGE_CONTENT_GAP == 6
 		and ThemeStyle.PAGE_SECTION_GAP == 8 and ThemeStyle.CARD_GRID_GAP == 10
+		and ThemeStyle.PAGE_SHELL_GAP == 4 and ThemeStyle.PAGE_BODY_GAP == 4
 		and ThemeStyle.CARD_CONTENT_GAP == 6 and ThemeStyle.INFO_ROW_GAP == 6
 		and ThemeStyle.NAVIGATION_TAB_GAP == 4 and ThemeStyle.BUTTON_GROUP_GAP == 6
 		and ThemeStyle.CARD_PADDING == 10 and ThemeStyle.CARD_INNER_PADDING == 8
 		and ThemeStyle.CARD_RADIUS == 10,
-		"Global Compact Layout V1 uses the centralized mobile-first spacing and card tokens")
+		"Global Compact Layout uses compact page hierarchy and centralized mobile-first spacing/card tokens")
 	var compact_card := ThemeStyle.card_box(ThemeStyle.SURFACE, ThemeStyle.LINE)
 	expect(compact_card.content_margin_left == ThemeStyle.CARD_PADDING
 		and compact_card.content_margin_right == ThemeStyle.CARD_PADDING

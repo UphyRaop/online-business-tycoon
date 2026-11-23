@@ -462,8 +462,7 @@ static func _analytics_pair_kpi(app: Control, parent: Control, title: String, fi
 	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
 	content.add_child(app.label(title, 13, Style.MUTED))
 	for metric in [[first_name, first_value], [second_name, second_value]]:
-		var metric_row := HBoxContainer.new()
-		metric_row.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
+		var metric_row: HBoxContainer = app.row(content)
 		var metric_label: Label = app.label(str(metric[0]), 11, Style.MUTED)
 		metric_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		metric_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -473,7 +472,6 @@ static func _analytics_pair_kpi(app: Control, parent: Control, title: String, fi
 		value_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 		metric_row.add_child(metric_label)
 		metric_row.add_child(value_label)
-		content.add_child(metric_row)
 	panel.add_child(content)
 	parent.add_child(panel)
 
