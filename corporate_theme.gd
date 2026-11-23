@@ -202,8 +202,10 @@ static func apply_button_role(control: Button, semantic_role: String, selected: 
 		ROLE_DISABLED:
 			control.add_theme_stylebox_override("disabled", box(DISABLED_FILL, LINE, 9, 10))
 			control.add_theme_color_override("font_disabled_color", DISABLED_TEXT)
+		ROLE_SECONDARY:
+			secondary_button(control)
 		_:
-			role(control, SURFACE, TEXT)
+			secondary_button(control)
 
 static func button_role_for_action(title: String) -> String:
 	var name := title.strip_edges().to_lower()
@@ -231,6 +233,18 @@ static func role(control: Button, fill: Color, ink: Color) -> void:
 	control.add_theme_stylebox_override("focus", focus)
 	for color in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		control.add_theme_color_override(color, ink)
+
+static func secondary_button(control: Button) -> void:
+	control.add_theme_stylebox_override("normal", box(INPUT, LINE, 9, BUTTON_PADDING))
+	control.add_theme_stylebox_override("hover", box(SURFACE.lightened(0.08), LINE.lightened(0.18), 9, BUTTON_PADDING))
+	control.add_theme_stylebox_override("pressed", box(SURFACE, GOLD.darkened(0.12), 9, BUTTON_PADDING))
+	var focus := box(INPUT, GOLD, 9, BUTTON_PADDING)
+	focus.draw_center = false
+	control.add_theme_stylebox_override("focus", focus)
+	control.add_theme_stylebox_override("disabled", box(DISABLED_FILL, LINE, 9, BUTTON_PADDING))
+	for color in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		control.add_theme_color_override(color, TEXT)
+	control.add_theme_color_override("font_disabled_color", DISABLED_TEXT)
 
 static func heading_text(value: String) -> String:
 	var words := value.strip_edges().split(" ", false)

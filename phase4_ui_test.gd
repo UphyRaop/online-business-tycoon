@@ -369,6 +369,11 @@ func run() -> void:
 		and has_label("Owned Companies") and has_label("Career Statistics") and not has_label("CEO ID")
 		and has_label("Career Start Date") and has_label("Companies Founded") and has_label("Active Companies"),
 		"Profile shows compact career information and keeps technical identifiers collapsed by default")
+	var show_ceo_details := app.find_child("ToggleTechnicalCEOProfileDetails", true, false) as Button
+	var ceo_details_surface := show_ceo_details.get_theme_stylebox("normal") as StyleBoxFlat if show_ceo_details != null else null
+	expect(show_ceo_details != null and ceo_details_surface != null
+		and ceo_details_surface.bg_color == Style.INPUT and ceo_details_surface.border_color == Style.LINE,
+		"Show CEO Details uses the shared visibly bordered secondary-action button style")
 	expect(has_label("Career Title") and has_label("Entrepreneur"),
 		"New CEO profile displays a progression title derived from its current level")
 	expect(has_label("Current XP") and has_label("XP to Next Level") and has_label("Next Career Title")
