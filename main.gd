@@ -41,6 +41,17 @@ const DRAWER_ICON_PATHS := {
 	"Main Menu": "res://assets/navigation/exit.svg",
 }
 const STATEMENTS := ["Income Statement", "Balance Sheet", "Cash Flow Statement"]
+const ACHIEVEMENT_DEFINITIONS := [
+	{"id": "company_registered", "title": "First Company Registered", "detail": "Register your first company", "icon": "building"},
+	{"id": "first_sale", "title": "Completed First Sale", "detail": "Complete your first sale", "icon": "shopping_bag"},
+	{"id": "sales_100000", "title": "Lifetime Sales · 100,000", "detail": "Reach lifetime sales of 100,000", "icon": "medal"},
+	{"id": "sales_1000000", "title": "Lifetime Sales · 1,000,000", "detail": "Reach lifetime sales of 1,000,000", "icon": "award"},
+	{"id": "sales_10000000", "title": "Lifetime Sales · 10,000,000", "detail": "Reach lifetime sales of 10,000,000", "icon": "trophy"},
+	{"id": "profit_100000", "title": "Lifetime Profit · 100,000", "detail": "Reach lifetime profit of 100,000", "icon": "coins"},
+	{"id": "profit_1000000", "title": "Lifetime Profit · 1,000,000", "detail": "Reach lifetime profit of 1,000,000", "icon": "gem"},
+	{"id": "profit_10000000", "title": "Lifetime Profit · 10,000,000", "detail": "Reach lifetime profit of 10,000,000", "icon": "crown"},
+]
+const ACHIEVEMENT_ICON_ROOT := "res://assets/achievements/"
 const TOUCH_HEIGHT := 44
 const PREFERENCES := "user://display.cfg"
 
@@ -1336,11 +1347,25 @@ func profile_page() -> void:
 	)
 	achievement_toggle.name = "ToggleAchievementDetails"
 	if bool(profile_sections_expanded.get("achievements", false)):
-		if earned.is_empty():
-			achievements.add_child(empty_state("No Achievements Yet", "Complete company and sales milestones to unlock achievements."))
-		else:
-			for item in earned:
-				achievements.add_child(label("• %s" % _achievement_summary(item), 14, Style.GOLD))
+		var earned_ids := {}
+		for item in earned:
+			if item is Dictionary:
+				earned_ids[str(item.get("id", ""))] = true
+		var achievement_list := stack(achievements, Style.SPACE_TIGHT)
+		achievement_list.name = "AchievementList"
+		for definition in ACHIEVEMENT_DEFINITIONS:
+			var achievement_id := str(definition.id)
+			var unlocked := bool(earned_ids.get(achievement_id, false))
+			_achievement_row(achievement_list, achievement_id, str(definition.title), str(definition.detail),
+				str(definition.icon), unlocked)
+		for item in earned:
+			if not item is Dictionary:
+				continue
+			var extra_id := str(item.get("id", ""))
+			if _achievement_definition(extra_id) != null:
+				continue
+			_achievement_row(achievement_list, extra_id, _achievement_summary(item),
+				"Additional career achievement", "medal", true)
 	var companies := card("Owned Companies")
 	companies.add_child(label("Each company keeps separate operations, accounts, and save data.", 14, Style.MUTED))
 	for entry in ceo_profile.get("companies", []):
@@ -1358,6 +1383,46 @@ func profile_page() -> void:
 		else:
 			action(company_row, "Switch", switch_company.bind(str(entry.get("company_id", ""))))
 	action(companies, "Start Another Company", start_new_game, true)
+
+func _achievement_definition(achievement_id: String) -> Variant:
+	for definition in ACHIEVEMENT_DEFINITIONS:
+		if str(definition.id) == achievement_id:
+			return definition
+	return null
+
+func _achievement_row(parent: Node, achievement_id: String, title: String, detail: String,
+		icon_name: String, unlocked: bool) -> HBoxContainer:
+	var line := row(parent)
+	line.name = "AchievementRow_%s" % achievement_id
+	line.custom_minimum_size.y = 40
+	line.add_theme_constant_override("separation", Style.SPACE_CONTROL)
+	var icon := TextureRect.new()
+	icon.name = "AchievementIcon_%s" % achievement_id
+	var icon_path := ACHIEVEMENT_ICON_ROOT + icon_name + ".svg"
+	icon.texture = Style.icon_texture(load(icon_path), Style.ICON_NAVIGATION)
+	icon.set_meta("achievement_icon_resource", icon_path)
+	icon.custom_minimum_size = Vector2(20, 20)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.modulate = Style.GOLD if unlocked else Style.MUTED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_child(icon)
+	var text_stack := stack(line, 0)
+	text_stack.name = "AchievementText_%s" % achievement_id
+	text_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_stack.add_child(label(title, Style.FONT_BODY, Style.TEXT if unlocked else Style.MUTED))
+	text_stack.add_child(label(detail, Style.FONT_CAPTION, Style.MUTED))
+	var state_icon := TextureRect.new()
+	state_icon.name = "AchievementStatus_%s" % achievement_id
+	state_icon.texture = Style.icon_texture(load(ACHIEVEMENT_ICON_ROOT + ("check.svg" if unlocked else "lock.svg")), Style.ICON_INDICATOR)
+	state_icon.custom_minimum_size = Vector2(16, 16)
+	state_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	state_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	state_icon.modulate = Style.GREEN if unlocked else Style.MUTED
+	state_icon.tooltip_text = "Unlocked" if unlocked else "Locked"
+	state_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_child(state_icon)
+	return line
 
 func _achievement_summary(item: Dictionary) -> String:
 	var achievement_id := str(item.get("id", ""))
