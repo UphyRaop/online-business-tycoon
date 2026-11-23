@@ -27,6 +27,11 @@ func _input(event: InputEvent) -> void:
 			_mouse_last = mouse_button.position
 			_mouse_dragging = false
 		else:
+			if _mouse_dragging:
+				# Consume the release as well as the drag. Otherwise a button that
+				# received the initial press can treat the end of a scroll gesture
+				# as a click (notably in Godot Web touch-to-mouse input).
+				get_viewport().set_input_as_handled()
 			_mouse_dragging = false
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		var mouse_motion := event as InputEventMouseMotion
@@ -47,6 +52,8 @@ func _input(event: InputEvent) -> void:
 			_touch_last = touch.position
 			_touch_dragging = false
 		elif touch.index == _touch_index:
+			if _touch_dragging:
+				get_viewport().set_input_as_handled()
 			_touch_index = -1
 			_touch_dragging = false
 	elif event is InputEventScreenDrag:

@@ -688,32 +688,49 @@ func run() -> void:
 	await process_frame
 	var landscape_scroll := app.find_child("GameContentScroll", true, false) as ScrollContainer
 	var landscape_drawer := app.find_child("PrimaryNavigation", true, false) as Control
-	var landscape_bar := landscape_scroll.get_v_scroll_bar() if landscape_scroll != null else null
-	expect(landscape_scroll != null and landscape_bar != null and landscape_bar.max_value > landscape_bar.page + 0.5
-		and landscape_drawer != null, "Small-landscape navigation has a touch-scrollable in-flow drawer")
-	if landscape_scroll != null and landscape_drawer != null and landscape_bar != null and landscape_bar.max_value > landscape_bar.page + 0.5:
-		var drawer_rect := landscape_drawer.get_global_rect()
+	var landscape_drawer_scroll := app.find_child("PrimaryNavigationScroll", true, false) as ScrollContainer
+	var drawer_bar := landscape_drawer_scroll.get_v_scroll_bar() if landscape_drawer_scroll != null else null
+	expect(landscape_scroll != null and landscape_drawer != null and landscape_drawer_scroll != null
+		and drawer_bar != null and drawer_bar.max_value > drawer_bar.page + 0.5
+		and landscape_drawer.size.y <= landscape_scroll.size.y + 1.0,
+		"Short-landscape navigation bounds the drawer to available height and scrolls its contents internally")
+	if landscape_scroll != null and landscape_drawer != null and landscape_drawer_scroll != null and drawer_bar != null and drawer_bar.max_value > drawer_bar.page + 0.5:
+		var drawer_rect := landscape_drawer_scroll.get_global_rect()
 		var swipe_start := Vector2(drawer_rect.position.x + drawer_rect.size.x * 0.55,
-			minf(drawer_rect.end.y - 20.0, float(root.size.y) - 28.0))
-		var swipe_down := InputEventScreenTouch.new()
-		swipe_down.index = 29
-		swipe_down.position = swipe_start
-		swipe_down.pressed = true
-		root.push_input(swipe_down)
-		await process_frame
-		var swipe_drag := InputEventScreenDrag.new()
-		swipe_drag.index = 29
-		swipe_drag.position = swipe_start + Vector2(0, -110)
-		swipe_drag.relative = Vector2(0, -110)
-		root.push_input(swipe_drag)
-		await process_frame
-		expect(landscape_scroll.scroll_vertical > 0,
-			"Touch swipe inside the drawer reveals lower navigation actions at 667×375")
-		var swipe_up := InputEventScreenTouch.new()
-		swipe_up.index = 29
-		swipe_up.position = swipe_drag.position
-		swipe_up.pressed = false
-		root.push_input(swipe_up)
+			drawer_rect.position.y + drawer_rect.size.y * 0.65)
+		for swipe_index in 24:
+			if not is_instance_valid(landscape_drawer_scroll):
+				landscape_drawer_scroll = app.find_child("PrimaryNavigationScroll", true, false) as ScrollContainer
+			if not is_instance_valid(landscape_drawer_scroll):
+				break
+			var swipe_down := InputEventScreenTouch.new()
+			swipe_down.index = 29 + swipe_index
+			swipe_down.position = swipe_start
+			swipe_down.pressed = true
+			landscape_drawer_scroll._input(swipe_down)
+			await process_frame
+			var swipe_drag := InputEventScreenDrag.new()
+			swipe_drag.index = 29 + swipe_index
+			swipe_drag.position = swipe_start + Vector2(0, -22)
+			swipe_drag.relative = Vector2(0, -22)
+			landscape_drawer_scroll._input(swipe_drag)
+			await process_frame
+			var swipe_up := InputEventScreenTouch.new()
+			swipe_up.index = 29 + swipe_index
+			swipe_up.position = swipe_drag.position
+			swipe_up.pressed = false
+			landscape_drawer_scroll._input(swipe_up)
+			await process_frame
+			landscape_drawer_scroll = app.find_child("PrimaryNavigationScroll", true, false) as ScrollContainer
+			landscape_scroll = app.find_child("GameContentScroll", true, false) as ScrollContainer
+		expect(landscape_drawer_scroll != null and landscape_scroll != null and landscape_drawer_scroll.scroll_vertical > 0 and landscape_scroll.scroll_vertical == 0,
+			"Touch swipes inside the short-landscape drawer scroll its items without moving the game page")
+		var main_menu_action := app.find_child("DrawerActionMainMenu", true, false) as Button
+		var action_rect := main_menu_action.get_global_rect() if main_menu_action != null else Rect2()
+		var scroller_rect := landscape_drawer_scroll.get_global_rect() if landscape_drawer_scroll != null else Rect2()
+		expect(main_menu_action != null and action_rect.position.y >= scroller_rect.position.y - 1.0
+			and action_rect.end.y <= scroller_rect.end.y + 1.0,
+			"The bottom Main Menu action is reachable within the internally scrolled drawer")
 		app.close_navigation_drawer(false)
 	root.size = Vector2i(390, 844)
 	await settle("phase4-navigation-touch-scroll-restored")
