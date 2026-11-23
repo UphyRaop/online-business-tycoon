@@ -380,6 +380,8 @@ func row(parent: Node) -> HBoxContainer:
 	var box := HBoxContainer.new()
 	if OS.has_feature("web"):
 		box.mouse_filter = Control.MOUSE_FILTER_PASS
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	box.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	parent.add_child(box)
 	return box
@@ -499,13 +501,10 @@ func divider(parent: Node) -> void:
 	parent.add_child(line)
 
 func metric(parent: Node, caption: String, value: String, color: Color = Style.TEXT) -> void:
-	var line := BoxContainer.new()
+	var line := row(parent)
 	line.name = "ResponsiveMetric"
-	line.vertical = false
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
-	if OS.has_feature("web"):
-		line.mouse_filter = Control.MOUSE_FILTER_PASS
-	parent.add_child(line)
 	var name := label(caption, Style.FONT_BODY, Style.MUTED)
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -544,7 +543,8 @@ func _update_responsive_layout() -> void:
 	Market.update_responsive_layout(self)
 	for metric_row in find_children("ResponsiveMetric", "BoxContainer", true, false):
 		var responsive_metric := metric_row as BoxContainer
-		responsive_metric.vertical = false
+		responsive_metric.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		responsive_metric.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		responsive_metric.add_theme_constant_override("separation", Style.INFO_ROW_GAP)
 	var inventory_panel := find_child("DashboardInventoryOverview", true, false) as PanelContainer
 	var mobile_layout := viewport_width < 600.0
@@ -616,6 +616,7 @@ func _reflow_page_cards() -> void:
 	page_right_column = null
 	if page_cards.size() == 1 and page_grid.columns >= 2:
 		page_wide.add_child(page_cards[0])
+		_update_empty_page_container_visibility()
 		return
 	if page_grid.columns >= 2 and page_cards.size() > 1:
 		page_left_column = VBoxContainer.new()
@@ -635,12 +636,24 @@ func _reflow_page_cards() -> void:
 				page_left_column.add_child(panel)
 			else:
 				page_right_column.add_child(panel)
+		_update_empty_page_container_visibility()
 		return
 	for panel in page_cards:
 		page_grid.add_child(panel)
+	_update_empty_page_container_visibility()
+
+func _update_empty_page_container_visibility() -> void:
+	# Empty wrappers still consume VBox separation unless hidden. This used to
+	# leave a blank navigation slot and empty page wrappers between the title,
+	# tabs, and first card.
+	if is_instance_valid(page_wide):
+		page_wide.visible = not page_wide.get_children().is_empty()
+	if is_instance_valid(page_grid):
+		page_grid.visible = not page_grid.get_children().is_empty()
 
 func _finish_responsive_content() -> void:
 	_reflow_page_cards()
+	_update_empty_page_container_visibility()
 
 func set_notice(message: String, error: bool = false) -> void:
 	notice = message
@@ -2046,6 +2059,7 @@ func _sync_navigation_slot_size() -> void:
 	navigation_panel.size = navigation_panel.get_combined_minimum_size()
 	if is_instance_valid(navigation_slot):
 		navigation_slot.custom_minimum_size.y = navigation_panel.get_combined_minimum_size().y if navigation_open else 0.0
+		navigation_slot.visible = navigation_open
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
@@ -2258,12 +2272,14 @@ func render() -> void:
 	var left_space := Control.new()
 	left_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centering.add_child(left_space)
-	page_shell = stack(centering, Style.PAGE_SECTION_GAP)
+	page_shell = stack(centering, Style.PAGE_SHELL_GAP)
 	page_shell.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	page_shell.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_shell.custom_minimum_size.x = minf(1100.0, maxf(280.0, viewport_width - horizontal_margin * 2.0))
 	var shell := page_shell
 	var masthead := stack(shell, 3)
+	masthead.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	masthead.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	var global_game_header := sim != null and screen not in ["Title", "Setup", "New Game", "Company Selection", "Load", "Entrepreneur name", "CEO identity conflict"]
 	if global_game_header:
 		primary_navigation(masthead)
@@ -2298,6 +2314,7 @@ func render() -> void:
 			"Advertising Analytics": "Ads Analytics", "Management": "Store Management", "Store Listings": "Store Listings", "Avatar Crop": "Crop Profile Photo",
 		"CEO identity conflict": "Identity choice", "New Game": "Create a Game"}
 		var screen_heading := row(masthead)
+		screen_heading.name = "PageHeading"
 		var screen_title := label(titles.get(screen, screen), 24 if viewport_width < 600.0 else 26)
 		screen_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		screen_heading.add_child(screen_title)
@@ -2312,7 +2329,7 @@ func render() -> void:
 	# can otherwise reopen a rebuilt step at the old action's vertical position.
 	scroll.follow_focus = page != "Market"
 	shell.add_child(scroll)
-	body = stack(scroll, 4 if compact_landscape else Style.PAGE_CONTENT_GAP)
+	body = stack(scroll, Style.PAGE_BODY_GAP)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if screen == "Game" and page == "Market":
 		# The Buy Inventory workflow owns its content scroll area and footer.
@@ -2325,6 +2342,7 @@ func render() -> void:
 		navigation_slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		navigation_slot.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		navigation_slot.clip_contents = true
+		navigation_slot.visible = false
 		body.add_child(navigation_slot)
 		body.move_child(navigation_slot, 0)
 		navigation_slot.add_child(navigation_panel)

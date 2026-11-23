@@ -339,12 +339,15 @@ func run() -> void:
 	var mobile_footer := app.find_child("BuyInventoryNavigationFooter", true, false) as Control
 	await settle_frames()
 	var mobile_scroll_bar := mobile_step_scroll.get_v_scroll_bar() if mobile_step_scroll != null else null
+	var mobile_step_content := mobile_step_scroll.get_child(0) as Control if mobile_step_scroll != null and mobile_step_scroll.get_child_count() > 0 else null
+	var category_content_exceeds_viewport := mobile_step_content != null and mobile_step_content.get_combined_minimum_size().y > mobile_step_scroll.size.y + 1.0
 	var outer_page_scroll := app.find_child("GameContentScroll", true, false) as ScrollContainer
 	var outer_scroll_bar := outer_page_scroll.get_v_scroll_bar() if outer_page_scroll != null else null
 	expect(mobile_grid != null and mobile_grid.columns == 2 and app.find_child("BuyInventoryProgress", true, false) != null,
 		"Mobile portrait retains compact category cards and the five-step indicator")
-	expect(mobile_scroll_bar != null and mobile_scroll_bar.max_value - mobile_scroll_bar.page > 0.0,
-		"Mobile category list scrolls independently when it exceeds the available step viewport")
+	expect(mobile_scroll_bar != null and mobile_step_content != null
+		and (category_content_exceeds_viewport == (mobile_scroll_bar.max_value - mobile_scroll_bar.page > 0.0)),
+		"Mobile category content scrolls independently only when its measured height exceeds the available step viewport")
 	expect(outer_scroll_bar != null and outer_scroll_bar.max_value - outer_scroll_bar.page <= 0.1,
 		"Market page does not need an outer scroll that could carry its persistent footer off-screen")
 	if mobile_footer != null:
