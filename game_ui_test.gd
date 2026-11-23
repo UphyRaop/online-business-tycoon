@@ -4,6 +4,8 @@ const Games = preload("res://game_store.gd")
 const CEO = preload("res://ceo_profile.gd")
 const Sim = preload("res://simulation.gd")
 const Ads = preload("res://advertising.gd")
+const Style = preload("res://corporate_theme.gd")
+const MenuView = preload("res://menu_view.gd")
 
 var legacy_game_id := ""
 var first_game_id := ""
@@ -25,11 +27,7 @@ func run() -> void:
 	app = Main.instantiate()
 	root.add_child(app)
 	await process_frame
-	var menu_actions := app.find_child("MainMenuActions", true, false) as FlowContainer
-	var menu_action_buttons := menu_actions.get_children() if menu_actions != null else []
-	expect(menu_actions != null and menu_actions.size.x <= 581.0 and menu_action_buttons.size() == 3
-		and menu_action_buttons.all(func(button): return button.custom_minimum_size.x <= 172.0),
-		"Main Menu actions remain in a compact, bounded row on wide screens with touch-friendly button widths")
+	_test_main_menu_layout()
 	test_legacy_game_is_visible()
 	test_required_new_game_identity()
 	test_independent_game_saves_and_profiles()
@@ -39,6 +37,63 @@ func run() -> void:
 	_cleanup()
 	print("Game selection UI: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
+
+func _test_main_menu_layout() -> void:
+	var actions := app.find_child("MainMenuActions", true, false) as VBoxContainer
+	var primary_grid := app.find_child("MainMenuPrimaryActions", true, false) as GridContainer
+	var new_game := app.find_child("MainMenuNewGame", true, false) as Button
+	var load_game := app.find_child("MainMenuLoadGame", true, false) as Button
+	var settings_button := app.find_child("MainMenuSettings", true, false) as Button
+	expect(MenuView.play_heading([]) == "Start Playing" and MenuView.play_heading([{"game_id": "saved"}]) == "Continue Playing",
+		"Main Menu play heading reflects whether a recoverable game exists")
+	expect(has_label("Continue Playing"), "Main Menu shows Continue Playing when a saved game exists")
+	expect(actions != null and primary_grid != null and primary_grid.columns == 2 and new_game != null and load_game != null
+		and settings_button != null and new_game.get_parent() == primary_grid and load_game.get_parent() == primary_grid
+		and settings_button.get_parent() == actions,
+		"Main Menu places New Game and Load Game together with Settings on its own full-width row")
+	if new_game == null or load_game == null or settings_button == null or primary_grid == null:
+		return
+	var new_style := new_game.get_theme_stylebox("normal") as StyleBoxFlat
+	var load_style := load_game.get_theme_stylebox("normal") as StyleBoxFlat
+	var settings_style := settings_button.get_theme_stylebox("normal") as StyleBoxFlat
+	expect(new_style != null and new_style.bg_color == Style.GOLD,
+		"New Game uses the visible gold primary button style")
+	expect(load_style != null and load_style.bg_color == Style.INPUT and load_style.border_color == Style.LINE
+		and settings_style != null and settings_style.bg_color == Style.INPUT and settings_style.border_color == Style.LINE,
+		"Load Game and Settings use visible dark secondary button styles")
+	expect([new_game, load_game, settings_button].all(func(button): return button.custom_minimum_size.y >= 44.0),
+		"Main Menu buttons preserve minimum 44px touch targets")
+	settings_button.pressed.emit()
+	expect(app.screen == "Settings", "Settings opens the existing settings screen")
+	app.open_screen("Title")
+	load_game = app.find_child("MainMenuLoadGame", true, false) as Button
+	if load_game == null:
+		expect(false, "Main Menu Load Game action remains present after returning from Settings")
+		return
+	load_game.pressed.emit()
+	expect(app.screen == "Load", "Load Game opens the existing save-loading screen")
+	app.open_screen("Title")
+	for viewport in [Vector2i(360, 800), Vector2i(390, 844), Vector2i(844, 390), Vector2i(1366, 768), Vector2i(1920, 1080)]:
+		root.size = viewport
+		app._update_responsive_layout()
+		await process_frame
+		await process_frame
+		var viewport_grid := app.find_child("MainMenuPrimaryActions", true, false) as GridContainer
+		var viewport_new := app.find_child("MainMenuNewGame", true, false) as Button
+		var viewport_load := app.find_child("MainMenuLoadGame", true, false) as Button
+		var viewport_settings := app.find_child("MainMenuSettings", true, false) as Button
+		var grid_rect := viewport_grid.get_global_rect() if viewport_grid != null else Rect2()
+		var new_rect := viewport_new.get_global_rect() if viewport_new != null else Rect2()
+		var load_rect := viewport_load.get_global_rect() if viewport_load != null else Rect2()
+		var settings_rect := viewport_settings.get_global_rect() if viewport_settings != null else Rect2()
+		expect(viewport_grid != null and viewport_new != null and viewport_load != null and viewport_settings != null
+			and grid_rect.size.x > 0.0 and new_rect.position.x >= grid_rect.position.x - 1.0
+			and load_rect.end.x <= grid_rect.end.x + 1.0 and new_rect.end.x <= load_rect.position.x
+			and settings_rect.size.x >= grid_rect.size.x - 1.0,
+			"Main Menu buttons align without clipping at %dx%d" % [viewport.x, viewport.y])
+	root.size = Vector2i(1280, 720)
+	app._update_responsive_layout()
+	await process_frame
 
 func test_legacy_game_is_visible() -> void:
 	var legacy := Games.get_game(legacy_game_id)
