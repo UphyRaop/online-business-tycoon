@@ -85,13 +85,66 @@ func test_mobile_layout() -> void:
 
 func test_portrait_frame() -> void:
 	var frame := PortraitFrame.new()
-	frame.set_portrait(null, 150.0)
+	var portrait_image := Image.create(120, 160, false, Image.FORMAT_RGBA8)
+	portrait_image.fill(Color(0.2, 0.4, 0.8, 1.0))
+	var portrait_texture := ImageTexture.create_from_image(portrait_image)
+	frame.set_portrait(portrait_texture, 150.0)
 	expect(is_equal_approx(frame.custom_minimum_size.x / frame.custom_minimum_size.y, 0.75),
 		"The CEO avatar frame preserves a 3:4 portrait ratio")
 	expect(frame.portrait.name == "CEOAvatar" and frame.portrait.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_COVERED,
 		"The framed avatar keeps the existing uploaded-photo crop presentation")
 	expect(frame.get_theme_stylebox("panel").get_border_width(SIDE_LEFT) == 2,
 		"The portrait frame uses a subtle theme-accent border")
+	expect(frame.portrait.get_parent() == frame.portrait_padding
+		and frame.portrait_padding.get_parent() == frame
+		and frame.portrait_padding.get_theme_constant("margin_left") == 6
+		and frame.portrait_padding.get_theme_constant("margin_right") == 6
+		and frame.portrait_padding.get_theme_constant("margin_top") == 6
+		and frame.portrait_padding.get_theme_constant("margin_bottom") == 6,
+		"The image stays inside a consistent inset on every side of the gold frame")
+	var displayed_portrait := frame.portrait.texture.get_image()
+	expect(displayed_portrait != null
+		and is_equal_approx(displayed_portrait.get_pixel(0, 0).a, 0.0)
+		and is_equal_approx(displayed_portrait.get_pixel(299, 0).a, 0.0)
+		and is_equal_approx(displayed_portrait.get_pixel(0, 399).a, 0.0)
+		and is_equal_approx(displayed_portrait.get_pixel(299, 399).a, 0.0)
+		and displayed_portrait.get_pixel(150, 0).a > 0.99,
+		"The display-only image mask rounds all four corners while keeping its straight frame edges opaque")
+	expect(portrait_texture.get_size() == Vector2(120, 160)
+		and frame.portrait.texture.get_size() == Vector2(300, 400)
+		and is_equal_approx(frame.portrait.texture.get_size().x / frame.portrait.texture.get_size().y, 0.75),
+		"A portrait photo displays in the frame without modifying its original texture")
+	var landscape_image := Image.create(160, 120, false, Image.FORMAT_RGBA8)
+	landscape_image.fill(Color(0.8, 0.4, 0.2, 1.0))
+	var landscape_texture := ImageTexture.create_from_image(landscape_image)
+	frame.set_portrait(landscape_texture, 150.0)
+	expect(landscape_texture.get_size() == Vector2(160, 120)
+		and frame.portrait.texture.get_size() == Vector2(300, 400)
+		and is_equal_approx(frame.portrait.texture.get_size().x / frame.portrait.texture.get_size().y, 0.75),
+		"A landscape source is center-cropped for display while its source remains unchanged")
+	var square_image := Image.create(120, 120, false, Image.FORMAT_RGBA8)
+	var square_texture := ImageTexture.create_from_image(square_image)
+	frame.set_portrait(square_texture, 150.0)
+	expect(square_texture.get_size() == Vector2(120, 120)
+		and frame.portrait.texture.get_size() == Vector2(300, 400)
+		and is_equal_approx(frame.portrait.texture.get_size().x / frame.portrait.texture.get_size().y, 0.75),
+		"A square legacy source is center-cropped for display without changing stored image data")
+	var jpeg_image := Image.create(120, 160, false, Image.FORMAT_RGBA8)
+	jpeg_image.fill(Color(0.7, 0.3, 0.2, 1.0))
+	var decoded_jpeg := Image.new()
+	decoded_jpeg.load_jpg_from_buffer(jpeg_image.save_jpg_to_buffer())
+	var jpeg_texture := ImageTexture.create_from_image(decoded_jpeg)
+	frame.set_portrait(jpeg_texture, 150.0)
+	var displayed_jpeg := frame.portrait.texture.get_image()
+	expect(displayed_jpeg.get_format() == Image.FORMAT_RGBA8
+		and is_equal_approx(displayed_jpeg.get_pixel(0, 0).a, 0.0)
+		and displayed_jpeg.get_pixel(150, 0).a > 0.99
+		and decoded_jpeg.get_format() != Image.FORMAT_RGBA8,
+		"JPEG photos gain display-only transparency at the rounded corners without changing the decoded source")
+	frame.set_portrait(null, 150.0)
+	expect(frame.portrait.texture == null,
+		"Removing an avatar restores the empty frame without stale image content")
+	frame.free()
 
 func _lot(units: int) -> Dictionary:
 	return {"units": units, "cost": 1000, "freight": 0, "quality": 0.9,

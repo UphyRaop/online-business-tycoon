@@ -146,7 +146,12 @@ func test_avatar_and_corruption_recovery() -> void:
 		"Existing square profile photos remain readable and unchanged during migration")
 	expect(CEO.add_avatar(profile, "text/plain", bytes) == ERR_INVALID_DATA, "Unsupported avatar file types are rejected")
 	var path := "user://ceo_profile_recovery.json"
+	var saved_avatar_data: String = profile.avatar_data
 	expect(CEO.save_profile(profile, path) == OK, "Profile snapshot saved")
+	var loaded_avatar := CEO.load_profile(path)
+	expect(loaded_avatar.get("avatar_data", "") == saved_avatar_data
+		and loaded_avatar.get("avatar_mime", "") == "image/jpeg",
+		"Saved CEO photos remain intact when the profile file is reloaded")
 	profile.full_name = "Kai Updated"
 	expect(CEO.save_profile(profile, path) == OK, "Profile update writes atomically with a backup")
 	var damaged := FileAccess.open(path, FileAccess.WRITE)
