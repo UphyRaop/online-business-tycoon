@@ -220,8 +220,10 @@ static func show_products(app: Control) -> void:
 		var starting_cost := _starting_landed_cost(app.sim.state, product_index, suppliers)
 		var card := _product_selection_card(product_grid, str(product.name), product_index)
 		var card_content := card.get_node("ProductCardContent") as VBoxContainer
-		app.metric(card_content, "Available Suppliers", str(suppliers.size()))
-		app.metric(card_content, "Starting Landed Cost", app.money(starting_cost) if starting_cost > 0 else "Unavailable", Style.GOLD)
+		var supplier_count := card_content.get_node("ProductSummaryRow/ProductSupplierCount") as Label
+		var landed_cost := card_content.get_node("ProductSummaryRow/ProductStartingLandedCost") as Label
+		supplier_count.text = "%d suppliers" % suppliers.size()
+		landed_cost.text = app.money(starting_cost) if starting_cost > 0 else "Unavailable"
 		var selected_product := product_index
 		var selected := int(app.get_meta("buy_selected_product", -1)) == product_index
 		card.add_theme_stylebox_override("normal", Style.card_box(Color("#25364D") if selected else Color("#19283C"), Color("#D5AC61") if selected else Color("#35465D"), 12))
@@ -233,10 +235,11 @@ static func show_products(app: Control) -> void:
 		card.add_theme_color_override("font_pressed_color", Style.TEXT)
 		card.add_theme_color_override("font_focus_color", Style.TEXT)
 		card.tooltip_text = "Select %s" % str(product.name)
-		var selected_marker: Label = app.label("Selected" if selected else "Tap to select", 11, Style.GOLD if selected else Style.MUTED)
+		var selected_marker := card_content.get_node("ProductNameRow/ProductSelectionIndicator") as TextureRect
 		selected_marker.name = "ProductSelectionIndicator_%d" % product_index
-		card_content.add_child(selected_marker)
-		card.custom_minimum_size.y = 96.0
+		selected_marker.texture = load("res://assets/navigation/check.svg") as Texture2D
+		selected_marker.visible = selected
+		card.custom_minimum_size.y = 64.0
 		var select_product := func():
 			app.set_meta("buy_selected_product", selected_product)
 			app.refresh_view()
@@ -388,18 +391,52 @@ static func _product_selection_card(parent: Node, title: String, product_index: 
 	content.name = "ProductCardContent"
 	content.anchor_right = 1.0
 	content.anchor_bottom = 1.0
-	content.offset_left = Style.CARD_PADDING
-	content.offset_top = Style.CARD_INNER_PADDING
-	content.offset_right = -Style.CARD_PADDING
-	content.offset_bottom = -Style.CARD_INNER_PADDING
-	content.add_theme_constant_override("separation", Style.CARD_CONTENT_GAP)
+	content.offset_left = 10
+	content.offset_top = 6
+	content.offset_right = -10
+	content.offset_bottom = -6
+	content.add_theme_constant_override("separation", 2)
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var name_row := HBoxContainer.new()
+	name_row.name = "ProductNameRow"
+	name_row.add_theme_constant_override("separation", 4)
+	name_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var heading := Label.new()
+	heading.name = "ProductName"
 	heading.text = title
-	heading.add_theme_font_size_override("font_size", Style.FONT_HEADING)
+	heading.add_theme_font_size_override("font_size", Style.normalized_font_size(Style.FONT_HEADING))
 	heading.add_theme_color_override("font_color", Style.TEXT)
 	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_child(heading)
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_row.add_child(heading)
+	var selection := TextureRect.new()
+	selection.name = "ProductSelectionIndicator"
+	selection.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	selection.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	selection.custom_minimum_size = Vector2(14, 14)
+	selection.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_row.add_child(selection)
+	content.add_child(name_row)
+	var summary_row := HBoxContainer.new()
+	summary_row.name = "ProductSummaryRow"
+	summary_row.add_theme_constant_override("separation", 6)
+	summary_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var supplier_count := Label.new()
+	supplier_count.name = "ProductSupplierCount"
+	supplier_count.add_theme_font_size_override("font_size", Style.normalized_font_size(Style.FONT_CAPTION))
+	supplier_count.add_theme_color_override("font_color", Style.MUTED)
+	supplier_count.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	supplier_count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	summary_row.add_child(supplier_count)
+	var landed_cost := Label.new()
+	landed_cost.name = "ProductStartingLandedCost"
+	landed_cost.add_theme_font_size_override("font_size", Style.normalized_font_size(Style.FONT_BODY))
+	landed_cost.add_theme_color_override("font_color", Style.GOLD)
+	landed_cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	landed_cost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	summary_row.add_child(landed_cost)
+	content.add_child(summary_row)
 	button.add_child(content)
 	parent.add_child(button)
 	return button
