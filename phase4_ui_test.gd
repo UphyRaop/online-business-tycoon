@@ -374,6 +374,40 @@ func run() -> void:
 	expect(has_label("Current XP") and has_label("XP to Next Level") and has_label("Next Career Title")
 		and has_label("Unlocks at Level") and app.find_child("CareerXPProgress", true, false) != null,
 		"Profile shows XP progress and the next title threshold")
+	var xp_bar := app.find_child("CareerXPProgress", true, false) as ProgressBar
+	var xp_fill := xp_bar.get_theme_stylebox("fill") as StyleBoxFlat if xp_bar != null else null
+	var xp_track := xp_bar.get_theme_stylebox("background") as StyleBoxFlat if xp_bar != null else null
+	expect(xp_fill != null and xp_fill.bg_color == Style.XP_PROGRESS_GREEN
+		and xp_fill.bg_color.to_html(false) == "22c55e" and xp_fill.corner_radius_top_left == 7
+		and xp_fill.corner_radius_top_right == 7 and xp_bar.custom_minimum_size.y == 14
+		and xp_track != null and xp_track.bg_color == Style.SURFACE,
+		"Career XP progress uses the compact rounded green fill and dark track")
+	var saved_xp := int(app.ceo_profile.get("xp", 0))
+	app.ceo_profile.xp = 0
+	app.refresh_view()
+	xp_bar = app.find_child("CareerXPProgress", true, false) as ProgressBar
+	expect(xp_bar != null and is_zero_approx(xp_bar.value), "Career XP bar displays zero progress at the level boundary")
+	app.ceo_profile.xp = 500
+	app.refresh_view()
+	xp_bar = app.find_child("CareerXPProgress", true, false) as ProgressBar
+	expect(xp_bar != null and xp_bar.value == 500 and xp_bar.max_value == CEO.LEVEL_XP
+		and is_equal_approx(xp_bar.value / xp_bar.max_value, 0.5),
+		"Career XP bar updates to the accurate partial-level progress after XP changes")
+	var xp_save_result := Slots.write_for_game(app.active_game_id, 1, app.sim.state, app.ceo_profile)
+	var reloaded_xp := CEO.load_game_profile(app.active_game_id)
+	expect(xp_save_result == OK and int(reloaded_xp.get("xp", -1)) == 500,
+		"Career XP remains intact in the existing game profile save")
+	Slots.delete_for_game(app.active_game_id, 1)
+	app.ceo_profile.xp = saved_xp
+	CEO.save_game_profile(app.ceo_profile, app.active_game_id)
+	app.refresh_view()
+	xp_bar = app.find_child("CareerXPProgress", true, false) as ProgressBar
+	expect(xp_bar != null and xp_bar.value == posmod(saved_xp, CEO.LEVEL_XP),
+		"Career XP progress refreshes to the saved profile value without changing XP rules")
+	# A full widget range reaches its 100% endpoint without overflowing the styled track.
+	xp_bar.value = xp_bar.max_value
+	expect(xp_bar.value == xp_bar.max_value, "Career XP fill reaches exactly 100% at its endpoint")
+	app.refresh_view()
 	expect(not has_label("Stored in this browser only; never uploaded."),
 		"Profile no longer shows the browser storage developer message")
 	expect(not has_label("Personal Finance") and not has_label("Personal cash and net worth remain untracked."),

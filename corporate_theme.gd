@@ -9,6 +9,7 @@ const MUTED := Color("#a6b5c8")
 const GOLD := Color("#e8c58b")
 const INK := Color("#22190f")
 const GREEN := Color("#7cdbb1")
+const XP_PROGRESS_GREEN := Color("#22C55E")
 const RED := Color("#ff9d9c")
 const SUCCESS_INK := Color("#10251d")
 const DANGER_INK := Color("#341514")
@@ -72,6 +73,14 @@ static func box(fill: Color, border: Color, radius: int, padding: int) -> StyleB
 
 static func card_box(fill: Color, border: Color, radius: int = CARD_RADIUS) -> StyleBoxFlat:
 	return box(fill, border, radius, CARD_PADDING)
+
+static func career_progress_style(fill: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = fill
+	style.set_border_width_all(0)
+	style.set_corner_radius_all(7)
+	style.set_content_margin_all(0)
+	return style
 
 static func normalized_font_size(requested: int, large_text: bool = false) -> int:
 	var standard_size := clampi(requested, FONT_CAPTION, FONT_HEADING)
