@@ -86,22 +86,25 @@ func run() -> void:
 			await process_frame
 			app.developer_mode_unlocked = true
 			app.developer_console_visible = true
+			app.developer_return_screen = "Game"
+			app.developer_return_page = "Dashboard"
 			app.developer_console_tab = "Preview Device"
-			app._show_developer_console_overlay()
+			app.screen = "Developer Preview"
+			app.render()
 			await process_frame
 			_check_visible_typography("%s / Developer Mode preview / %dx%d" % ["Large Text" if large_text else "Standard", viewport.x, viewport.y], limit)
 			app.developer_console_tab = "Cheats"
+			app.screen = "Developer Cheats"
 			for category in ["Finance", "Inventory", "Sales & Orders", "Marketing", "Company", "Time", "Scenarios"]:
 				app.developer_cheat_category = category
-				app._refresh_developer_console_overlay()
+				app.render()
 				await process_frame
 				_check_visible_typography("%s / Developer Mode / %s / %dx%d" % ["Large Text" if large_text else "Standard", category, viewport.x, viewport.y], limit)
 				screen_checks += 1
 			app.developer_console_visible = false
 			app.developer_mode_unlocked = false
-			if is_instance_valid(app.developer_overlay):
-				app.developer_overlay.queue_free()
-				app.developer_overlay = null
+			app.screen = "Game"
+			app.render()
 			await process_frame
 		# ConfirmationDialog contains engine-created labels/buttons and is opened dynamically.
 		app.confirm_action("Typography test", "Verify dynamically opened confirmation text and actions.", "Confirm", func(): pass)

@@ -53,8 +53,8 @@ func run() -> void:
 	app.open_developer_mode()
 	var active_snapshot: Dictionary = app.sim.state.duplicate(true)
 	var active_id: String = app.active_game_id
-	expect(app.developer_mode_unlocked and app.screen == "Game" and app.page == "Dashboard",
-		"Unlock exposes Developer Mode without leaving the current gameplay route")
+	expect(app.developer_mode_unlocked and app.screen == "Developer Mode" and app.page == "Dashboard",
+		"Unlock opens the dedicated Developer Mode page while retaining the previous gameplay route")
 	expect(app.sim.state == active_snapshot and app.active_game_id == active_id and app.ceo_profile == original_profile,
 		"Unlock preserves the active company, save identity, simulation, and CEO profile")
 	expect(app.developer_mode_unlocked and app.active_game_id == active_id,
