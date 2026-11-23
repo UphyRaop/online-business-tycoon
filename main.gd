@@ -1288,6 +1288,8 @@ func profile_page() -> void:
 	progress.value = current_level_xp
 	progress.show_percentage = false
 	progress.custom_minimum_size.y = 14
+	progress.add_theme_stylebox_override("background", Style.career_progress_style(Style.SURFACE))
+	progress.add_theme_stylebox_override("fill", Style.career_progress_style(Style.XP_PROGRESS_GREEN))
 	progress.tooltip_text = "%d / %d XP toward the next level" % [current_level_xp, CEOProfile.LEVEL_XP]
 	career.add_child(progress)
 	var next_title := CEOProfile.next_title(ceo_profile)
