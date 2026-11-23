@@ -43,6 +43,24 @@ func test_semantic_button_roles() -> void:
 	expect(disabled_button.disabled and disabled_button.get_theme_color("font_disabled_color") == ThemeStyle.DISABLED_TEXT,
 		"Disabled role blocks activation and retains legible text")
 	disabled_button.free()
+	var secondary_button := Button.new()
+	ThemeStyle.secondary(secondary_button)
+	var secondary_normal := secondary_button.get_theme_stylebox("normal") as StyleBoxFlat
+	var secondary_hover := secondary_button.get_theme_stylebox("hover") as StyleBoxFlat
+	var secondary_pressed := secondary_button.get_theme_stylebox("pressed") as StyleBoxFlat
+	var secondary_focus := secondary_button.get_theme_stylebox("focus") as StyleBoxFlat
+	var secondary_disabled := secondary_button.get_theme_stylebox("disabled") as StyleBoxFlat
+	expect(secondary_normal != null and secondary_normal.bg_color == ThemeStyle.INPUT
+		and secondary_normal.border_color == ThemeStyle.LINE and secondary_normal.border_color != secondary_normal.bg_color
+		and secondary_normal.corner_radius_top_left == 9
+		and secondary_button.custom_minimum_size.y >= 44 and secondary_button.custom_minimum_size.x >= 44,
+		"Secondary actions have an explicit dark surface, visible border, rounded corners, and a 44px touch target")
+	expect(secondary_hover != null and secondary_hover.bg_color != secondary_normal.bg_color
+		and secondary_pressed != null and secondary_pressed.border_color == ThemeStyle.GOLD.darkened(0.12)
+		and secondary_focus != null and not secondary_focus.draw_center and secondary_focus.border_color == ThemeStyle.GOLD
+		and secondary_disabled != null and secondary_disabled.bg_color == ThemeStyle.DISABLED_FILL,
+		"Secondary actions expose distinct hover, pressed, focus, and disabled states")
+	secondary_button.free()
 
 func test_action_semantics() -> void:
 	expect(ThemeStyle.button_role_for_action("Create Campaign") == "primary", "Creation actions map to Primary")

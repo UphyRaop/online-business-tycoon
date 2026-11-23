@@ -70,13 +70,7 @@ static func play_heading(games: Array) -> String:
 	return "Continue Playing" if not games.is_empty() else "Start Playing"
 
 static func _style_menu_secondary(button: Button) -> void:
-	button.add_theme_stylebox_override("normal", Style.box(Style.INPUT, Style.LINE, Style.CARD_RADIUS, Style.BUTTON_PADDING))
-	button.add_theme_stylebox_override("hover", Style.box(Style.SURFACE.lightened(0.08), Style.LINE.lightened(0.18), Style.CARD_RADIUS, Style.BUTTON_PADDING))
-	button.add_theme_stylebox_override("pressed", Style.box(Style.SURFACE, Style.GOLD, Style.CARD_RADIUS, Style.BUTTON_PADDING))
-	var focus := Style.box(Style.INPUT, Style.GOLD, Style.CARD_RADIUS, Style.BUTTON_PADDING)
-	focus.draw_center = false
-	button.add_theme_stylebox_override("focus", focus)
-	button.add_theme_stylebox_override("disabled", Style.box(Style.BG, Style.LINE, Style.CARD_RADIUS, Style.BUTTON_PADDING))
+	Style.secondary(button)
 
 static func slots(app: Control, saving: bool) -> void:
 	var back: VBoxContainer = app.wide_card("")
