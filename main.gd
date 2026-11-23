@@ -133,6 +133,8 @@ var avatar_crop_source: Image
 var navigation_panel: PanelContainer
 var navigation_slot: Control
 var navigation_open := false
+var navigation_scroller: ScrollContainer
+var navigation_items: VBoxContainer
 var navigation_toggle: Button
 var bank_balance_label: Label
 var header_bank_balance_label: Label
@@ -2129,6 +2131,10 @@ func toggle_navigation_drawer() -> void:
 	navigation_panel.visible = navigation_open
 	_sync_navigation_slot_size()
 	if navigation_open:
+		# The drawer is built dynamically. Its first minimum-size pass can run
+		# before VBoxContainer has measured the navigation/action rows, which
+		# leaves the internal scroll viewport at zero height on short screens.
+		call_deferred("_sync_navigation_slot_size")
 		var page_scroller := find_child("GameContentScroll", true, false) as ScrollContainer
 		if page_scroller != null:
 			page_scroller.scroll_vertical = 0
@@ -2155,9 +2161,24 @@ func _sync_navigation_slot_size() -> void:
 	if not is_instance_valid(navigation_panel):
 		return
 	navigation_panel.position = Vector2.ZERO
-	navigation_panel.size = navigation_panel.get_combined_minimum_size()
+	var panel_minimum := navigation_panel.get_combined_minimum_size()
+	var panel_height := panel_minimum.y
+	if is_instance_valid(navigation_scroller) and is_instance_valid(navigation_items):
+		var natural_items_height := navigation_items.get_combined_minimum_size().y
+		var fixed_height := Style.CARD_PADDING * 2.0 + 2.0 + Style.CARD_CONTENT_GAP
+		var heading := navigation_panel.find_child("PrimaryNavigationHeading", true, false) as Control
+		if heading != null:
+			fixed_height += heading.get_combined_minimum_size().y
+		var page_scroller := find_child("GameContentScroll", true, false) as ScrollContainer
+		var available_height := page_scroller.size.y if page_scroller != null else get_viewport_rect().size.y
+		available_height = maxf(120.0, available_height - Style.PAGE_BODY_GAP)
+		var scroll_height := minf(natural_items_height, maxf(40.0, available_height - fixed_height))
+		navigation_scroller.custom_minimum_size.y = scroll_height
+		panel_height = minf(fixed_height + scroll_height, available_height)
+	navigation_panel.custom_minimum_size.y = panel_height
+	navigation_panel.size = Vector2(panel_minimum.x, panel_height)
 	if is_instance_valid(navigation_slot):
-		navigation_slot.custom_minimum_size.y = navigation_panel.get_combined_minimum_size().y if navigation_open else 0.0
+		navigation_slot.custom_minimum_size.y = navigation_panel.size.y if navigation_open else 0.0
 		navigation_slot.visible = navigation_open
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -2208,20 +2229,44 @@ func _create_navigation_drawer() -> void:
 	drawer.name = "PrimaryNavigation"
 	drawer.visible = false
 	drawer.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	drawer.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	drawer.custom_minimum_size.x = clampf(size.x * 0.78, 260.0, 320.0)
 	drawer.mouse_filter = Control.MOUSE_FILTER_STOP
+	drawer.clip_contents = true
 	drawer.add_theme_stylebox_override("panel", Style.card_box(Style.SURFACE, Style.GOLD, 9))
 	navigation_panel = drawer
 	var content := stack(drawer, Style.CARD_CONTENT_GAP)
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.custom_minimum_size.x = maxf(0.0, drawer.custom_minimum_size.x - (Style.CARD_PADDING + 1) * 2.0)
 	var heading := row(content)
+	heading.name = "PrimaryNavigationHeading"
 	var title := label("Navigation", Style.FONT_HEADING)
+	title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(title)
 	var close_button := action(heading, "Close", close_navigation_drawer)
 	close_button.name = "PrimaryNavigationClose"
 	close_button.custom_minimum_size = Vector2(72, 44)
+	close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_apply_drawer_icon(close_button, DRAWER_ICON_PATHS.Close, 18)
-	var nav_list := stack(content, Style.CARD_CONTENT_GAP)
+	var drawer_scroll := TouchScroll.new() as ScrollContainer
+	drawer_scroll.name = "PrimaryNavigationScroll"
+	drawer_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	drawer_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	drawer_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	drawer_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	drawer_scroll.mouse_force_pass_scroll_events = false
+	drawer_scroll.scroll_deadzone = 12
+	content.add_child(drawer_scroll)
+	navigation_scroller = drawer_scroll
+	var drawer_items := stack(drawer_scroll, Style.CARD_CONTENT_GAP)
+	drawer_items.name = "NavigationDrawerItems"
+	drawer_items.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	drawer_items.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	drawer_items.custom_minimum_size.x = content.custom_minimum_size.x
+	navigation_items = drawer_items
+	var nav_list := stack(drawer_items, Style.CARD_CONTENT_GAP)
 	nav_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for index in NAV.size():
 		var target: String = NAV[index]
@@ -2242,9 +2287,13 @@ func _create_navigation_drawer() -> void:
 		else:
 			Style.secondary(item)
 			item.add_theme_color_override("icon_normal_color", Style.GOLD)
-	divider(content)
-	content.add_child(label("Actions", 13, Style.MUTED))
-	var save_action := action(content, "Save Game", func():
+	divider(drawer_items)
+	var actions_heading := label("Actions", Style.FONT_BODY, Style.MUTED)
+	actions_heading.name = "NavigationActionsHeading"
+	actions_heading.autowrap_mode = TextServer.AUTOWRAP_OFF
+	actions_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	drawer_items.add_child(actions_heading)
+	var save_action := action(drawer_items, "Save Game", func():
 		close_navigation_drawer(false)
 		open_screen("Save")
 	)
@@ -2254,7 +2303,7 @@ func _create_navigation_drawer() -> void:
 	# the existing gold primary actions instead of the semantic green success role.
 	Style.primary(save_action)
 	_apply_drawer_icon(save_action, DRAWER_ICON_PATHS["Save Game"], 20)
-	var main_menu_action := action(content, "Main Menu", func():
+	var main_menu_action := action(drawer_items, "Main Menu", func():
 		close_navigation_drawer(false)
 		leave_game()
 	)
@@ -2263,7 +2312,7 @@ func _create_navigation_drawer() -> void:
 	_apply_drawer_icon(main_menu_action, DRAWER_ICON_PATHS["Main Menu"], 20)
 	Style.secondary(main_menu_action)
 	if developer_mode_unlocked:
-		var lock_action := action(content, "Lock Developer Mode", leave_developer_mode)
+		var lock_action := action(drawer_items, "Lock Developer Mode", leave_developer_mode)
 		lock_action.name = "DrawerActionLockDeveloperMode"
 		lock_action.custom_minimum_size.y = TOUCH_HEIGHT
 		Style.secondary(lock_action)
@@ -2330,6 +2379,8 @@ func render() -> void:
 	navigation_panel = null
 	navigation_toggle = null
 	navigation_slot = null
+	navigation_scroller = null
+	navigation_items = null
 	bank_balance_label = null
 	header_bank_balance_label = null
 	header_bank_balance_value = null
