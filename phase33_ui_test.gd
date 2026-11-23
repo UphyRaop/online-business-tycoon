@@ -45,8 +45,14 @@ func run() -> void:
 	await process_frame
 	var search: LineEdit = app.find_child("CatalogueProductSearch", true, false)
 	var product_card := app.find_child("CatalogueProduct_1", true, false) as Button
-	expect(search != null and product_card != null and has_label("Starting Landed Cost") and has_label("Available Suppliers"),
-		"Selecting a category shows product cards with live supplier count and landed cost")
+	var product_content := product_card.get_node_or_null("ProductCardContent") as VBoxContainer if product_card != null else null
+	var supplier_count := product_content.get_node_or_null("ProductSummaryRow/ProductSupplierCount") as Label if product_content != null else null
+	var landed_cost := product_content.get_node_or_null("ProductSummaryRow/ProductStartingLandedCost") as Label if product_content != null else null
+	expect(search != null and product_card != null and product_content != null and product_content.get_child_count() == 2
+		and supplier_count != null and supplier_count.text == "%d suppliers" % MarketView._available_suppliers(app.sim.state, 1).size()
+		and landed_cost != null and landed_cost.text == app.money(MarketView._starting_landed_cost(app.sim.state, 1, MarketView._available_suppliers(app.sim.state, 1)))
+		and landed_cost.horizontal_alignment == HORIZONTAL_ALIGNMENT_RIGHT,
+		"Selecting a category shows two compact product rows with live supplier count and right-aligned landed cost")
 	expect(product_card != null and app.find_child("ChooseProduct_1", true, false) == null
 		and app.find_child("ProductSelectionIndicator_1", true, false) != null,
 		"Product selection is shown on a compact full-card button without a redundant nested action")

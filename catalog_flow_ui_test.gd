@@ -162,8 +162,20 @@ func run() -> void:
 	verify_purchase_footer("Product")
 	var search := app.find_child("CatalogueProductSearch", true, false) as LineEdit
 	var first_card := app.find_child("CatalogueProduct_0", true, false) as Button
-	expect(first_card != null and has_label("Starting Landed Cost") and has_label("Available Suppliers"),
-		"Product cards show catalogue product and indicative supplier pricing information")
+	var product_content := first_card.get_node_or_null("ProductCardContent") as VBoxContainer if first_card != null else null
+	var product_name_row := product_content.get_node_or_null("ProductNameRow") as HBoxContainer if product_content != null else null
+	var product_summary_row := product_content.get_node_or_null("ProductSummaryRow") as HBoxContainer if product_content != null else null
+	var supplier_count := product_content.get_node_or_null("ProductSummaryRow/ProductSupplierCount") as Label if product_content != null else null
+	var landed_cost := product_content.get_node_or_null("ProductSummaryRow/ProductStartingLandedCost") as Label if product_content != null else null
+	expect(product_content != null and product_content.get_child_count() == 2
+		and product_name_row != null and product_summary_row != null
+		and supplier_count != null and supplier_count.text == "%d suppliers" % Market._available_suppliers(app.sim.state, 0).size()
+		and landed_cost != null and landed_cost.text == app.money(Market._starting_landed_cost(app.sim.state, 0, Market._available_suppliers(app.sim.state, 0)))
+		and landed_cost.horizontal_alignment == HORIZONTAL_ALIGNMENT_RIGHT,
+		"Product card presents product name, supplier count, and starting landed cost in exactly two compact rows")
+	expect(first_card != null and first_card.custom_minimum_size.y <= 68.0
+		and not has_label("Tap to select"),
+		"Product card removes the instructional text and avoids unnecessary height")
 	expect(first_card != null and first_card.find_child("ChooseProduct_0", true, false) == null
 		and app.find_child("ProductSelectionIndicator_0", true, false) != null
 		and search != null and search.custom_minimum_size.y <= 40.0,
@@ -175,6 +187,12 @@ func run() -> void:
 		search.text = "Portable Blender"
 		search.text_changed.emit(search.text)
 	await click_control(first_card)
+	first_card = app.find_child("CatalogueProduct_0", true, false) as Button
+	var selected_indicator := app.find_child("ProductSelectionIndicator_0", true, false) as TextureRect
+	var selected_product_style := first_card.get_theme_stylebox("normal") as StyleBoxFlat if first_card != null else null
+	expect(first_card != null and selected_indicator != null and selected_indicator.visible and selected_indicator.texture != null
+		and selected_product_style != null and selected_product_style.border_color == Color("#D5AC61"),
+		"Selecting a product updates its gold border and graphical checkmark")
 	click("Continue")
 	await settle_frames()
 	expect(app.selected_product == 0 and str(app.get_meta(Market.CATALOG_STAGE_META, "")) == "suppliers"
