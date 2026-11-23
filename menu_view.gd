@@ -25,19 +25,30 @@ static func brand(app: Control, parent: Node) -> HBoxContainer:
 	return header
 
 static func title(app: Control) -> void:
-	var play: VBoxContainer = app.wide_card("Continue Playing")
-	var actions := FlowContainer.new()
-	actions.name = "MainMenuActions"
-	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	actions.custom_minimum_size.x = minf(580.0, maxf(0.0, app.size.x - 66.0))
-	actions.add_theme_constant_override("h_separation", Style.BUTTON_GROUP_GAP)
-	actions.add_theme_constant_override("v_separation", Style.BUTTON_GROUP_GAP)
-	play.add_child(actions)
-	for item in [["New Game", app.start_new_game, true], ["Load Game", app.open_screen.bind("Load"), false], ["Settings", app.open_screen.bind("Settings"), false]]:
-		var button: Button = app.action(actions, item[0], item[1], item[2])
-		button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		button.custom_minimum_size.x = 150 if app.size.x < 600.0 else 172
 	var games := GameStore.list_games()
+	var play: VBoxContainer = app.wide_card(play_heading(games))
+	var actions := VBoxContainer.new()
+	actions.name = "MainMenuActions"
+	actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions.add_theme_constant_override("separation", Style.BUTTON_GROUP_GAP)
+	play.add_child(actions)
+	var primary_actions := GridContainer.new()
+	primary_actions.name = "MainMenuPrimaryActions"
+	primary_actions.columns = 2
+	primary_actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	primary_actions.add_theme_constant_override("h_separation", Style.BUTTON_GROUP_GAP)
+	primary_actions.add_theme_constant_override("v_separation", Style.BUTTON_GROUP_GAP)
+	actions.add_child(primary_actions)
+	for item in [["New Game", app.start_new_game, true], ["Load Game", app.open_screen.bind("Load"), false]]:
+		var button: Button = app.action(primary_actions, item[0], item[1], item[2])
+		button.name = "MainMenu%s" % str(item[0]).replace(" ", "")
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.custom_minimum_size = Vector2(150 if app.size.x < 600.0 else 172, Style.BUTTON_TOUCH_HEIGHT)
+		if item[0] == "Load Game": _style_menu_secondary(button)
+	var settings_button: Button = app.action(actions, "Settings", app.open_screen.bind("Settings"))
+	settings_button.name = "MainMenuSettings"
+	settings_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_style_menu_secondary(settings_button)
 	if games.is_empty():
 		play.add_child(app.label("No saved games yet. Start a New Game to begin.", Style.FONT_BODY, Style.MUTED))
 	else:
@@ -54,6 +65,18 @@ static func title(app: Control) -> void:
 		play.add_child(cards)
 		for game in games:
 			_game_card(app, game, true, cards, game_names)
+
+static func play_heading(games: Array) -> String:
+	return "Continue Playing" if not games.is_empty() else "Start Playing"
+
+static func _style_menu_secondary(button: Button) -> void:
+	button.add_theme_stylebox_override("normal", Style.box(Style.INPUT, Style.LINE, Style.CARD_RADIUS, Style.BUTTON_PADDING))
+	button.add_theme_stylebox_override("hover", Style.box(Style.SURFACE.lightened(0.08), Style.LINE.lightened(0.18), Style.CARD_RADIUS, Style.BUTTON_PADDING))
+	button.add_theme_stylebox_override("pressed", Style.box(Style.SURFACE, Style.GOLD, Style.CARD_RADIUS, Style.BUTTON_PADDING))
+	var focus := Style.box(Style.INPUT, Style.GOLD, Style.CARD_RADIUS, Style.BUTTON_PADDING)
+	focus.draw_center = false
+	button.add_theme_stylebox_override("focus", focus)
+	button.add_theme_stylebox_override("disabled", Style.box(Style.BG, Style.LINE, Style.CARD_RADIUS, Style.BUTTON_PADDING))
 
 static func slots(app: Control, saving: bool) -> void:
 	var back: VBoxContainer = app.wide_card("")

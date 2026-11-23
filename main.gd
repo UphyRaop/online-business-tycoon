@@ -593,13 +593,16 @@ func _update_responsive_layout() -> void:
 		var grid := find_child(grid_name, true, false) as GridContainer
 		if grid != null:
 			grid.columns = 3 if viewport_width >= 900.0 else (2 if viewport_width >= 600.0 else 1)
-	var menu_actions := find_child("MainMenuActions", true, false) as FlowContainer
+	var menu_actions := find_child("MainMenuActions", true, false) as VBoxContainer
 	if menu_actions != null:
-		menu_actions.custom_minimum_size.x = minf(580.0, maxf(0.0, viewport_width - 66.0))
-		for child in menu_actions.get_children():
+		menu_actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var menu_grid := find_child("MainMenuPrimaryActions", true, false) as GridContainer
+	if menu_grid != null:
+		menu_grid.columns = 2
+		for child in menu_grid.get_children():
 			var action_button := child as Button
 			if action_button != null:
-				action_button.custom_minimum_size.x = 150.0 if viewport_width < 600.0 else 172.0
+				action_button.custom_minimum_size = Vector2(150.0 if viewport_width < 600.0 else 172.0, TOUCH_HEIGHT)
 
 func _reflow_page_cards() -> void:
 	if not is_instance_valid(page_grid):
