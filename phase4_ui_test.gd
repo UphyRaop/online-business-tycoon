@@ -369,6 +369,31 @@ func run() -> void:
 		and has_label("Owned Companies") and has_label("Career Statistics") and not has_label("CEO ID")
 		and has_label("Career Start Date") and has_label("Companies Founded") and has_label("Active Companies"),
 		"Profile shows compact career information and keeps technical identifiers collapsed by default")
+	press("View Achievements")
+	var achievement_ids := ["company_registered", "first_sale", "sales_100000", "sales_1000000",
+		"sales_10000000", "profit_100000", "profit_1000000", "profit_10000000"]
+	var achievement_icon_names := ["building", "shopping_bag", "medal", "award", "trophy", "coins", "gem", "crown"]
+	var achievement_list := app.find_child("AchievementList", true, false) as VBoxContainer
+	expect(achievement_list != null and achievement_list.get_child_count() == 8,
+		"Expanded Achievements presents all eight approved milestones")
+	for achievement_index in achievement_ids.size():
+		var achievement_id: String = achievement_ids[achievement_index]
+		var achievement_row := app.find_child("AchievementRow_" + achievement_id, true, false) as HBoxContainer
+		var achievement_icon := app.find_child("AchievementIcon_" + achievement_id, true, false) as TextureRect
+		var achievement_status := app.find_child("AchievementStatus_" + achievement_id, true, false) as TextureRect
+		var unlocked := achievement_id == "company_registered"
+		expect(achievement_row != null and achievement_icon != null and achievement_icon.texture != null
+			and str(achievement_icon.get_meta("achievement_icon_resource", "")).ends_with(str(achievement_icon_names[achievement_index]) + ".svg")
+			and achievement_icon.modulate == (Style.GOLD if unlocked else Style.MUTED)
+			and achievement_status != null and achievement_status.texture != null
+			and achievement_status.modulate == (Style.GREEN if unlocked else Style.MUTED)
+			and achievement_status.tooltip_text == ("Unlocked" if unlocked else "Locked"),
+			"Achievement %s uses its mapped icon and correct locked/unlocked appearance" % achievement_id)
+	var persisted_achievement_profile := CEO.load_game_profile(app.active_game_id)
+	expect(persisted_achievement_profile.get("achievements", []).any(func(entry):
+		return str(entry.get("id", "")) == "company_registered"),
+		"Unlocked achievement state remains in the existing save profile")
+	press("Hide Achievements")
 	var show_ceo_details := app.find_child("ToggleTechnicalCEOProfileDetails", true, false) as Button
 	var ceo_details_surface := show_ceo_details.get_theme_stylebox("normal") as StyleBoxFlat if show_ceo_details != null else null
 	expect(show_ceo_details != null and ceo_details_surface != null
