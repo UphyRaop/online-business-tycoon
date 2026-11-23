@@ -52,11 +52,6 @@ static func title(app: Control) -> void:
 	if games.is_empty():
 		play.add_child(app.label("No saved games yet. Start a New Game to begin.", Style.FONT_BODY, Style.MUTED))
 	else:
-		var game_names := {}
-		for game in games:
-			var latest := GameStore.latest(str(game.game_id))
-			var company_name := str(latest.get("state", {}).get("company", ""))
-			if not company_name.is_empty(): game_names[company_name] = int(game_names.get(company_name, 0)) + 1
 		var cards := GridContainer.new()
 		cards.name = "SavedGameCards"
 		cards.columns = 3 if app.size.x >= 900.0 else (2 if app.size.x >= 600.0 else 1)
@@ -64,7 +59,7 @@ static func title(app: Control) -> void:
 		cards.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 		play.add_child(cards)
 		for game in games:
-			_game_card(app, game, true, cards, game_names)
+			_game_card(app, game, true, cards)
 
 static func play_heading(games: Array) -> String:
 	return "Continue Playing" if not games.is_empty() else "Start Playing"
@@ -96,7 +91,7 @@ static func slots(app: Control, saving: bool) -> void:
 		cards.add_theme_constant_override("v_separation", Style.CARD_GRID_GAP)
 		back.add_child(cards)
 		for game in games:
-			_game_card(app, game, true, cards, {})
+			_game_card(app, game, true, cards)
 		return
 	var order := [1, 2, 3, 0] if saving else [0, 1, 2, 3]
 	var slots_grid := GridContainer.new()
@@ -132,7 +127,7 @@ static func describe(app: Control, parent: Node, slot: Dictionary) -> void:
 	if slot.get("recovered", false):
 		parent.add_child(app.label("Recovered backup", 14, Style.GOLD))
 
-static func _game_card(app: Control, game: Dictionary, show_slot_summary: bool, parent: Node, duplicate_company_names: Dictionary) -> void:
+static func _game_card(app: Control, game: Dictionary, show_slot_summary: bool, parent: Node) -> void:
 	var game_id := str(game.get("game_id", ""))
 	if game_id.is_empty(): return
 	var latest := GameStore.latest(game_id)
@@ -141,8 +136,6 @@ static func _game_card(app: Control, game: Dictionary, show_slot_summary: bool, 
 	var company_name := str(latest.get("state", {}).get("company", ""))
 	if company_name.is_empty() and not companies.is_empty(): company_name = str(companies[0].get("name", ""))
 	if company_name.is_empty(): company_name = "New Game Setup"
-	if int(duplicate_company_names.get(company_name, 0)) > 1:
-		company_name += " · %s" % game_id.right(6)
 	var view: VBoxContainer = app._create_card(parent, company_name)
 	view.name = "SavedGame_%s" % game_id
 	view.add_child(app.label(str(game.get("ceo_name", "CEO not recorded")), 14, Style.MUTED))

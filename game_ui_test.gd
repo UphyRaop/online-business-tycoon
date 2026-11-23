@@ -31,6 +31,7 @@ func run() -> void:
 	test_legacy_game_is_visible()
 	test_required_new_game_identity()
 	test_independent_game_saves_and_profiles()
+	test_save_cards_hide_internal_ids()
 	await test_delete_confirmation_is_scoped()
 	app.queue_free()
 	await process_frame
@@ -248,9 +249,51 @@ func test_independent_game_saves_and_profiles() -> void:
 	expect(slot_card != null and "Avery Retail" in slot_labels and "Avery Updated" in slot_labels
 		and "Country" in slot_labels and "Simulation Date" in slot_labels and "Save Type" in slot_labels and "Last Saved" in slot_labels,
 		"Manual slot card shows company, CEO, country, simulation date, save type, and last saved date without a concatenated duplicate label")
+	var saved_company_id := str(first_slot.get("state", {}).get("company_id", ""))
+	expect(not slot_labels.any(func(text): return text.contains(saved_company_id)),
+		"Manual save card keeps the company ID in save data but omits it from displayed text")
 	app.load_slot(3)
 	expect(app.screen == "Game" and app.active_game_id == first_game_id and app.sim.state.owner == "Avery Updated" and app.sim.state.company == "Avery Retail",
 		"Loading a manual slot restores only its owning game's company")
+
+func test_save_cards_hide_internal_ids() -> void:
+	var duplicate_created := Games.create_game("Avery Founder", "Duplicate Name QA")
+	var duplicate_game: Dictionary = duplicate_created.get("game", {})
+	if duplicate_game.is_empty():
+		expect(false, "Duplicate-name QA game is created for save-card display verification")
+		return
+	var duplicate_game_id := str(duplicate_game.get("game_id", ""))
+	var duplicate_state := Sim.register("Avery Founder", "Avery Retail", "", 1, 1, 0, 2004)
+	var duplicate_profile := CEO.register_company(duplicate_created.profile, duplicate_state)
+	expect(Games.write_slot(duplicate_game_id, Slots.AUTOSAVE, duplicate_state, duplicate_profile) == OK,
+		"Duplicate company name is stored in an independent autosave with its original internal ID")
+	app.leave_game()
+	var saved_card := _game_card(duplicate_game_id)
+	var card_labels := controls(saved_card, "Label").map(func(node): return str(node.text)) if saved_card != null else []
+	var company_id := str(duplicate_state.get("company_id", ""))
+	expect(saved_card != null and saved_card.get_child(0) is Label
+		and str(saved_card.get_child(0).text) == "Avery Retail"
+		and not str(saved_card.get_child(0).text).contains(duplicate_game_id.right(6))
+		and not card_labels.any(func(text): return text.contains(company_id) or text.contains(duplicate_game_id.right(6)))
+		and "Avery Founder" in card_labels and "Country" in card_labels and "Simulation Date" in card_labels
+		and "Save Type" in card_labels and "Last Saved" in card_labels,
+		"Duplicate company names display without an internal identifier while CEO and save metadata remain visible")
+	expect(_button_in(saved_card, "Continue Game") != null and _button_in(saved_card, "Choose Company") != null
+		and _button_in(saved_card, "Load Saves") != null and _button_in(saved_card, "Delete Game") != null,
+		"Hiding the identifier preserves Continue, Choose Company, Load Saves, and Delete Game actions")
+	var delete_action := _button_in(saved_card, "Delete Game")
+	if delete_action != null:
+		delete_action.pressed.emit()
+		expect(app.confirmation != null, "Delete Game still requires confirmation after its card title is compacted")
+		if app.confirmation != null: app.confirmation.get_cancel_button().pressed.emit()
+	expect(not Games.get_game(duplicate_game_id).is_empty(), "Cancelling save-card deletion preserves the correct game record")
+	app.open_game_slots(duplicate_game_id)
+	var autosave_card := _slot_card(Slots.AUTOSAVE)
+	var autosave_labels := controls(autosave_card, "Label").map(func(node): return str(node.text)) if autosave_card != null else []
+	expect(autosave_card != null and "Avery Retail" in autosave_labels and "Avery Founder" in autosave_labels
+		and not autosave_labels.any(func(text): return text.contains(company_id) or text.contains(duplicate_game_id.right(6)))
+		and _button_in(autosave_card, "Load Autosave") != null,
+		"Autosave cards display company identity and metadata without exposing IDs, and remain loadable")
 
 func test_delete_confirmation_is_scoped() -> void:
 	app.leave_game()
